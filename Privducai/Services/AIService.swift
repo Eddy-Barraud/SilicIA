@@ -17,8 +17,6 @@ class AIService: ObservableObject {
     @Published var modelAvailable = false
 
     private let webScraper = WebScrapingService()
-    private var languageModelManager: LanguageModelManager?
-    private var languageModelSession: LanguageModelSession?
 
     init() {
         Task {
@@ -28,22 +26,15 @@ class AIService: ObservableObject {
 
     /// Check if Foundation Models are available
     private func checkModelAvailability() async {
-        do {
-            // Check if language models are available
-            let manager = LanguageModelManager()
-            let availability = await manager.availability()
+        // Check if Foundation Models are available on this system
+        let availability = LanguageModel.availability
 
-            if availability.status == .available {
-                self.languageModelManager = manager
-                self.modelAvailable = true
-                print("✓ Foundation Models are available")
-            } else {
-                self.modelAvailable = false
-                print("⚠️ Foundation Models not available, using fallback summarization")
-            }
-        } catch {
+        if availability == .available {
+            self.modelAvailable = true
+            print("✓ Foundation Models are available")
+        } else {
             self.modelAvailable = false
-            print("⚠️ Error checking model availability: \(error.localizedDescription)")
+            print("⚠️ Foundation Models not available (status: \(availability)), using fallback summarization")
         }
     }
 
@@ -71,8 +62,8 @@ class AIService: ObservableObject {
 
         // Use Foundation Models if available, otherwise fallback
         let summary: String
-        if modelAvailable, let manager = languageModelManager {
-            summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results, manager: manager)
+        if modelAvailable {
+            summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results)
         } else {
             summary = await generateConciseSummary(query: query, context: fullContext, results: results)
         }
@@ -82,31 +73,23 @@ class AIService: ObservableObject {
     }
 
     /// Generate summary using Apple Foundation Models
-    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], manager: LanguageModelManager) async -> String {
+    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult]) async -> String {
         do {
-            // Create a session if we don't have one
-            if languageModelSession == nil {
-                let instructions = """
-                You are a helpful AI assistant that provides concise, accurate summaries of web search results.
-                Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
+            // Prepare the system prompt
+            let systemPrompt = """
+            You are a helpful AI assistant that provides concise, accurate summaries of web search results.
+            Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
 
-                Guidelines:
-                - Be concise but comprehensive
-                - Focus on the most relevant information
-                - Include key facts and details
-                - Maintain accuracy
-                - Use clear, easy-to-understand language
-                """
+            Guidelines:
+            - Be concise but comprehensive
+            - Focus on the most relevant information
+            - Include key facts and details
+            - Maintain accuracy
+            - Use clear, easy-to-understand language
+            """
 
-                languageModelSession = try await manager.createSession(instructions: instructions)
-            }
-
-            guard let session = languageModelSession else {
-                return await generateConciseSummary(query: query, context: context, results: results)
-            }
-
-            // Prepare the prompt with query and context
-            let prompt = """
+            // Prepare the user prompt with query and context
+            let userPrompt = """
             User Query: \(query)
 
             Web Content:
@@ -120,11 +103,25 @@ class AIService: ObservableObject {
             Keep the summary under 300 words.
             """
 
+            // Create request with system and user messages
+            let request = LanguageModelRequest(
+                messages: [
+                    .init(role: .system, content: systemPrompt),
+                    .init(role: .user, content: userPrompt)
+                ]
+            )
+
             // Generate the summary
-            let response = try await session.generate(prompt: prompt)
+            let response = try await LanguageModel.shared.perform(request)
+
+            // Extract the generated text
+            var generatedText = ""
+            if let firstChoice = response.choices.first {
+                generatedText = firstChoice.message.content
+            }
 
             // Add source links
-            var finalSummary = response + "\n\n**Sources:**\n"
+            var finalSummary = generatedText + "\n\n**Sources:**\n"
             for (index, result) in results.prefix(5).enumerated() {
                 finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
             }
@@ -133,7 +130,7 @@ class AIService: ObservableObject {
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
             // Fallback to basic summarization
-            return await generateConciseSummary(query: query, context: context, results: results)
+            return await generateConciseSummary(query: query, context: fullContext, results: results)
         }
     }
 
