@@ -94,9 +94,10 @@ class AIService: ObservableObject {
 
             // Generate the summary
             let response = try await session.respond(to: prompt, options: options)
+            let txt_response = String(describing: response.content)
 
             // Add source links
-            var finalSummary = response + "\n\n**Sources:**\n"
+            var finalSummary = txt_response + "\n\n**Sources:**\n"
             for (index, result) in results.prefix(5).enumerated() {
                 finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
             }
