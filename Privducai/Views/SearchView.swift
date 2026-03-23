@@ -96,7 +96,7 @@ struct SearchView: View {
             }
 
             HStack(spacing: 6) {
-                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 3000) }) {
+                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 3000, skipPerPageSummary: true) }) {
                     Label(
                         settings.language == .french ? "Rapide" : "Quick",
                         systemImage: "bolt.fill"
@@ -378,7 +378,7 @@ struct SearchView: View {
     }
 
     // MARK: - Actions
-    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil) {
+    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) {
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
 
@@ -395,7 +395,7 @@ struct SearchView: View {
                 // Auto-generate summary for the first search
                 if !searchResults.isEmpty && !showingSummary {
                     showingSummary = true
-                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars)
+                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars, skipPerPageSummary: skipPerPageSummary)
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -413,7 +413,7 @@ struct SearchView: View {
         }
     }
 
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         _ = await aiService.summarize(
@@ -423,7 +423,8 @@ struct SearchView: View {
             maxScrapingChars: maxScrapingChars ?? settings.maxScrapingCharacters,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
-            language: settings.language
+            language: settings.language,
+            skipPerPageSummary: skipPerPageSummary
         )
         if let start = summaryStartTime {
             summaryElapsedSeconds = Date().timeIntervalSince(start)

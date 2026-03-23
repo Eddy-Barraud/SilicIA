@@ -25,7 +25,12 @@ class AIService: ObservableObject {
     private static let avgCharsPerToken = 3
 
     /// Summarize search results using Foundation Models or fallback to NLP
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
+    ///
+    /// - Parameter skipPerPageSummary: When `true` (fast-search mode), the raw scraped text
+    ///   from all pages is concatenated directly and passed as context to the final answer
+    ///   step instead of first summarising each page individually.  The combined text is
+    ///   still truncated to fit within the model's context-window budget.
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, skipPerPageSummary: Bool = false) async -> String {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -33,43 +38,77 @@ class AIService: ObservableObject {
         let urls = results.map { $0.url }
         let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
 
-        // Per-page summarization uses its own small response budget (2-3 sentence summaries).
-        // Compute content budget independently from the final-summary maxTokens setting so
-        // that a large maxTokens value doesn't unnecessarily shrink per-page content.
-        let pageResponseTokens = 150      // tokens reserved for each page summary response
-        let pageInstructionTokens = 40    // short per-page session instructions
-        let pagePromptOverheadTokens = 60 // query, title, labels in the per-page prompt
-        let pageContentAvailableTokens = max(
-            0,
-            AIService.contextWindowLimit - pageInstructionTokens - pagePromptOverheadTokens - pageResponseTokens
-        )
-        // Respect the user's maxScrapingChars setting; never exceed the token budget.
-        let pageMaxChars = min(maxScrapingChars, pageContentAvailableTokens * AIService.avgCharsPerToken)
+        let fullContext: String
 
-        // Summarize each scraped page individually with a fresh session per page,
-        // then combine the resulting short summaries for the final AI step.
-        var summarizedParts: [String] = []
+        if skipPerPageSummary {
+            // Fast-search mode: concatenate raw page texts and let the final step truncate.
+            // Distribute the context-window budget evenly across pages so a single large
+            // page cannot crowd out the others.
+            let instructionTokens = 100   // session instructions for the final answer step
+            let promptOverheadTokens = 80 // query label, section headers, closing instructions
+            let minContextTokens = 300    // reserve at least this many tokens for page content
+            // Apply a 20% utilization buffer to absorb tokeniser variance (French/European
+            // text can be denser than English, so 1 token ≠ exactly avgCharsPerToken chars).
+            let utilizationFactor = 0.8
+            let effectiveMaxResponseTokens = min(
+                maxTokens,
+                AIService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
+            )
+            let reservedTokens = instructionTokens + promptOverheadTokens + effectiveMaxResponseTokens
+            let availableChars = Int(Double(max(AIService.contextWindowLimit - reservedTokens, 0) * AIService.avgCharsPerToken) * utilizationFactor)
+            let pageCount = max(results.count, 1)
+            let charsPerPage = availableChars / pageCount
 
-        for result in results {
-            if let pageContent = scrapedContent[result.url] {
-                let pageSummary = await summarizePage(
-                    content: pageContent,
-                    title: result.title,
-                    url: result.url,
-                    query: query,
-                    temperature: temperature,
-                    language: language,
-                    maxResponseTokens: pageResponseTokens,
-                    maxContentChars: pageMaxChars
-                )
-                summarizedParts.append(pageSummary)
-            } else {
-                // Use snippet if no full content was scraped
-                summarizedParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
+            var rawParts: [String] = []
+            for result in results {
+                if let pageContent = scrapedContent[result.url] {
+                    let truncated = String(pageContent.prefix(charsPerPage))
+                    rawParts.append("Source: \(result.title)\nURL: \(result.url)\nContent:\n\(truncated)")
+                } else {
+                    rawParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
+                }
             }
-        }
+            fullContext = rawParts.joined(separator: "\n\n---\n\n")
+        } else {
+            // Standard mode: summarise each page individually, then combine the short
+            // summaries for the final answer step.
 
-        let fullContext = summarizedParts.joined(separator: "\n\n---\n\n")
+            // Per-page summarization uses its own small response budget (2-3 sentence summaries).
+            // Compute content budget independently from the final-summary maxTokens setting so
+            // that a large maxTokens value doesn't unnecessarily shrink per-page content.
+            let pageResponseTokens = 150      // tokens reserved for each page summary response
+            let pageInstructionTokens = 40    // short per-page session instructions
+            let pagePromptOverheadTokens = 60 // query, title, labels in the per-page prompt
+            let pageContentAvailableTokens = max(
+                0,
+                AIService.contextWindowLimit - pageInstructionTokens - pagePromptOverheadTokens - pageResponseTokens
+            )
+            // Respect the user's maxScrapingChars setting; never exceed the token budget.
+            let pageMaxChars = min(maxScrapingChars, pageContentAvailableTokens * AIService.avgCharsPerToken)
+
+            var summarizedParts: [String] = []
+
+            for result in results {
+                if let pageContent = scrapedContent[result.url] {
+                    let pageSummary = await summarizePage(
+                        content: pageContent,
+                        title: result.title,
+                        url: result.url,
+                        query: query,
+                        temperature: temperature,
+                        language: language,
+                        maxResponseTokens: pageResponseTokens,
+                        maxContentChars: pageMaxChars
+                    )
+                    summarizedParts.append(pageSummary)
+                } else {
+                    // Use snippet if no full content was scraped
+                    summarizedParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
+                }
+            }
+
+            fullContext = summarizedParts.joined(separator: "\n\n---\n\n")
+        }
 
         // Try Foundation Models first, fallback to NLP if it fails
         let summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results, temperature: temperature, maxTokens: maxTokens, language: language)
