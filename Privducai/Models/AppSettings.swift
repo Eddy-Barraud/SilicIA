@@ -7,11 +7,17 @@
 
 import Foundation
 
+enum ModelLanguage: String, CaseIterable {
+    case french = "French"
+    case english = "English"
+}
+
 struct AppSettings {
-    var maxSearchResults: Int = 4
+    var maxSearchResults: Int = 5
     var maxResponseTokens: Int = 1000
     var temperature: Double = 0.3
     var maxScrapingCharacters: Int = 3000
+    var language: ModelLanguage = .french
 
     // Value ranges for validation
     static let maxSearchResultsRange = 3...20

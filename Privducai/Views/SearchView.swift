@@ -45,12 +45,18 @@ struct SearchView: View {
     // MARK: - Header View
     private var headerView: some View {
         HStack {
-            Image(systemName: "magnifyingglass.circle.fill")
-                .font(.system(size: 32))
-                .foregroundColor(.accentColor)
-            Text("Duck Assist")
-                .font(.title)
-                .fontWeight(.bold)
+            Button(action: { goHome() }) {
+                HStack {
+                    Image(systemName: "magnifyingglass.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundColor(.accentColor)
+                    Text("Duck Assist")
+                        .font(.title)
+                        .fontWeight(.bold)
+                }
+            }
+            .buttonStyle(.plain)
+            
             Spacer()
 
             Button(action: { showSettings.toggle() }) {
@@ -70,7 +76,7 @@ struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
 
-            TextField("Search the web...", text: $searchQuery)
+            TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .onSubmit {
@@ -86,7 +92,7 @@ struct SearchView: View {
             }
 
             Button(action: performSearch) {
-                Text("Search")
+                Text(settings.language == .french ? "Rechercher" : "Search")
                     .fontWeight(.medium)
             }
             .buttonStyle(.borderedProminent)
@@ -112,7 +118,11 @@ struct SearchView: View {
                 Button(action: { toggleSummary() }) {
                     HStack {
                         Image(systemName: showingSummary ? "eye.slash" : "sparkles")
-                        Text(showingSummary ? "Hide Summary" : "Show AI Summary")
+                        if settings.language == .french {
+                            Text(showingSummary ? "Masquer le résumé" : "Afficher le résumé IA")
+                        } else {
+                            Text(showingSummary ? "Hide Summary" : "Show AI Summary")
+                        }
                     }
                     .font(.subheadline)
                     .fontWeight(.medium)
@@ -136,7 +146,7 @@ struct SearchView: View {
             HStack {
                 Image(systemName: "sparkles")
                     .foregroundColor(.accentColor)
-                Text("AI Summary")
+                Text(settings.language == .french ? "Résumé IA" : "AI Summary")
                     .font(.headline)
                     .fontWeight(.semibold)
 
@@ -148,7 +158,7 @@ struct SearchView: View {
             }
 
             if aiService.isSummarizing {
-                Text("Analyzing full web pages...")
+                Text(settings.language == .french ? "Analyse des pages web complètes..." : "Analyzing full web pages...")
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {
@@ -167,7 +177,7 @@ struct SearchView: View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.5)
-            Text("Searching DuckDuckGo...")
+            Text(settings.language == .french ? "Recherche sur DuckDuckGo..." : "Searching DuckDuckGo...")
                 .foregroundColor(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -182,20 +192,26 @@ struct SearchView: View {
                     .foregroundColor(.accentColor)
 
                 VStack(spacing: 8) {
-                    Text("Search the Web Efficiently")
+                    Text(settings.language == .french ? "Recherchez le Web efficacement" : "Search the Web Efficiently")
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text("Get concise AI-powered summaries of web results\nwithout draining your battery")
+                    Text(settings.language == .french ? "Obtenez des résumés concis alimentés par l'IA des résultats de recherche\nsans épuiser la batterie" : "Get concise AI-powered summaries of web results\nwithout draining your battery")
                         .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
                 VStack(alignment: .leading, spacing: 12) {
-                    FeatureRow(icon: "bolt.fill", title: "Fast & Efficient", description: "Optimized for M3 MacBook")
-                    FeatureRow(icon: "lock.shield.fill", title: "Privacy-Focused", description: "Uses DuckDuckGo search")
-                    FeatureRow(icon: "brain.head.profile", title: "On-Device AI", description: "Apple Foundation Models")
+                    if settings.language == .french {
+                        FeatureRow(icon: "bolt.fill", title: "Rapide et efficace", description: "Optimisé pour MacBook M3")
+                        FeatureRow(icon: "lock.shield.fill", title: "Axé sur la confidentialité", description: "Utilise la recherche DuckDuckGo")
+                        FeatureRow(icon: "brain.head.profile", title: "IA sur l'appareil", description: "Modèles de fondation Apple")
+                    } else {
+                        FeatureRow(icon: "bolt.fill", title: "Fast & Efficient", description: "Optimized for M3 MacBook")
+                        FeatureRow(icon: "lock.shield.fill", title: "Privacy-Focused", description: "Uses DuckDuckGo search")
+                        FeatureRow(icon: "brain.head.profile", title: "On-Device AI", description: "Apple Foundation Models")
+                    }
                 }
                 .padding(.top)
 
@@ -215,7 +231,7 @@ struct SearchView: View {
     private var settingsPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text("Settings")
+                Text(settings.language == .french ? "Paramétrages" : "Settings")
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -226,7 +242,7 @@ struct SearchView: View {
             // Max Search Results
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Max Search Results")
+                    Text(settings.language == .french ? "Nombre maximal de résultats" : "Max Search Results")
                         .font(.subheadline)
                     Spacer()
                     Text("\(settings.maxSearchResults)")
@@ -242,7 +258,7 @@ struct SearchView: View {
             // Temperature
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("AI Temperature")
+                    Text(settings.language == .french ? "Température de l'IA" : "AI Temperature")
                         .font(.subheadline)
                     Spacer()
                     Text(String(format: "%.2f", settings.temperature))
@@ -255,7 +271,7 @@ struct SearchView: View {
             // Max Response Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Max Response Tokens")
+                    Text(settings.language == .french ? "Tokens de réponse max" : "Max Response Tokens")
                         .font(.subheadline)
                     Spacer()
                     Text("\(settings.maxResponseTokens)")
@@ -271,7 +287,7 @@ struct SearchView: View {
             // Max Scraping Characters
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Max Scraping Characters")
+                    Text(settings.language == .french ? "Caractères de scraping max" : "Max Scraping Characters")
                         .font(.subheadline)
                     Spacer()
                     Text("\(settings.maxScrapingCharacters)")
@@ -282,6 +298,24 @@ struct SearchView: View {
                     get: { Double(settings.maxScrapingCharacters) },
                     set: { settings.maxScrapingCharacters = Int($0) }
                 ), in: Double(AppSettings.maxScrapingCharactersRange.lowerBound)...Double(AppSettings.maxScrapingCharactersRange.upperBound), step: 500)
+            }
+
+            // Model Language
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Langue du modèle" : "Model Language")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(settings.language.rawValue)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Picker("Language", selection: $settings.language) {
+                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
+                        Text(lang.rawValue).tag(lang)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
         .padding()
@@ -295,9 +329,9 @@ struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            Text("No results found")
+            Text(settings.language == .french ? "Aucun résultat trouvé" : "No results found")
                 .font(.headline)
-            Text("Try a different search query")
+            Text(settings.language == .french ? "Essayez une requête de recherche différente" : "Try a different search query")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -333,14 +367,23 @@ struct SearchView: View {
     }
 
     private func generateSummary() async {
-        await aiService.summarize(
+        _ = await aiService.summarize(
             query: searchQuery,
             results: searchResults,
             maxScrapingResults: settings.maxSearchResults,
             maxScrapingChars: settings.maxScrapingCharacters,
             temperature: settings.temperature,
-            maxTokens: settings.maxResponseTokens
+            maxTokens: settings.maxResponseTokens,
+            language: settings.language
         )
+    }
+
+    private func goHome() {
+        searchQuery = ""
+        searchResults = []
+        showingSummary = false
+        aiService.summary = ""
+        errorMessage = nil
     }
 }
 
