@@ -47,8 +47,63 @@ class AIService: ObservableObject {
         return summary
     }
 
+    // MARK: - Context Window Helpers
+
+    /// Approximate token count using the common heuristic of 1 token ≈ 4 characters.
+    private func estimateTokenCount(_ text: String) -> Int {
+        max(1, text.utf8.count / 4)
+    }
+
+    /// Return the maximum number of tokens available for context content.
+    ///
+    /// The on-device Foundation Model has a context window of approximately
+    /// 4 096 tokens. We reserve capacity for the system instructions
+    /// (~250 tokens), the prompt template (~100 tokens) and the model
+    /// response (``maxTokens``), then return what is left for the scraped
+    /// web content.
+    private func maxContextTokens(maxTokens: Int) -> Int {
+        let modelContextWindow = 4096
+        let systemInstructionsBuffer = 250
+        let promptTemplateBuffer = 100
+        let available = modelContextWindow - systemInstructionsBuffer - promptTemplateBuffer - maxTokens
+        return max(500, available)
+    }
+
+    /// Truncate ``context`` so that its estimated token count does not exceed
+    /// ``limit``.  When truncation is necessary the content is cut at a
+    /// sentence boundary where possible, then at a character boundary.
+    private func truncateContext(_ context: String, toTokenLimit limit: Int) -> String {
+        let charLimit = limit * 4 // 1 token ≈ 4 characters
+        guard context.utf8.count > charLimit else { return context }
+
+        // Try to cut cleanly at the last sentence boundary before charLimit
+        let truncated = String(context.prefix(charLimit))
+        if let lastPeriod = truncated.range(of: ".", options: .backwards) {
+            return String(truncated[..<lastPeriod.upperBound]) + "…"
+        }
+        return truncated + "…"
+    }
+
+    // MARK: - Foundation Models
+
     /// Generate summary using Apple Foundation Models
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000) async -> String {
+        // Proactively truncate context to avoid exceeding the model's context window.
+        let tokenLimit = maxContextTokens(maxTokens: maxTokens)
+        let safeContext = truncateContext(context, toTokenLimit: tokenLimit)
+
+        if safeContext.count < context.count {
+            print("ℹ️ Context truncated from \(estimateTokenCount(context)) to \(estimateTokenCount(safeContext)) estimated tokens to fit model context window.")
+        }
+
+        return await generateSummaryAttempt(query: query, context: safeContext, results: results, temperature: temperature, maxTokens: maxTokens, contextTokenLimit: tokenLimit)
+    }
+
+    /// Single attempt at Foundation Models generation. If the context window is
+    /// still exceeded (e.g. due to token estimation inaccuracy), the method
+    /// retries once with the context halved before falling back to the NLP
+    /// summariser.
+    private func generateSummaryAttempt(query: String, context: String, results: [SearchResult], temperature: Double, maxTokens: Int, contextTokenLimit: Int? = nil, isRetry: Bool = false) async -> String {
         do {
             // Create session with instructions if we don't have one
             if languageSession == nil {
@@ -104,6 +159,26 @@ class AIService: ObservableObject {
             return finalSummary
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
+
+            // If this looks like a context-window error and we haven't retried yet,
+            // halve the token budget and try once more before giving up.
+            let isContextWindowError = {
+                // Prefer matching on the non-localised technical description so the check
+                // is locale-independent.
+                let technicalDesc = String(describing: error).lowercased()
+                let localizedDesc = error.localizedDescription.lowercased()
+                return technicalDesc.contains("context") || localizedDesc.contains("context window")
+            }()
+
+            if !isRetry && isContextWindowError {
+                print("ℹ️ Retrying with halved context after context-window error.")
+                // Invalidate the session so a fresh one is created on retry.
+                languageSession = nil
+                let reducedLimit = (contextTokenLimit ?? maxContextTokens(maxTokens: maxTokens)) / 2
+                let halvedContext = truncateContext(context, toTokenLimit: reducedLimit)
+                return await generateSummaryAttempt(query: query, context: halvedContext, results: results, temperature: temperature, maxTokens: maxTokens, contextTokenLimit: reducedLimit, isRetry: true)
+            }
+
             // Fallback to basic summarization
             return await generateConciseSummary(query: query, context: context, results: results)
         }
