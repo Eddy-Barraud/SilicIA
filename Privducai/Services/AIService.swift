@@ -71,12 +71,26 @@ class AIService: ObservableObject {
                 return await generateConciseSummary(query: query, context: context, results: results)
             }
 
+            // Truncate context to fit within the model's context window.
+            // Reserve tokens for the session instructions (~100 tokens), prompt template
+            // overhead – query, labels, closing instructions (~80 tokens) – and the response.
+            // Apple on-device Foundation Models have a context window of ~4096 tokens.
+            let contextWindowLimit = 4096
+            let instructionTokens = 100  // estimated tokens consumed by the LanguageModelSession instructions
+            let promptOverheadTokens = 80  // estimated tokens for query label, section headers, and closing instructions
+            let reservedTokens = instructionTokens + promptOverheadTokens + maxTokens
+            let availableTokens = max(contextWindowLimit - reservedTokens, 0)
+            // 1 token ≈ 4 characters is a common approximation for English text with subword tokenisers.
+            let avgCharsPerToken = 4
+            let maxContextChars = availableTokens * avgCharsPerToken
+            let truncatedContext = context.count > maxContextChars ? String(context.prefix(maxContextChars)) : context
+
             // Prepare the prompt
             let prompt = """
             User Query: \(query)
 
             Web Content:
-            \(context)
+            \(truncatedContext)
 
             Please provide a concise summary that answers the user's query based on the above web content. Structure your response with:
             1. A direct answer to the query
