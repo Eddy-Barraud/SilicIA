@@ -95,12 +95,34 @@ struct SearchView: View {
                 .buttonStyle(.plain)
             }
 
-            Button(action: performSearch) {
-                Text(settings.language == .french ? "Rechercher" : "Search")
-                    .fontWeight(.medium)
+            HStack(spacing: 6) {
+                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 3000) }) {
+                    Label(
+                        settings.language == .french ? "Rapide" : "Quick",
+                        systemImage: "bolt.fill"
+                    )
+                    .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(searchQuery.isEmpty || searchService.isSearching)
+
+                Button(action: { performSearch() }) {
+                    Text(settings.language == .french ? "Rechercher" : "Search")
+                        .fontWeight(.medium)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(searchQuery.isEmpty || searchService.isSearching)
+
+                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 5000) }) {
+                    Label(
+                        settings.language == .french ? "Approfondi" : "Deep",
+                        systemImage: "sparkle.magnifyingglass"
+                    )
+                    .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .disabled(searchQuery.isEmpty || searchService.isSearching)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(searchQuery.isEmpty || searchService.isSearching)
         }
         .padding()
         .background(Color(NSColor.textBackgroundColor))
@@ -356,7 +378,10 @@ struct SearchView: View {
     }
 
     // MARK: - Actions
-    private func performSearch() {
+    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil) {
+        let resultsCount = maxResults ?? settings.maxSearchResults
+        let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
+
         // Clear previous results and state before starting new search
         searchResults = []
         aiService.summary = ""
@@ -364,13 +389,13 @@ struct SearchView: View {
         
         Task {
             do {
-                searchResults = try await searchService.search(query: searchQuery, maxResults: settings.maxSearchResults)
+                searchResults = try await searchService.search(query: searchQuery, maxResults: resultsCount)
                 errorMessage = nil
 
                 // Auto-generate summary for the first search
                 if !searchResults.isEmpty && !showingSummary {
                     showingSummary = true
-                    await generateSummary()
+                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars)
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -388,14 +413,14 @@ struct SearchView: View {
         }
     }
 
-    private func generateSummary() async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         _ = await aiService.summarize(
             query: searchQuery,
             results: searchResults,
-            maxScrapingResults: settings.maxSearchResults,
-            maxScrapingChars: settings.maxScrapingCharacters,
+            maxScrapingResults: maxScrapingResults ?? settings.maxSearchResults,
+            maxScrapingChars: maxScrapingChars ?? settings.maxScrapingCharacters,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language
