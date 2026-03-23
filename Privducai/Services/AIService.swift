@@ -37,7 +37,7 @@ class AIService: ObservableObject {
         let avgCharsPerToken = 3
         
         // Calculate tokens to allocate per page
-        let totalPossibleTokens = (maxSearchResults * maxScrapingChars) / avgCharsPerToken
+        let totalPossibleTokens = (maxScrapingResults * maxScrapingChars) / avgCharsPerToken
         let tokensPerPage = max(100, (availableTokens * results.count) / max(1, totalPossibleTokens))
 
         // Summarize each scraped page individually, then combine summaries
@@ -47,7 +47,7 @@ class AIService: ObservableObject {
             if let pageContent = scrapedContent[result.url] {
                 // Summarize individual page with calculated parameters
                 let pageMaxTokens = Int(tokensPerPage)
-                let pageMaxChars = (maxScrapingChars * 2) / 5  // Use 40% of maxScrapingChars
+                let pageMaxChars = availableTokens * avgCharsPerToken * 3 / 4  // Use 70% of available tokens for page content to allow for prompt overhead
                 let pageSummary = await summarizePage(content: pageContent, title: result.title, url: result.url, query: query, temperature: temperature, language: language, maxResponseTokens: pageMaxTokens, maxContentChars: pageMaxChars)
                 summarizedParts.append(pageSummary)
             } else {
@@ -157,7 +157,7 @@ class AIService: ObservableObject {
 
                 Veuillez fournir un résumé concis qui répond à la requête de l'utilisateur en fonction des résumés des pages web ci-dessus. Structurez votre réponse avec :
                 1. Une réponse directe à la requête
-                2. Les détails d'appui clés
+                2. Les éléments clés
                 3. Tout contexte important ou mise en garde
 
                 Limitez le résumé à moins de 300 mots.

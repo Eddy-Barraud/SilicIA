@@ -340,6 +340,11 @@ struct SearchView: View {
 
     // MARK: - Actions
     private func performSearch() {
+        // Clear previous results and state before starting new search
+        searchResults = []
+        aiService.summary = ""
+        showingSummary = false
+        
         Task {
             do {
                 searchResults = try await searchService.search(query: searchQuery, maxResults: settings.maxSearchResults)
