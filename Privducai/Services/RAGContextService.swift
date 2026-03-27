@@ -198,7 +198,7 @@ enum RAGCitationFormatter {
 
         let isFrench = language == .french
         let title = isFrench ? "Top 3 extraits pertinents :" : "Top 3 relevant chunks:"
-        let urlLabel = isFrench ? "URL" : "URL"
+        let urlLabel = "URL"
         let pageLabel = isFrench ? "Page PDF" : "PDF Page"
 
         let lines = chunks.enumerated().flatMap { index, ranked -> [String] in
