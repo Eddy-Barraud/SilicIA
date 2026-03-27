@@ -10,6 +10,8 @@ import Combine
 import FoundationModels
 import PDFKit
 import NaturalLanguage
+import Vision
+import AppKit
 
 /// Service layer that orchestrates retrieval-augmented chat generation.
 @MainActor
@@ -239,7 +241,61 @@ final class ChatService: ObservableObject {
             pages.append(documentText)
         }
 
+        if pages.isEmpty {
+            debugContext("extractPDFPageTexts attempting OCR fallback for image-only PDF")
+            pages = extractPDFPageTextsWithOCR(from: document)
+            debugContext("extractPDFPageTexts OCR fallback extractedPages=\(pages.count)")
+        }
+
         return pages
+    }
+
+    /// Fallback OCR extraction for image-only PDFs.
+    private func extractPDFPageTextsWithOCR(from document: PDFDocument) -> [String] {
+        var pages: [String] = []
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex),
+                  let pageText = recognizeText(in: page) else { continue }
+            pages.append(pageText)
+        }
+        return pages
+    }
+
+    /// Runs Vision OCR on a rendered PDF page and returns recognized text.
+    private func recognizeText(in page: PDFPage) -> String? {
+        let pageBounds = page.bounds(for: .mediaBox)
+        let pageSize = pageBounds.size
+        let maxSide: CGFloat = 2000
+        let scale = max(pageSize.width, pageSize.height) > maxSide
+            ? (maxSide / max(pageSize.width, pageSize.height))
+            : 1
+        let targetSize = CGSize(
+            width: max(1, pageSize.width * scale),
+            height: max(1, pageSize.height * scale)
+        )
+        let image = page.thumbnail(of: targetSize, for: .mediaBox)
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+            return nil
+        }
+
+        let request = VNRecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+        request.recognitionLanguages = ["fr-FR", "en-US"]
+
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            debugContext("OCR request failed: \(error.localizedDescription)")
+            return nil
+        }
+
+        let text = (request.results ?? [])
+            .compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
     private func debugContext(_ message: @autoclosure () -> String) {
