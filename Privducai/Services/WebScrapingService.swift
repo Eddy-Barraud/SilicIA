@@ -9,11 +9,13 @@ import Foundation
 import Combine
 
 @MainActor
+/// Fetches and extracts readable text content from web pages.
 class WebScrapingService: ObservableObject {
     @Published var isScrapingContent = false
 
     private let session: URLSession
 
+    /// Creates a scraping session configured for resilient low-overhead requests.
     init() {
         // Configure URLSession for efficient scraping
         let config = URLSessionConfiguration.default

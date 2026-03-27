@@ -19,6 +19,7 @@ struct ChatView: View {
     @State private var isDropTargeted = false
     @State private var showFileImporter = false
 
+    /// Renders chat transcript, composer, and context inputs.
     var body: some View {
         VStack(spacing: 12) {
             messagesView

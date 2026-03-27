@@ -32,7 +32,10 @@ Privducai/
 │   └── SearchResult.swift          # Data models for search results
 ├── Services/
 │   ├── DuckDuckGoService.swift     # Web search integration
-│   └── AIService.swift             # On-device AI summarization
+│   ├── AIService.swift             # On-device AI summarization
+│   ├── ChatService.swift           # Retrieval-augmented chat orchestration
+│   ├── ChatView.swift              # Chat user interface
+│   └── WebScrapingService.swift    # Web page content extraction
 ├── Views/
 │   └── SearchView.swift            # Main search interface
 ├── ContentView.swift               # Root view

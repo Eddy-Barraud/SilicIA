@@ -19,6 +19,7 @@ struct ContentView: View {
 
     @State private var selectedTab: AppTab = .searchAssist
 
+    /// Renders the tab picker and currently selected application screen.
     var body: some View {
         VStack(spacing: 0) {
             Picker("Application", selection: $selectedTab) {

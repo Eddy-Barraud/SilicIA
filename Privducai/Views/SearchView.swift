@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+/// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
@@ -24,6 +25,7 @@ struct SearchView: View {
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
 
+    /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -378,6 +380,7 @@ struct SearchView: View {
     }
 
     // MARK: - Actions
+    /// Executes a web search then optionally triggers summary generation.
     private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) {
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
@@ -404,6 +407,7 @@ struct SearchView: View {
         }
     }
 
+    /// Toggles summary visibility and lazily generates it when first opened.
     private func toggleSummary() {
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
@@ -413,6 +417,7 @@ struct SearchView: View {
         }
     }
 
+    /// Generates a synthesized answer from current search results.
     private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
@@ -431,6 +436,7 @@ struct SearchView: View {
         }
     }
 
+    /// Resets all search and summary state to the initial home screen.
     private func goHome() {
         searchQuery = ""
         searchResults = []
@@ -443,9 +449,11 @@ struct SearchView: View {
 }
 
 // MARK: - Search Result Card
+/// Displays one search result row with link, source host, and snippet preview.
 struct SearchResultCard: View {
     let result: SearchResult
 
+    /// Renders one result card with title link, host, and snippet.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Title
@@ -474,6 +482,7 @@ struct SearchResultCard: View {
         .cornerRadius(8)
     }
 
+    /// Extracts a readable host from a URL string.
     private func formatURL(_ urlString: String) -> String {
         guard let url = URL(string: urlString),
               let host = url.host else {
@@ -484,11 +493,13 @@ struct SearchResultCard: View {
 }
 
 // MARK: - Feature Row
+/// Displays one feature line in the search welcome screen.
 struct FeatureRow: View {
     let icon: String
     let title: String
     let description: String
 
+    /// Renders one welcome-screen feature row with icon and text.
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: icon)

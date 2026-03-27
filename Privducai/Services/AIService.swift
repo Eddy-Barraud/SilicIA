@@ -11,6 +11,7 @@ import NaturalLanguage
 import FoundationModels
 
 @MainActor
+/// Generates search summaries using Foundation Models with deterministic fallbacks.
 class AIService: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: String = ""
@@ -117,7 +118,7 @@ class AIService: ObservableObject {
         return summary
     }
 
-    /// Generate summary using Apple Foundation Models
+    /// Generates the final summary through Foundation Models with context budgeting.
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
         do {
             // Always create a fresh session so that context from previous searches
@@ -249,7 +250,7 @@ class AIService: ObservableObject {
         }
     }
 
-    /// Summarize a single page content
+    /// Summarizes one scraped page into a compact source-tagged block.
     private func summarizePage(content: String, title: String, url: String, query: String, temperature: Double = 0.3, language: ModelLanguage = .french, maxResponseTokens: Int = 150, maxContentChars: Int = 2000) async -> String {
         do {
             // Create a fresh session for every page so that successive page calls within
@@ -301,7 +302,7 @@ class AIService: ObservableObject {
         }
     }
 
-    /// Generate a concise summary with links
+    /// Builds an extractive fallback summary and appends top source links.
     private func generateConciseSummary(query: String, context: String, results: [SearchResult], language: ModelLanguage = .french) async -> String {
         // For M3 MacBooks without full Apple Intelligence, we'll create an efficient
         // extractive summary that highlights key information
@@ -363,7 +364,7 @@ class AIService: ObservableObject {
         return summaryParts.joined(separator: "\n")
     }
 
-    /// Calculate relevance score for a sentence based on query terms
+    /// Calculates lexical relevance of one sentence against the query.
     private func calculateRelevanceScore(sentence: String, query: String) -> Double {
         let sentenceLower = sentence.lowercased()
         let queryWords = query.lowercased().components(separatedBy: .whitespacesAndNewlines)
@@ -405,7 +406,7 @@ class AIService: ObservableObject {
         return score
     }
 
-    /// Generate a quick answer for common query types
+    /// Returns a lightweight canned answer for simple definition/how-to queries.
     func generateQuickAnswer(query: String, results: [SearchResult]) -> String? {
         let queryLower = query.lowercased()
 
@@ -426,4 +427,3 @@ class AIService: ObservableObject {
         return nil
     }
 }
-
