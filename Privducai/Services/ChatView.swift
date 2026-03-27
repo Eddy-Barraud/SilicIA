@@ -76,7 +76,7 @@ struct ChatView: View {
                             Text(message.role == .user ? "You" : "Assistant")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
-                            Text(message.content)
+                            renderedMessageContent(message)
                                 .textSelection(.enabled)
                         }
                         .padding(10)
@@ -105,6 +105,15 @@ struct ChatView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(NSColor.textBackgroundColor))
         .cornerRadius(10)
+    }
+
+    /// Renders assistant replies as Markdown when possible, with plaintext fallback.
+    private func renderedMessageContent(_ message: ChatMessage) -> Text {
+        guard message.role == .assistant,
+              let attributed = try? AttributedString(markdown: message.content) else {
+            return Text(message.content)
+        }
+        return Text(attributed)
     }
 
     /// Renders input area and send action.
