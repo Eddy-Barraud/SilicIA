@@ -241,8 +241,9 @@ private final class ChatService: ObservableObject {
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
 
-    // Apple Foundation Models practical context window budget.
+    // Apple Foundation Models practical context window budget used in this app.
     // Context is always selected/truncated to fit this limit before generation.
+    // This aligns with the 4096-token window already enforced in AIService.
     private static let contextWindowLimit = 4096
     // Conservative estimate to keep selected text under token limits across mixed languages.
     private static let avgCharsPerToken = 3
@@ -262,6 +263,8 @@ private final class ChatService: ObservableObject {
     private static let contextUtilizationFactor = 0.8
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
+    // Response budget for chat generation while preserving room for retrieved context.
+    private static let chatResponseTokens = 700
     // Guarantee minimum fallback context even under very small calculated budgets.
     private static let minimumFallbackContextCharacters = 200
     // Slightly prefer richer chunks while still primarily ranking by lexical relevance.
@@ -276,7 +279,7 @@ private final class ChatService: ObservableObject {
         defer { isResponding = false }
 
         let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
-        let selectedContext = selectContext(chunks: chunks, query: message, maxResponseTokens: 700)
+        let selectedContext = selectContext(chunks: chunks, query: message, maxResponseTokens: Self.chatResponseTokens)
 
         do {
             let instructions = """
@@ -285,7 +288,7 @@ private final class ChatService: ObservableObject {
             """
             let session = LanguageModelSession(instructions: instructions)
             let prompt = buildPrompt(for: message, selectedContext: selectedContext)
-            let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: 700)
+            let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
             let response = try await session.respond(to: prompt, options: options)
             messages.append(ChatMessage(role: .assistant, content: String(describing: response.content)))
         } catch {
@@ -381,21 +384,22 @@ private final class ChatService: ObservableObject {
 
         let maxContextChars = calculateMaxContextCharacters(maxResponseTokens: maxResponseTokens)
 
-        let ranked = chunks
+        let ranked: [(chunk: RAGChunk, score: Double)] = chunks
             .map { chunk in
-                (chunk, relevanceScore(text: chunk.text, query: query))
+                (chunk: chunk, score: relevanceScore(text: chunk.text, query: query))
             }
             .sorted { lhs, rhs in
-                if lhs.1 == rhs.1 {
-                    return lhs.0.text.count > rhs.0.text.count
+                if lhs.score == rhs.score {
+                    return lhs.chunk.text.count > rhs.chunk.text.count
                 }
-                return lhs.1 > rhs.1
+                return lhs.score > rhs.score
             }
 
         var selected: [String] = []
         var currentChars = 0
 
-        for (chunk, _) in ranked {
+        for entry in ranked {
+            let chunk = entry.chunk
             let entry = "Source: \(chunk.source)\n\(chunk.text)"
             if currentChars + entry.count > maxContextChars {
                 continue
@@ -405,7 +409,7 @@ private final class ChatService: ObservableObject {
         }
 
         if selected.isEmpty, let first = ranked.first {
-            let fallback = "Source: \(first.0.source)\n\(first.0.text)"
+            let fallback = "Source: \(first.chunk.source)\n\(first.chunk.text)"
             return String(fallback.prefix(max(Self.minimumFallbackContextCharacters, maxContextChars)))
         }
 
@@ -423,16 +427,10 @@ private final class ChatService: ObservableObject {
     }
 
     private func relevanceScore(text: String, query: String) -> Double {
-        let queryWords = Set(
-            query.lowercased()
-                .components(separatedBy: .whitespacesAndNewlines)
-                .filter { $0.count > 2 }
-        )
+        let queryWords = Set(tokenize(query).filter { $0.count > 2 })
         guard !queryWords.isEmpty else { return 0 }
 
-        let textWords = Set(
-            text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
-        )
+        let textWords = Set(tokenize(text))
         var score = 0.0
         for word in queryWords where textWords.contains(word) {
             score += 1.0
@@ -443,6 +441,12 @@ private final class ChatService: ObservableObject {
         }
 
         return score
+    }
+
+    private func tokenize(_ text: String) -> [String] {
+        text.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
     }
 
     private func buildPrompt(for userMessage: String, selectedContext: String) -> String {
@@ -486,6 +490,7 @@ private struct RAGChunk: Identifiable {
 }
 
 private struct RAGChunker {
+    // Keep this estimate aligned with ChatService token budgeting.
     private static let avgCharsPerToken = 3
     private static let whitespacePattern = "\\s+"
     // Keep chunks large enough to carry coherent information for retrieval.
@@ -499,6 +504,7 @@ private struct RAGChunker {
         guard !cleanText.isEmpty else { return [] }
 
         let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
+        // Cap overlap at 50% so each subsequent chunk still contributes mostly new context.
         let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
         let stride = max(1, maxChunkChars - overlapChars)
 
