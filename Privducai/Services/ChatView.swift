@@ -212,7 +212,7 @@ struct ChatView: View {
                 .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
         )
         .cornerRadius(8)
-        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+        .onDrop(of: [.pdf, .fileURL], isTargeted: nil) { providers in
             handlePDFDrop(providers, rowIndex: index)
         }
     }
