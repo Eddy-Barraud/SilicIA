@@ -57,12 +57,14 @@ private func htmlToPlainText(_ html: String) -> String {
 }
 
 @MainActor
+/// Performs DuckDuckGo HTML search and parses result cards.
 class DuckDuckGoService: ObservableObject {
     @Published var isSearching = false
     @Published var error: Error?
 
     private let session: URLSession
 
+    /// Creates a search session configured for efficient DuckDuckGo requests.
     init() {
         // Configure URLSession for efficient power usage
         let config = URLSessionConfiguration.default
@@ -163,12 +165,14 @@ class DuckDuckGoService: ObservableObject {
     }
 }
 
+/// Enumerates high-level search failure categories.
 enum SearchError: LocalizedError {
     case invalidURL
     case invalidResponse
     case parsingFailed
     case networkError
 
+    /// Provides user-facing descriptions for search errors.
     var errorDescription: String? {
         switch self {
         case .invalidURL:

@@ -256,6 +256,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Search Assist";
+				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
+				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -302,6 +304,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Search Assist";
+				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
+				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

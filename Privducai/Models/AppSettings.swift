@@ -7,11 +7,13 @@
 
 import Foundation
 
+/// Supported output languages for generated model responses.
 enum ModelLanguage: String, CaseIterable {
     case french = "French"
     case english = "English"
 }
 
+/// User-configurable settings controlling search and summary behavior.
 struct AppSettings {
     var maxSearchResults: Int = 5
     var maxResponseTokens: Int = 1000
