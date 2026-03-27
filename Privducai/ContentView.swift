@@ -237,8 +237,31 @@ private final class ChatService: ObservableObject {
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
 
+    // Apple Foundation Models practical context window budget.
     private static let contextWindowLimit = 4096
+    // Conservative estimate to keep selected text under token limits across mixed languages.
     private static let avgCharsPerToken = 3
+    // Keep web retrieval bounded to control latency and context size.
+    private static let maxWebContextURLs = 8
+    private static let maxWebScrapeCharacters = 8000
+    // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
+    private static let webChunkMaxTokens = 240
+    private static let webChunkOverlapTokens = 40
+    private static let pdfChunkMaxTokens = 220
+    private static let pdfChunkOverlapTokens = 30
+    // Token reservation for instructions/template/response before retrieved context allocation.
+    private static let instructionTokens = 120
+    private static let promptOverheadTokens = 120
+    private static let minContextTokens = 300
+    // Safety margin for tokenization variance.
+    private static let contextUtilizationFactor = 0.8
+    // Keep recent turns only, to leave room for retrieved context.
+    private static let historyMessageLimit = 6
+    // Guarantee minimum fallback context even under very small calculated budgets.
+    private static let minimumFallbackContextCharacters = 200
+    // Slightly prefer richer chunks while still primarily ranking by lexical relevance.
+    private static let longChunkCharacterThreshold = 300
+    private static let longChunkBonusScore = 0.2
 
     func sendMessage(_ message: String, contextInput: String, pdfURLs: [URL]) async {
         messages.append(ChatMessage(role: .user, content: message))
@@ -272,14 +295,18 @@ private final class ChatService: ObservableObject {
 
         let urls = extractURLs(from: contextInput)
         if !urls.isEmpty {
-            let scraped = await webScraper.scrapeMultiplePages(urls: urls, limit: min(urls.count, 8), maxCharacters: 8000)
+            let scraped = await webScraper.scrapeMultiplePages(
+                urls: urls,
+                limit: min(urls.count, Self.maxWebContextURLs),
+                maxCharacters: Self.maxWebScrapeCharacters
+            )
             for url in urls {
                 guard let text = scraped[url] else { continue }
                 let chunked = ragChunker.chunk(
                     text: text,
                     source: "Web: \(url)",
-                    maxChunkTokens: 240,
-                    overlapTokens: 40
+                    maxChunkTokens: Self.webChunkMaxTokens,
+                    overlapTokens: Self.webChunkOverlapTokens
                 )
                 chunks.append(contentsOf: chunked)
             }
@@ -292,8 +319,8 @@ private final class ChatService: ObservableObject {
                 let chunked = ragChunker.chunk(
                     text: pageText,
                     source: source,
-                    maxChunkTokens: 220,
-                    overlapTokens: 30
+                    maxChunkTokens: Self.pdfChunkMaxTokens,
+                    overlapTokens: Self.pdfChunkOverlapTokens
                 )
                 chunks.append(contentsOf: chunked)
             }
@@ -347,16 +374,12 @@ private final class ChatService: ObservableObject {
             return "No additional context provided."
         }
 
-        let instructionTokens = 120
-        let promptOverheadTokens = 120
-        let minContextTokens = 300
         let effectiveResponseTokens = min(
             maxResponseTokens,
-            ChatService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
+            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
         )
-        let availableTokens = max(ChatService.contextWindowLimit - instructionTokens - promptOverheadTokens - effectiveResponseTokens, 0)
-        let utilizationFactor = 0.8
-        let maxContextChars = Int(Double(availableTokens * ChatService.avgCharsPerToken) * utilizationFactor)
+        let availableTokens = max(Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - effectiveResponseTokens, 0)
+        let maxContextChars = Int(Double(availableTokens * Self.avgCharsPerToken) * Self.contextUtilizationFactor)
 
         let ranked = chunks
             .map { chunk in
@@ -383,7 +406,7 @@ private final class ChatService: ObservableObject {
 
         if selected.isEmpty, let first = ranked.first {
             let fallback = "Source: \(first.0.source)\n\(first.0.text)"
-            return String(fallback.prefix(max(200, maxContextChars)))
+            return String(fallback.prefix(max(Self.minimumFallbackContextCharacters, maxContextChars)))
         }
 
         return selected.joined(separator: "\n\n---\n\n")
@@ -403,8 +426,8 @@ private final class ChatService: ObservableObject {
             score += 1.0
         }
 
-        if text.count > 300 {
-            score += 0.2
+        if text.count > Self.longChunkCharacterThreshold {
+            score += Self.longChunkBonusScore
         }
 
         return score
@@ -412,7 +435,7 @@ private final class ChatService: ObservableObject {
 
     private func buildPrompt(for userMessage: String, selectedContext: String) -> String {
         let history = messages
-            .suffix(6)
+            .suffix(Self.historyMessageLimit)
             .map { item in
                 "\(item.role == .user ? "User" : "Assistant"): \(item.content)"
             }
