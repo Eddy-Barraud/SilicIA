@@ -6,7 +6,6 @@
 //
 
 import Foundation
-import FoundationModels
 
 /// Represents a retrieval chunk and its source metadata.
 struct RAGChunk: Identifiable {
@@ -103,11 +102,6 @@ struct RAGSelectionResult {
 
 /// Shared context selection/relevance service for chat and search.
 actor RAGContextService {
-    private static let embeddingDimensions = 64
-    private static let embeddingInputCharacterLimit = 1800
-
-    private var embeddingCache: [String: [Double]] = [:]
-
     /// Selects the highest-ranked chunks that fit the context budget.
     func selectContext(
         chunks: [RAGChunk],
@@ -123,12 +117,11 @@ actor RAGContextService {
         }
 
         let maxContextChars = calculateMaxContextCharacters(maxResponseTokens: maxResponseTokens, options: options)
-        let queryVector = await embeddingVector(for: query)
 
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(chunks.count)
         for chunk in chunks {
-            let score = await relevanceScore(text: chunk.text, query: query, queryVector: queryVector, options: options)
+            let score = relevanceScore(text: chunk.text, query: query, options: options)
             ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
         }
 
@@ -141,13 +134,15 @@ actor RAGContextService {
 
         var selected: [String] = []
         var currentChars = 0
+        let separator = "\n\n---\n\n"
         for rankedChunk in ranked {
             let chunkEntry = "Source: \(rankedChunk.chunk.source)\n\(rankedChunk.chunk.text)"
-            if currentChars + chunkEntry.count > maxContextChars {
+            let separatorChars = selected.isEmpty ? 0 : separator.count
+            if currentChars + separatorChars + chunkEntry.count > maxContextChars {
                 continue
             }
             selected.append(chunkEntry)
-            currentChars += chunkEntry.count
+            currentChars += separatorChars + chunkEntry.count
         }
 
         if selected.isEmpty, let first = ranked.first {
@@ -159,7 +154,7 @@ actor RAGContextService {
         }
 
         return RAGSelectionResult(
-            selectedContext: selected.joined(separator: "\n\n---\n\n"),
+            selectedContext: selected.joined(separator: separator),
             rankedChunks: ranked
         )
     }
@@ -174,17 +169,7 @@ actor RAGContextService {
         return Int(Double(availableTokens * options.avgCharsPerToken) * options.contextUtilizationFactor)
     }
 
-    private func relevanceScore(text: String, query: String, queryVector: [Double]?, options: RAGSelectionOptions) async -> Double {
-        if let queryVector,
-           let textVector = await embeddingVector(for: text),
-           queryVector.count == textVector.count {
-            var score = cosineSimilarity(queryVector, textVector)
-            if text.count > options.longChunkCharacterThreshold {
-                score += options.longChunkBonusScore
-            }
-            return score
-        }
-
+    private func relevanceScore(text: String, query: String, options: RAGSelectionOptions) -> Double {
         let queryWords = Set(tokenize(query).filter { $0.count > 2 })
         guard !queryWords.isEmpty else { return 0 }
 
@@ -197,65 +182,6 @@ actor RAGContextService {
             score += options.longChunkBonusScore
         }
         return score
-    }
-
-    private func embeddingVector(for rawText: String) async -> [Double]? {
-        let text = String(rawText.prefix(Self.embeddingInputCharacterLimit)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return nil }
-        if let cached = embeddingCache[text] {
-            return cached
-        }
-
-        do {
-            let instructions = """
-            You are a text embedding generator.
-            Return ONLY valid JSON representing an array of exactly \(Self.embeddingDimensions) float values.
-            The array must be deterministic for semantically equivalent text and suitable for cosine similarity.
-            Do not include any markdown, explanation, or extra keys.
-            """
-            let session = LanguageModelSession(instructions: instructions)
-            let prompt = """
-            Generate an embedding array with exactly \(Self.embeddingDimensions) normalized floats for this text:
-            \(text)
-            """
-            let options = GenerationOptions(temperature: 0, maximumResponseTokens: 400)
-            let response = try await session.respond(to: prompt, options: options)
-            let raw = String(describing: response.content)
-            guard let parsed = parseEmbedding(from: raw) else { return nil }
-            embeddingCache[text] = parsed
-            return parsed
-        } catch {
-            return nil
-        }
-    }
-
-    private func parseEmbedding(from raw: String) -> [Double]? {
-        guard let start = raw.firstIndex(of: "["),
-              let end = raw.lastIndex(of: "]"),
-              start <= end else {
-            return nil
-        }
-        let jsonSlice = raw[start...end]
-        guard let data = String(jsonSlice).data(using: .utf8),
-              let values = try? JSONSerialization.jsonObject(with: data) as? [Double],
-              values.count == Self.embeddingDimensions else {
-            return nil
-        }
-        return normalize(values)
-    }
-
-    private func cosineSimilarity(_ lhs: [Double], _ rhs: [Double]) -> Double {
-        guard lhs.count == rhs.count, !lhs.isEmpty else { return 0 }
-        let dot = zip(lhs, rhs).reduce(0.0) { partial, pair in
-            partial + (pair.0 * pair.1)
-        }
-        return max(min(dot, 1.0), -1.0)
-    }
-
-    private func normalize(_ vector: [Double]) -> [Double] {
-        let magnitude = sqrt(vector.reduce(0.0) { $0 + ($1 * $1) })
-        guard magnitude > 0 else { return vector }
-        return vector.map { $0 / magnitude }
     }
 
     private func tokenize(_ text: String) -> [String] {
