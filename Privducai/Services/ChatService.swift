@@ -215,7 +215,7 @@ final class ChatService: ObservableObject {
         }
 
         if document.isLocked, document.unlock(withPassword: "") {
-            debugContext("extractPDFPageTexts unlocked PDF with empty password: \(url.lastPathComponent)")
+            debugContext("extractPDFPageTexts unlocked a PDF with empty password")
         }
         var pages: [String] = []
 
