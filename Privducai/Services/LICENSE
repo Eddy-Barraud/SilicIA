@@ -1,0 +1,43 @@
+Privducai Non‑Commercial License v1.0
+
+Copyright (c) 2026 Eddy Barraud and contributors
+
+Definitions
+1. "Software" means the source code, object code, documentation, and other files in this repository and any derivative works of them.
+2. "You" means the individual or legal entity exercising permissions granted by this License.
+3. "Non‑Commercial Use" means any use that is not intended for or directed toward commercial advantage or monetary compensation. Non‑Commercial Use includes personal projects, academic research/teaching, evaluation, and use by non‑profit organizations where no fee is charged and no commercial service is provided. Any production use by a for‑profit entity, internal use that supports revenue‑generating activity, providing the Software as a service, or distribution in exchange for any consideration is Commercial Use.
+
+Grant of Permission (Non‑Commercial Only)
+4. Subject to the terms and conditions of this License, the Licensor hereby grants You a worldwide, royalty‑free, non‑exclusive, non‑transferable, non‑sublicensable license to use, copy, modify, create derivative works of, and distribute the Software solely for Non‑Commercial Use.
+
+Conditions
+5. You must:
+   a. Retain all copyright, license, and attribution notices in copies of the Software and in substantial portions of derivative works;
+   b. Clearly mark any changes You make to the Software;
+   c. Include this License with any distribution of the Software or derivative works;
+   d. Not remove or alter any notices regarding trademarks or authors.
+
+Restrictions
+6. You may not:
+   a. Use the Software for Commercial Use without a separate commercial license from the Licensor;
+   b. Offer the Software (or substantial portions of it) as a managed or hosted service to third parties, including as part of a product or API, where You receive any form of consideration;
+   c. Sublicense the Software or grant downstream licenses that are inconsistent with this License;
+   d. Use the names, logos, or trademarks of the Licensor to endorse or promote products without prior written permission.
+
+Patents
+7. No patent rights are granted under this License. If You or Your affiliates initiate patent litigation (including a cross‑claim or counterclaim) alleging that the Software or a contribution to the Software infringes any patent, then all rights granted to You under this License terminate as of the date such litigation is filed.
+
+No Warranty
+8. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON‑INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Termination
+9. This License terminates automatically if You breach any of its terms. Upon termination, You must cease all use of the Software and destroy all copies. A violation is curable within thirty (30) days of notice from the Licensor; if cured within that period, rights are reinstated prospectively as of cure.
+
+Commercial Licensing
+10. For Commercial Use (including SaaS, paid distribution, or use in revenue‑generating products or services), contact the Licensor to obtain a commercial license: eddy.barraud [at] example.com (replace with your preferred contact).
+
+Severability and No Waiver
+11. If any provision of this License is unenforceable, the remaining provisions will remain in effect. Failure to enforce any provision is not a waiver.
+
+Entire Agreement
+12. This License is the entire agreement between You and the Licensor regarding the Software for Non‑Commercial Use and supersedes any prior understandings.
