@@ -7,7 +7,9 @@
 
 import SwiftUI
 import Foundation
+import Combine
 import FoundationModels
+import AppKit
 import PDFKit
 import UniformTypeIdentifiers
 
