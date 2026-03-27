@@ -9,6 +9,8 @@ A fast, efficient, and privacy-focused web search assistant for macOS, powered b
 - 🧠 **On-Device AI**: Uses Apple's NaturalLanguage framework for summaries
 - 📝 **Concise Summaries**: Get quick insights without reading through multiple pages
 - 🔗 **Direct Links**: Easy access to sources for detailed information
+- 💬 **Tabbed Chat Experience**: Switch between Search Assist and Chat
+- 📎 **Context-Aware Chat**: Add URL and PDF context (including drag-and-drop PDFs) for retrieval-augmented answers
 - 🔒 **Privacy-First**: No tracking, no data collection
 
 ## Overview
@@ -96,4 +98,3 @@ This project is open source and available for educational purposes.
 ## Credits
 
 Created by Eddy Barraud
-
