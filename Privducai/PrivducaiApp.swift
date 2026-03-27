@@ -33,6 +33,12 @@ struct PrivducaiApp: App {
                             handleIncomingURL(url)
                         }
                     }
+                    let pending = appDelegate.drainPendingURLs()
+                    if !pending.isEmpty {
+                        for url in pending {
+                            handleIncomingURL(url)
+                        }
+                    }
                 }
 #endif
         }
@@ -64,9 +70,19 @@ struct PrivducaiApp: App {
 /// Receives URLs and files opened by macOS (Finder/Preview/Safari share flows).
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var onOpenURLs: (([URL]) -> Void)?
+    private var pendingURLs: [URL] = []
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        onOpenURLs?(urls)
+        if let onOpenURLs {
+            onOpenURLs(urls)
+        } else {
+            pendingURLs.append(contentsOf: urls)
+        }
+    }
+
+    func drainPendingURLs() -> [URL] {
+        defer { pendingURLs.removeAll() }
+        return pendingURLs
     }
 }
 #endif
