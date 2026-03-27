@@ -213,15 +213,30 @@ final class ChatService: ObservableObject {
             debugContext("extractPDFPageTexts failed to open PDF at path=\(url.path)")
             return []
         }
+
+        if document.isLocked, document.unlock(withPassword: "") {
+            debugContext("extractPDFPageTexts unlocked PDF with empty password: \(url.lastPathComponent)")
+        }
         var pages: [String] = []
 
         for pageIndex in 0..<document.pageCount {
-            guard let page = document.page(at: pageIndex),
-                  let pageString = page.string?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !pageString.isEmpty else {
+            guard let page = document.page(at: pageIndex) else { continue }
+            if let pageString = page.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !pageString.isEmpty {
+                pages.append(pageString)
                 continue
             }
-            pages.append(pageString)
+            if let attributedPageString = page.attributedString?.string.trimmingCharacters(in: .whitespacesAndNewlines),
+               !attributedPageString.isEmpty {
+                pages.append(attributedPageString)
+            }
+        }
+
+        if pages.isEmpty,
+           let documentText = document.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !documentText.isEmpty {
+            debugContext("extractPDFPageTexts using document-level fallback text for \(url.lastPathComponent)")
+            pages.append(documentText)
         }
 
         return pages
