@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		36D25B9F2F78168800B52C37 /* LLMStream in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD01 /* LLMStream */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		36D5D0B42F7190B80090D706 /* Privducai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Privducai.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				36D25B9F2F78168800B52C37 /* LLMStream in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -95,37 +100,18 @@
 			);
 			mainGroup = 36D5D0AB2F7190B80090D706;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 36D5D0B52F7190B80090D706 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
-			packageReferences = (
-				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */,
-			);
 			targets = (
 				36D5D0B32F7190B80090D706 /* Privducai */,
 			);
 		};
 /* End PBXProject section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/synth-inc/LLMStream";
-			requirement = {
-				branch = main;
-				kind = branch;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCSwiftPackageProductDependency section */
-		7A1C9D8B4E2F114500ABCD01 /* LLMStream */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */;
-			productName = LLMStream;
-		};
-/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		36D5D0B22F7190B80090D706 /* Resources */ = {
@@ -269,7 +255,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Privducai/Privducai.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WPBZAUF723;
@@ -278,9 +266,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Search Assist";
+				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -296,7 +285,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.Privducai;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.silicia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -317,7 +306,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = Privducai/Privducai.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WPBZAUF723;
@@ -326,9 +317,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Search Assist";
+				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -344,7 +336,7 @@
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.Privducai;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.silicia;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = auto;
@@ -382,6 +374,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/synth-inc/LLMStream";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7A1C9D8B4E2F114500ABCD01 /* LLMStream */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */;
+			productName = LLMStream;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 36D5D0AC2F7190B80090D706 /* Project object */;
 }
