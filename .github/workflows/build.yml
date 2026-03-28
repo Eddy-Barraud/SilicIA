@@ -1,4 +1,4 @@
-name: Build Privducai
+name: Build SilicIA
 
 on:
   push:
@@ -28,8 +28,8 @@ jobs:
       run: |
         set -o pipefail
         xcodebuild \
-          -project Privducai.xcodeproj \
-          -scheme Privducai \
+          -project SilicIA.xcodeproj \
+          -scheme SilicIA \
           -configuration Debug \
           -destination "generic/platform=macOS" \
           CODE_SIGNING_ALLOWED=NO \

@@ -18,7 +18,7 @@
                BlueprintIdentifier = "36D5D0B32F7190B80090D706"
                BuildableName = "Privducai.app"
                BlueprintName = "Privducai"
-               ReferencedContainer = "container:Privducai.xcodeproj">
+               ReferencedContainer = "container:SilicIA.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -47,7 +47,7 @@
             BlueprintIdentifier = "36D5D0B32F7190B80090D706"
             BuildableName = "Privducai.app"
             BlueprintName = "Privducai"
-            ReferencedContainer = "container:Privducai.xcodeproj">
+            ReferencedContainer = "container:SilicIA.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -64,7 +64,7 @@
             BlueprintIdentifier = "36D5D0B32F7190B80090D706"
             BuildableName = "Privducai.app"
             BlueprintName = "Privducai"
-            ReferencedContainer = "container:Privducai.xcodeproj">
+            ReferencedContainer = "container:SilicIA.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

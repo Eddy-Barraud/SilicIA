@@ -1,6 +1,6 @@
-# Privducai
+# SilicIA
 
-[![Build Status](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml/badge.svg)](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml)
+[![Build Privducai](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml/badge.svg)](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml)
 
 A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
 The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.

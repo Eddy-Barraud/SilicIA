@@ -91,7 +91,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 36D5D0AF2F7190B80090D706 /* Build configuration list for PBXProject "Privducai" */;
+			buildConfigurationList = 36D5D0AF2F7190B80090D706 /* Build configuration list for PBXProject "SilicIA" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -355,7 +355,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		36D5D0AF2F7190B80090D706 /* Build configuration list for PBXProject "Privducai" */ = {
+		36D5D0AF2F7190B80090D706 /* Build configuration list for PBXProject "SilicIA" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				36D5D0BD2F7190B90090D706 /* Debug */,
