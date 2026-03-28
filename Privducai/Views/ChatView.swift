@@ -8,6 +8,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import LLMStream
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
@@ -77,7 +78,6 @@ struct ChatView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             renderedMessageContent(message)
-                                .textSelection(.enabled)
                         }
                         .padding(10)
                         .background(
@@ -107,13 +107,15 @@ struct ChatView: View {
         .cornerRadius(10)
     }
 
-    /// Renders assistant replies as Markdown when possible, with plaintext fallback.
-    private func renderedMessageContent(_ message: ChatMessage) -> Text {
-        guard message.role == .assistant,
-              let attributed = try? AttributedString(markdown: message.content) else {
-            return Text(message.content)
+    /// Renders assistant replies through LLMStream and keeps plaintext for user turns.
+    @ViewBuilder
+    private func renderedMessageContent(_ message: ChatMessage) -> some View {
+        if message.role == .assistant {
+            LLMStreamView(text: message.content)
+        } else {
+            Text(message.content)
+                .textSelection(.enabled)
         }
-        return Text(attributed)
     }
 
     /// Renders input area and send action.

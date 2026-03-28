@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import LLMStream
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
@@ -190,9 +191,8 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {
-                Text(LocalizedStringKey(aiService.summary))
-                    .font(.body)
-                    .foregroundColor(.primary)
+                LLMStreamView(text: aiService.summary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // Generation time shown at the bottom-right once complete
