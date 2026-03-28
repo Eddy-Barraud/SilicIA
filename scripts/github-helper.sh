@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Privducai GitHub Helper Script
+# SilicIA GitHub Helper Script
 # This script helps with common GitHub operations
 
 set -e
@@ -14,12 +14,12 @@ NC='\033[0m' # No Color
 
 # Configuration
 REPO_OWNER="${REPO_OWNER:-eddybarraud}"
-REPO_NAME="${REPO_NAME:-Privducai}"
+REPO_NAME="${REPO_NAME:-SilicIA}"
 MAIN_BRANCH="${MAIN_BRANCH:-main}"
 
 # Functions
 print_menu() {
-  echo -e "${BLUE}=== Privducai GitHub Helper ===${NC}"
+  echo -e "${BLUE}=== SilicIA GitHub Helper ===${NC}"
   echo ""
   echo "1. Check build status"
   echo "2. View recent commits"

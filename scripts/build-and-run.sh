@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Privducai Build and Run Script
-# This script builds and runs the Privducai macOS application
+# SilicIA Build and Run Script
+# This script builds and runs the SilicIA macOS application
 
 set -e
 
@@ -11,11 +11,11 @@ RED='\033[0;31m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-BUILD_SCHEME="Privducai"
-BUILD_PROJECT="Privducai.xcodeproj"
+BUILD_SCHEME="SilicIA"
+BUILD_PROJECT="SilicIA.xcodeproj"
 BUILD_CONFIGURATION="${1:-Debug}"
 
-echo -e "${YELLOW}Building and running Privducai...${NC}"
+echo -e "${YELLOW}Building and running SilicIA...${NC}"
 
 # Navigate to project root
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

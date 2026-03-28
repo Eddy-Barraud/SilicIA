@@ -17,4 +17,4 @@ build/
 Configs/LocalSigning.xcconfig
 
 # Local build scheme (do not commit your personal scheme)
-Privducai.xcodeproj/xcshareddata/xcschemes/Privducai.xcscheme
+SilicIA.xcodeproj/xcshareddata/xcschemes/SilicIA.xcscheme

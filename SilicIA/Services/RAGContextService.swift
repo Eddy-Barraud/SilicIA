@@ -1,6 +1,6 @@
 //
 //  RAGContextService.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Eddy Barraud on 27/03/2026.
 //

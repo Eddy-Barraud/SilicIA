@@ -1,6 +1,6 @@
 //
 //  WebScrapingService.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Claude on 23/03/2026.
 //

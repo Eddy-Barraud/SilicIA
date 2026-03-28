@@ -1,6 +1,6 @@
 //
 //  DuckDuckGoService.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Claude on 23/03/2026.
 //
@@ -54,6 +54,23 @@ private func htmlToPlainText(_ html: String) -> String {
         }
     }
     return result.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+/// Extract the inner HTML for the first element matching a class name and tag.
+private func extractInnerHTML(in html: String, className: String, tagName: String) -> String? {
+    let escapedClassName = NSRegularExpression.escapedPattern(for: className)
+    let escapedTagName = NSRegularExpression.escapedPattern(for: tagName)
+    let pattern = "<\(escapedTagName)[^>]*class=\"[^\"]*\\b\(escapedClassName)\\b[^\"]*\"[^>]*>([\\s\\S]*?)</\(escapedTagName)>"
+
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+        return nil
+    }
+    let range = NSRange(html.startIndex..., in: html)
+    guard let match = regex.firstMatch(in: html, options: [], range: range),
+          let contentRange = Range(match.range(at: 1), in: html) else {
+        return nil
+    }
+    return String(html[contentRange])
 }
 
 @MainActor
@@ -133,13 +150,12 @@ class DuckDuckGoService: ObservableObject {
             }
             let title = htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
 
-            // Extract snippet
-            var snippet = ""
-            if let snippetRange = component.range(of: "class=\"result__snippet\""),
-               let snippetStart = component.range(of: ">", range: snippetRange.upperBound..<component.endIndex),
-               let snippetEnd = component.range(of: "</", range: snippetStart.upperBound..<component.endIndex) {
-                snippet = htmlToPlainText(String(component[snippetStart.upperBound..<snippetEnd.lowerBound]))
-            }
+            // Extract snippet. The snippet may include nested tags (<b>, <span>, etc.);
+            // capture the full element content instead of stopping at the first closing tag.
+            let snippetHTML = extractInnerHTML(in: component, className: "result__snippet", tagName: "a")
+                ?? extractInnerHTML(in: component, className: "result__snippet", tagName: "div")
+                ?? ""
+            let snippet = htmlToPlainText(snippetHTML)
 
             // Clean up URL (DuckDuckGo redirects)
             let cleanURL = url.hasPrefix("//duckduckgo.com/l/?") ? extractActualURL(from: url) : url

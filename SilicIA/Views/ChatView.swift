@@ -1,6 +1,6 @@
 //
 //  ChatView.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Eddy Barraud on 27/03/2026.
 //
@@ -43,6 +43,8 @@ struct ChatView: View {
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
         VStack(spacing: 12) {
+            chatHeaderView
+
             messagesView
 
             if let errorMessage = chatService.errorMessage {
@@ -78,6 +80,25 @@ struct ChatView: View {
         }
     }
 
+    /// Renders top-level chat actions.
+    private var chatHeaderView: some View {
+        HStack {
+            Spacer()
+
+            Button(action: { startOver() }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.2.circlepath")
+                    Text("Start Over")
+                        .fontWeight(.medium)
+                }
+            }
+            .buttonStyle(.bordered)
+
+            Spacer()
+        }
+        .padding(.bottom, 2)
+    }
+
     /// Renders message history and in-progress state.
     private var messagesView: some View {
         ScrollView {
@@ -89,24 +110,24 @@ struct ChatView: View {
                 }
 
                 ForEach(chatService.messages) { message in
-                    HStack {
-                        if message.role == .assistant { Spacer(minLength: 40) }
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(message.role == .user ? "You" : "Assistant")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            renderedMessageContent(message)
-                                .textSelection(.enabled)
-                        }
-                        .padding(10)
-                        .background(
-                            message.role == .user
-                            ? Color.accentColor.opacity(0.15)
-                            : Color(NSColor.controlBackgroundColor)
-                        )
-                        .cornerRadius(10)
-                        if message.role == .user { Spacer(minLength: 40) }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(message.role == .user ? "You" : "Assistant")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        renderedMessageContent(message)
+                            .textSelection(.enabled)
                     }
+                    .padding(10)
+                    .background(
+                        message.role == .user
+                        ? Color.accentColor.opacity(0.15)
+                        : Color(NSColor.controlBackgroundColor)
+                    )
+                    .cornerRadius(10)
+                    .frame(
+                        maxWidth: .infinity,
+                        alignment: message.role == .assistant ? .leading : .trailing
+                    )
                 }
 
                 if chatService.isResponding {
@@ -349,7 +370,7 @@ struct ChatView: View {
     /// Copies dropped PDF to a stable temporary location so it remains readable for later context analysis.
     private func persistDroppedPDF(_ sourceURL: URL) -> URL? {
         let fileManager = FileManager.default
-        let destinationDirectory = fileManager.temporaryDirectory.appendingPathComponent("PrivducaiDroppedPDFs", isDirectory: true)
+        let destinationDirectory = fileManager.temporaryDirectory.appendingPathComponent("SilicIADroppedPDFs", isDirectory: true)
         do {
             try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
             let baseName = sourceURL.deletingPathExtension().lastPathComponent
@@ -457,6 +478,16 @@ struct ChatView: View {
             guard !Task.isCancelled else { return }
             await chatService.preAnalyzeContext(contextInput: contextInput, pdfURLs: selectedPDFs)
         }
+    }
+
+    /// Resets transcript and local context inputs to start a new conversation.
+    private func startOver() {
+        preanalysisTask?.cancel()
+        messageInput = ""
+        contextSources = [ContextSource(kind: .url(text: ""))]
+        sharedURLs.removeAll()
+        sharedPDFs.removeAll()
+        chatService.resetConversation()
     }
 }
 

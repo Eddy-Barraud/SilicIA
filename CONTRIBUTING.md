@@ -1,6 +1,6 @@
-# Contributing to Privducai
+# Contributing to SilicIA
 
-Thank you for your interest in contributing to Privducai! Here's how you can help.
+Thank you for your interest in contributing to SilicIA! Here's how you can help.
 
 ## Code of Conduct
 
@@ -11,8 +11,8 @@ Please be respectful and constructive in all interactions. We're building a welc
 1. **Fork the repository** on GitHub
 2. **Clone your fork** locally:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/Privducai.git
-   cd Privducai
+   git clone https://github.com/YOUR_USERNAME/SilicIA.git
+   cd SilicIA
    ```
 3. **Create a feature branch**:
    ```bash
@@ -99,7 +99,7 @@ Include:
 
 ## Licensing
 
-By contributing to Privducai, you agree that your contributions will be licensed under the project's Privducai Non-Commercial License v1.0.
+By contributing to SilicIA, you agree that your contributions will be licensed under the project's SilicIA Non-Commercial License v1.0.
 
 ## Questions?
 

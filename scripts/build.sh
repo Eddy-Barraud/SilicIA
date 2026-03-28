@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Privducai Build Script
-# This script builds the Privducai macOS application
+# SilicIA Build Script
+# This script builds the SilicIA macOS application
 
 set -e
 
@@ -12,12 +12,12 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-BUILD_SCHEME="Privducai"
-BUILD_PROJECT="Privducai.xcodeproj"
+BUILD_SCHEME="SilicIA"
+BUILD_PROJECT="SilicIA.xcodeproj"
 BUILD_CONFIGURATION="${1:-Debug}"
 BUILD_DESTINATION="${2:-generic/platform=macOS}"
 
-echo -e "${YELLOW}Building Privducai...${NC}"
+echo -e "${YELLOW}Building SilicIA...${NC}"
 echo "Scheme: $BUILD_SCHEME"
 echo "Configuration: $BUILD_CONFIGURATION"
 echo "Destination: $BUILD_DESTINATION"

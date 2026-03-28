@@ -1,6 +1,6 @@
 # SilicIA
 
-[![Build Privducai](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml/badge.svg)](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml)
+[![Build SilicIA](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml/badge.svg)](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml)
 
 A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
 The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.
@@ -18,7 +18,7 @@ The app bundles context-aware chat experience, scraping web content, analyzing P
 
 ## Overview
 
-Privducai (Privacy + Education + AI) is a native macOS application that provides a DuckDuckGo assistant experience similar to Perplexica, but optimized for Apple Silicon Macs. It combines efficient web search with on-device AI summarization to help you find and understand information quickly without draining your battery.
+SilicIA (Privacy + Education + AI) is a native macOS application that provides a DuckDuckGo assistant experience similar to Perplexica, but optimized for Apple Silicon Macs. It combines efficient web search with on-device AI summarization to help you find and understand information quickly without draining your battery.
 
 ### How It Works
 
@@ -30,7 +30,7 @@ Privducai (Privacy + Education + AI) is a native macOS application that provides
 ## Architecture
 
 ```
-Privducai/
+SilicIA/
 ├── Models/
 │   ├── AppSettings.swift           # User-configurable settings (language, token limits)
 │   └── SearchResult.swift          # Data models for search results and metadata
@@ -45,8 +45,8 @@ Privducai/
 │   └── ChatView.swift              # Chat user interface and interaction logic
 ├── Assets.xcassets/                # App icons and color definitions
 ├── ContentView.swift               # Root view and main UI container
-├── PrivducaiApp.swift              # App entry point and lifecycle management
-└── Privducai.entitlements          # macOS sandbox and capability permissions
+├── SilicIAApp.swift              # App entry point and lifecycle management
+└── SilicIA.entitlements          # macOS sandbox and capability permissions
 ```
 
 ### Data Flow
@@ -133,17 +133,17 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/eddybarraud/Privducai.git
-   cd Privducai
+   git clone https://github.com/eddybarraud/SilicIA.git
+   cd SilicIA
    ```
 
 2. **Open the project in Xcode**
    ```bash
-   open Privducai.xcodeproj
+   open SilicIA.xcodeproj
    ```
 
 3. **Configure signing** (for device builds)
-   - Select the **Privducai** target
+   - Select the **SilicIA** target
    - Go to **Signing & Capabilities**
    - Enable **Automatically manage signing** and select your Team
 
@@ -168,7 +168,7 @@ Potential improvements for future versions:
 
 ## License
 
-This project is licensed under the **Privducai Non-Commercial License v1.0**.
+This project is licensed under the **SilicIA Non-Commercial License v1.0**.
 
 **Non-Commercial Use Only**: The Software is available for personal projects, academic research, evaluation, and non-profit use at no charge.
 
@@ -186,7 +186,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 
 Quick start:
 ```bash
-git clone https://github.com/eddybarraud/Privducai.git
+git clone https://github.com/eddybarraud/SilicIA.git
 ./scripts/build.sh Debug
 ```
 

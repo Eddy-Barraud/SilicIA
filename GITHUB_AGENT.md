@@ -1,6 +1,6 @@
 # GitHub Agent Setup
 
-This document explains the GitHub integration for Privducai.
+This document explains the GitHub integration for SilicIA.
 
 ## Components
 
@@ -20,7 +20,7 @@ Runs:
 
 **Status Badge:** Add to README
 ```markdown
-[![Build Status](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml/badge.svg)](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml)
+[![Build Status](https://github.com/eddybarraud/SilicIA/actions/workflows/build.yml/badge.svg)](https://github.com/eddybarraud/SilicIA/actions/workflows/build.yml)
 ```
 
 ### 2. GitHub Helper Script
@@ -83,13 +83,13 @@ Guidelines for:
 ### GitHub Actions Status
 
 View build status:
-- **GitHub UI:** Actions tab → Build Privducai
+- **GitHub UI:** Actions tab → Build SilicIA
 - **CLI:** `./scripts/github-helper.sh` → Option 1
 - **README Badge:** Shows in project header
 
 ## Setup Requirements
 
-- GitHub repository at `https://github.com/eddybarraud/Privducai`
+- GitHub repository at `https://github.com/eddybarraud/SilicIA`
 - Actions enabled (default)
 - macOS runners available (GitHub-hosted)
 

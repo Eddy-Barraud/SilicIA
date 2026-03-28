@@ -1,6 +1,6 @@
-# Building Privducai
+# Building SilicIA
 
-This document explains the available build options for Privducai.
+This document explains the available build options for SilicIA.
 
 ## Using Shell Scripts
 
@@ -29,7 +29,7 @@ Press `⌘⇧B` to access the build task menu or use **Terminal → Run Task** a
 ## Using Xcode
 
 ```bash
-open Privducai.xcodeproj
+open SilicIA.xcodeproj
 ```
 
 Then press `⌘R` to build and run in Xcode.
@@ -37,8 +37,8 @@ Then press `⌘R` to build and run in Xcode.
 ## Command Line (Manual)
 
 ```bash
-xcodebuild -project Privducai.xcodeproj \
-  -scheme Privducai \
+xcodebuild -project SilicIA.xcodeproj \
+  -scheme SilicIA \
   -configuration Debug \
   -destination "generic/platform=macOS" \
   build

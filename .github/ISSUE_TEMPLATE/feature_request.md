@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea for Privducai
+about: Suggest an idea for SilicIA
 title: "[FEATURE] "
 labels: enhancement
 assignees: ''

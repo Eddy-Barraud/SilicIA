@@ -11,13 +11,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		36D5D0B42F7190B80090D706 /* Privducai.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Privducai.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		36D5D0B42F7190B80090D706 /* SilicIA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SilicIA.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		36D5D0B62F7190B80090D706 /* Privducai */ = {
+		36D5D0B62F7190B80090D706 /* SilicIA */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = Privducai;
+			path = SilicIA;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -37,7 +37,7 @@
 		36D5D0AB2F7190B80090D706 = {
 			isa = PBXGroup;
 			children = (
-				36D5D0B62F7190B80090D706 /* Privducai */,
+				36D5D0B62F7190B80090D706 /* SilicIA */,
 				36D5D0B52F7190B80090D706 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -45,7 +45,7 @@
 		36D5D0B52F7190B80090D706 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				36D5D0B42F7190B80090D706 /* Privducai.app */,
+				36D5D0B42F7190B80090D706 /* SilicIA.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,9 +53,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		36D5D0B32F7190B80090D706 /* Privducai */ = {
+		36D5D0B32F7190B80090D706 /* SilicIA */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 36D5D0BF2F7190B90090D706 /* Build configuration list for PBXNativeTarget "Privducai" */;
+			buildConfigurationList = 36D5D0BF2F7190B90090D706 /* Build configuration list for PBXNativeTarget "SilicIA" */;
 			buildPhases = (
 				36D5D0B02F7190B80090D706 /* Sources */,
 				36D5D0B12F7190B80090D706 /* Frameworks */,
@@ -66,14 +66,14 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				36D5D0B62F7190B80090D706 /* Privducai */,
+				36D5D0B62F7190B80090D706 /* SilicIA */,
 			);
-			name = Privducai;
+			name = SilicIA;
 			packageProductDependencies = (
 				7A1C9D8B4E2F114500ABCD01 /* LLMStream */,
 			);
-			productName = Privducai;
-			productReference = 36D5D0B42F7190B80090D706 /* Privducai.app */;
+			productName = SilicIA;
+			productReference = 36D5D0B42F7190B80090D706 /* SilicIA.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -84,7 +84,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2630;
-				LastUpgradeCheck = 2630;
+				LastUpgradeCheck = 2640;
 				TargetAttributes = {
 					36D5D0B32F7190B80090D706 = {
 						CreatedOnToolsVersion = 26.3;
@@ -108,7 +108,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				36D5D0B32F7190B80090D706 /* Privducai */,
+				36D5D0B32F7190B80090D706 /* SilicIA */,
 			);
 		};
 /* End PBXProject section */
@@ -168,6 +168,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				DEVELOPMENT_TEAM = WPBZAUF723;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -191,6 +192,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -230,6 +232,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				DEVELOPMENT_TEAM = WPBZAUF723;
 				ENABLE_NS_ASSERTIONS = NO;
@@ -246,6 +249,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 			};
 			name = Release;
@@ -256,10 +260,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = Privducai/Privducai.entitlements;
+				CODE_SIGN_ENTITLEMENTS = SilicIA/SilicIA.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = WPBZAUF723;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -268,7 +273,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
-				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
+				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.SilicIA;\n        CFBundleURLSchemes = (\n            SilicIA,\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -307,10 +312,11 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
-				CODE_SIGN_ENTITLEMENTS = Privducai/Privducai.entitlements;
+				CODE_SIGN_ENTITLEMENTS = SilicIA/SilicIA.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = WPBZAUF723;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -319,7 +325,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
-				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.privducai;\n        CFBundleURLSchemes = (\n            privducai,\n        );\n    },\n)]";
+				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.SilicIA;\n        CFBundleURLSchemes = (\n            SilicIA,\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -364,7 +370,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		36D5D0BF2F7190B90090D706 /* Build configuration list for PBXNativeTarget "Privducai" */ = {
+		36D5D0BF2F7190B90090D706 /* Build configuration list for PBXNativeTarget "SilicIA" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				36D5D0C02F7190B90090D706 /* Debug */,

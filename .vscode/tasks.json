@@ -7,9 +7,9 @@
       "command": "xcodebuild",
       "args": [
         "-project",
-        "Privducai.xcodeproj",
+        "SilicIA.xcodeproj",
         "-scheme",
-        "Privducai",
+        "SilicIA",
         "-configuration",
         "Debug",
         "-destination",
@@ -34,9 +34,9 @@
       "command": "xcodebuild",
       "args": [
         "-project",
-        "Privducai.xcodeproj",
+        "SilicIA.xcodeproj",
         "-scheme",
-        "Privducai",
+        "SilicIA",
         "-configuration",
         "Release",
         "-destination",
@@ -58,9 +58,9 @@
       "command": "xcodebuild",
       "args": [
         "-project",
-        "Privducai.xcodeproj",
+        "SilicIA.xcodeproj",
         "-scheme",
-        "Privducai",
+        "SilicIA",
         "clean"
       ],
       "group": "build",

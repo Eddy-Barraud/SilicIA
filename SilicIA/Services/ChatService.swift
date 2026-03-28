@@ -1,6 +1,6 @@
 //
 //  ChatService.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Eddy Barraud on 27/03/2026.
 //
@@ -105,6 +105,17 @@ final class ChatService: ObservableObject {
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
+    }
+
+    /// Clears conversation and cached context analysis so a new chat starts cleanly.
+    func resetConversation() {
+        messages = []
+        errorMessage = nil
+        isResponding = false
+        isAnalyzingContext = false
+        contextAnalysisProgress = 0
+        preAnalyzedContextKey = nil
+        preAnalyzedChunks = []
     }
 
     /// Collects web and PDF chunks from provided context.

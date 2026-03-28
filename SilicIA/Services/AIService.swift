@@ -1,6 +1,6 @@
 //
 //  AIService.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Claude on 23/03/2026.
 //
@@ -118,7 +118,7 @@ class AIService: ObservableObject {
         - Include key facts and details
         - Maintain accuracy
         - Use clear, easy-to-understand language
-        - Inline expressions using $...$
+        - Symbols and math encapsulated using $...$
         - Display math using \\[...\\]
         Respond in the same language as the user's latest question.
         """

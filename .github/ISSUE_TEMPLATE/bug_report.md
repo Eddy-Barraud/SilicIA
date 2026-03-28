@@ -24,7 +24,7 @@ assignees: ''
 
 ## Environment
 - macOS Version: 
-- Privducai Version/Commit: 
+- SilicIA Version/Commit: 
 - Hardware: (Apple Silicon/Intel)
 
 ## Screenshots

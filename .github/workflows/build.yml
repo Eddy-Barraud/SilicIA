@@ -42,8 +42,8 @@ jobs:
       run: |
         set -o pipefail
         xcodebuild \
-          -project Privducai.xcodeproj \
-          -scheme Privducai \
+          -project SilicIA.xcodeproj \
+          -scheme SilicIA \
           -configuration Release \
           -destination "generic/platform=macOS" \
           CODE_SIGNING_ALLOWED=NO \

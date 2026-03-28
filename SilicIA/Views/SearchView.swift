@@ -1,6 +1,6 @@
 //
 //  SearchView.swift
-//  Privducai
+//  SilicIA
 //
 //  Created by Claude on 23/03/2026.
 //
@@ -72,17 +72,14 @@ struct SearchView: View {
     private var headerView: some View {
         HStack {
             Button(action: { goHome() }) {
-                HStack {
+                HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                        .font(.system(size: 32))
-                        .foregroundColor(.accentColor)
-                    Text("Search Assist")
-                        .font(.title)
-                        .fontWeight(.bold)
+                    Text(settings.language == .french ? "Recommencer" : "Start Over")
+                        .fontWeight(.medium)
                 }
             }
-            .buttonStyle(.plain)
-            
+            .buttonStyle(.bordered)
+
             Spacer()
 
             Button(action: { showSettings.toggle() }) {
@@ -266,17 +263,6 @@ struct SearchView: View {
                         .multilineTextAlignment(.center)
                 }
 
-                VStack(alignment: .leading, spacing: 12) {
-                    if settings.language == .french {
-                        FeatureRow(icon: "bolt.fill", title: "Rapide et efficace", description: "Optimisé pour MacBook M3")
-                        FeatureRow(icon: "lock.shield.fill", title: "Axé sur la confidentialité", description: "Utilise la recherche DuckDuckGo")
-                        FeatureRow(icon: "brain.head.profile", title: "IA sur l'appareil", description: "Modèles de fondation Apple")
-                    } else {
-                        FeatureRow(icon: "bolt.fill", title: "Fast & Efficient", description: "Optimized for M3 MacBook")
-                        FeatureRow(icon: "lock.shield.fill", title: "Privacy-Focused", description: "Uses DuckDuckGo search")
-                        FeatureRow(icon: "brain.head.profile", title: "On-Device AI", description: "Apple Foundation Models")
-                    }
-                }
                 .padding(.top)
 
                 // Settings Panel
@@ -497,7 +483,7 @@ struct SearchResultCard: View {
             Text(result.snippet)
                 .font(.body)
                 .foregroundColor(.primary)
-                .lineLimit(3)
+                .lineLimit(5)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()

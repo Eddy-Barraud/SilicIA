@@ -1,6 +1,6 @@
 //
-//  PrivducaiApp.swift
-//  Privducai
+//  SilicIAApp.swift
+//  SilicIA
 //
 //  Created by Eddy Barraud on 23/03/2026.
 //
@@ -12,11 +12,11 @@ import AppKit
 
 @main
 /// Application entry point that launches the main content window.
-struct PrivducaiApp: App {
+struct SilicIAApp: App {
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
 #if os(macOS)
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
 
     /// Declares the app's primary window scene.
@@ -42,6 +42,9 @@ struct PrivducaiApp: App {
                 }
 #endif
         }
+        #if os(macOS)
+            .defaultSize(width: 1284, height: 1662)
+        #endif
     }
 
     /// Routes incoming shared URLs and files to chat context.
@@ -53,7 +56,7 @@ struct PrivducaiApp: App {
         }
 
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           url.scheme?.lowercased() == "privducai",
+           url.scheme?.lowercased() == "SilicIA",
            let sharedURL = components.queryItems?.first(where: { $0.name == "url" })?.value {
             sharedURLs.append(sharedURL)
             return
@@ -85,8 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return pendingURLs
     }
 
-    func applicationShouldTerminateWhenLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+            return true
     }
 }
 #endif
