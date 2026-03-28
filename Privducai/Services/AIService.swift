@@ -85,39 +85,48 @@ class AIService: ObservableObject {
         return withCitations
     }
 
+    /// Builds dynamic instructions matching the user's query language (French or English).
+    private func buildInstructions(for userMessage: String) -> String {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(userMessage)
+        let language = recognizer.dominantLanguage
+
+        if language == .french {
+            return """
+            Vous êtes un assistant IA utile qui fournit des résumés concis et précis des résultats de recherche web.
+            Votre tâche est d'analyser le contenu web fourni et de générer un résumé clair et informatif qui répond directement à la requête de l'utilisateur.
+
+            Directives :
+            - Soyez concis mais complet
+            - Concentrez-vous sur les informations les plus pertinentes
+            - Incluez les faits et détails clés
+            - Maintenez la précision
+            - Utilisez un langage clair et facile à comprendre
+            Répondez dans la même langue que la question de l'utilisateur (ici: français).
+            """
+        }
+
+        return """
+        You are a helpful AI assistant that provides concise, accurate summaries of web search results.
+        Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
+
+        Guidelines:
+        - Be concise but comprehensive
+        - Focus on the most relevant information
+        - Include key facts and details
+        - Maintain accuracy
+        - Use clear, easy-to-understand language
+        Respond in the same language as the user's latest question.
+        """
+    }
+
     /// Generates the final summary through Foundation Models with context budgeting.
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
         do {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
-            let instructions: String
-
-            if language == .french {
-                instructions = """
-                Vous êtes un assistant IA utile qui fournit des résumés concis et précis des résultats de recherche web.
-                Votre tâche est d'analyser le contenu web fourni et de générer un résumé clair et informatif qui répond directement à la requête de l'utilisateur.
-
-                Directives :
-                - Soyez concis mais complet
-                - Concentrez-vous sur les informations les plus pertinentes
-                - Incluez les faits et détails clés
-                - Maintenez la précision
-                - Utilisez un langage clair et facile à comprendre
-                """
-            } else {
-                instructions = """
-                You are a helpful AI assistant that provides concise, accurate summaries of web search results.
-                Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
-
-                Guidelines:
-                - Be concise but comprehensive
-                - Focus on the most relevant information
-                - Include key facts and details
-                - Maintain accuracy
-                - Use clear, easy-to-understand language
-                """
-            }
-
+            // Build instructions based on detected query language (French/English)
+            let instructions = buildInstructions(for: query)
             let session = LanguageModelSession(instructions: instructions)
 
             // Token budget for the final summary.
@@ -166,10 +175,12 @@ class AIService: ObservableObject {
                 }
             }
 
-            // Prepare the prompt in the selected language
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(query)
+            let isFrench = recognizer.dominantLanguage == .french
+
             let prompt: String
-            
-            if language == .french {
+            if isFrench {
                 prompt = """
                 Requête de l'utilisateur : \(query)
 
@@ -222,6 +233,10 @@ class AIService: ObservableObject {
         // For M3 MacBooks without full Apple Intelligence, we'll create an efficient
         // extractive summary that highlights key information
 
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(query)
+        let isFrench = recognizer.dominantLanguage == .french
+
         // Split context into sentences
         let tokenizer = NLTokenizer(unit: .sentence)
         tokenizer.string = context
@@ -247,7 +262,7 @@ class AIService: ObservableObject {
         var summaryParts: [String] = []
 
         // Add query context in the selected language
-        if language == .french {
+        if isFrench {
             summaryParts.append("Basé sur votre recherche pour '\(query)' :")
         } else {
             summaryParts.append("Based on your search for '\(query)':")
@@ -256,7 +271,7 @@ class AIService: ObservableObject {
 
         // Add key findings
         if !topSentences.isEmpty {
-            summaryParts.append(language == .french ? "**Principaux résultats :**" : "**Key Findings:**")
+            summaryParts.append(isFrench ? "**Principaux résultats :**" : "**Key Findings:**")
             for (_, sentence) in topSentences.enumerated() {
                 // Clean up the sentence
                 let cleaned = sentence
@@ -271,7 +286,7 @@ class AIService: ObservableObject {
         }
 
         // Add top sources with links
-        summaryParts.append(language == .french ? "**Principales sources :**" : "**Top Sources:**")
+        summaryParts.append(isFrench ? "**Principales sources :**" : "**Top Sources:**")
         for (index, result) in results.prefix(5).enumerated() {
             summaryParts.append("\(index + 1). [\(result.title)](\(result.url))")
         }
