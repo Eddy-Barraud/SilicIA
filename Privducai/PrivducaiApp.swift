@@ -84,5 +84,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer { pendingURLs.removeAll() }
         return pendingURLs
     }
+
+    func applicationShouldTerminateWhenLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
 }
 #endif

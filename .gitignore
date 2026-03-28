@@ -1,0 +1,20 @@
+# Xcode user data
+xcuserdata/
+*.xcuserdatad/
+
+# Derived data and build artifacts
+DerivedData/
+build/
+
+# SwiftPM
+.swiftpm/
+.build/
+
+# macOS
+.DS_Store
+
+# Local signing override (do not commit your personal team/profile)
+Configs/LocalSigning.xcconfig
+
+# Local build scheme (do not commit your personal scheme)
+Privducai.xcodeproj/xcshareddata/xcschemes/Privducai.xcscheme
