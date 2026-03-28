@@ -6,9 +6,13 @@
 //
 
 import SwiftUI
-import AppKit
 import UniformTypeIdentifiers
 import LLMStream
+#if os(macOS)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
@@ -21,6 +25,8 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
     @State private var preanalysisTask: Task<Void, Never>?
+    @State private var settings = AppSettings()
+    @FocusState private var isInputFieldFocused: Bool
 
     private static let llmCustomColorConfig = ColorConfiguration(
         textColor: .black,
@@ -39,6 +45,22 @@ struct ChatView: View {
     @State private var LLMS_cust_config = LLMStreamConfiguration(
         colors: Self.llmCustomColorConfig
     )
+
+    private var controlBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.controlBackgroundColor)
+        #else
+        return Color(UIColor.secondarySystemBackground)
+        #endif
+    }
+
+    private var textBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.textBackgroundColor)
+        #else
+        return Color(UIColor.systemBackground)
+        #endif
+    }
 
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
@@ -59,6 +81,13 @@ struct ChatView: View {
             contextBoxView
         }
         .padding()
+        #if canImport(UIKit)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissKeyboard()
+            }
+        )
+        #endif
         .fileImporter(
             isPresented: $showFileImporter,
             allowedContentTypes: [.pdf],
@@ -88,7 +117,7 @@ struct ChatView: View {
             Button(action: { startOver() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                    Text("Start Over")
+                    Text(settings.language == .french ? "Nettoyer" : "Start Over")
                         .fontWeight(.medium)
                 }
             }
@@ -104,14 +133,14 @@ struct ChatView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 if chatService.messages.isEmpty {
-                    Text("Start a chat conversation with the foundation model.")
+                    Text(settings.language == .french ? "Commencez une conversation de chat avec le modèle." : "Start a chat conversation with the foundation model.")
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
                 ForEach(chatService.messages) { message in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(message.role == .user ? "You" : "Assistant")
+                        Text(message.role == .user ? settings.language == .french ? "Vous" : "You" : settings.language == .french ? "Assistant" : "Assistant")
                             .font(.caption)
                             .foregroundColor(.secondary)
                         renderedMessageContent(message)
@@ -121,7 +150,7 @@ struct ChatView: View {
                     .background(
                         message.role == .user
                         ? Color.accentColor.opacity(0.15)
-                        : Color(NSColor.controlBackgroundColor)
+                        : controlBackgroundColor
                     )
                     .cornerRadius(10)
                     .frame(
@@ -143,7 +172,7 @@ struct ChatView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.textBackgroundColor))
+        .background(textBackgroundColor)
         .cornerRadius(10)
     }
 
@@ -153,11 +182,19 @@ struct ChatView: View {
         if message.role == .assistant {
             LLMStreamView(text: message.content, configuration: LLMS_cust_config) { urlString in
                 guard let url = URL(string: urlString) else { return }
-                NSWorkspace.shared.open(url)
+                openExternalURL(url)
             }
         } else {
             Text(message.content)
         }
+    }
+
+    private func openExternalURL(_ url: URL) {
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif canImport(UIKit)
+        UIApplication.shared.open(url)
+        #endif
     }
 
     /// Renders input area and send action.
@@ -166,6 +203,7 @@ struct ChatView: View {
             TextField("Type a message", text: $messageInput, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.roundedBorder)
+                .focused($isInputFieldFocused)
                 .onSubmit {
                     submitMessage()
                 }
@@ -238,6 +276,7 @@ struct ChatView: View {
                     )
                 )
                 .textFieldStyle(.roundedBorder)
+                .focused($isInputFieldFocused)
             case .pdf:
                 if case .pdf(let url) = source.kind {
                     Text(url?.lastPathComponent ?? "PDF")
@@ -259,7 +298,7 @@ struct ChatView: View {
             .buttonStyle(.plain)
         }
         .padding(8)
-        .background(Color(NSColor.textBackgroundColor))
+        .background(textBackgroundColor)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
@@ -272,6 +311,10 @@ struct ChatView: View {
 
     /// Validates and dispatches the current text input to the chat service.
     private func submitMessage() {
+        #if canImport(UIKit)
+        dismissKeyboard()
+        #endif
+
         let trimmed = messageInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -438,6 +481,13 @@ struct ChatView: View {
         print("[ChatView][PDFDrop] \(message())")
         #endif
     }
+
+    #if canImport(UIKit)
+    private func dismissKeyboard() {
+        isInputFieldFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    #endif
 
     /// Appends multiple PDFs.
     private func appendPDFSources(_ urls: [URL]) {

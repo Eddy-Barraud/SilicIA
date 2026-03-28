@@ -8,6 +8,8 @@
 import SwiftUI
 #if os(macOS)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 
 @main
@@ -15,6 +17,7 @@ import AppKit
 struct SilicIAApp: App {
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
+    @Environment(\.scenePhase) private var scenePhase
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
@@ -26,6 +29,11 @@ struct SilicIAApp: App {
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }
+#if canImport(UIKit)
+                .onAppear {
+                    ensureIdleTimerAllowsSleep()
+                }
+#endif
 #if os(macOS)
                 .onAppear {
                     appDelegate.onOpenURLs = { urls in
@@ -42,10 +50,23 @@ struct SilicIAApp: App {
                 }
 #endif
         }
+#if canImport(UIKit)
+        .onChange(of: scenePhase) {
+            if scenePhase == .active {
+                ensureIdleTimerAllowsSleep()
+            }
+        }
+#endif
         #if os(macOS)
             .defaultSize(width: 1284, height: 1662)
         #endif
     }
+
+#if canImport(UIKit)
+    private func ensureIdleTimerAllowsSleep() {
+        UIApplication.shared.isIdleTimerDisabled = false
+    }
+#endif
 
     /// Routes incoming shared URLs and files to chat context.
     private func handleIncomingURL(_ url: URL) {

@@ -11,7 +11,11 @@ import FoundationModels
 import PDFKit
 import NaturalLanguage
 import Vision
+#if os(macOS)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 /// Service layer that orchestrates retrieval-augmented chat generation.
 @MainActor
@@ -285,7 +289,12 @@ final class ChatService: ObservableObject {
             height: max(1, pageSize.height * scale)
         )
         let image = page.thumbnail(of: targetSize, for: .mediaBox)
-        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+        #if os(macOS)
+        let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #else
+        let cgImage = image.cgImage
+        #endif
+        guard let cgImage else {
             return nil
         }
 

@@ -6,8 +6,12 @@
 //
 
 import SwiftUI
-import AppKit
 import LLMStream
+#if os(macOS)
+import AppKit
+#elseif canImport(UIKit)
+import UIKit
+#endif
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
@@ -21,6 +25,7 @@ struct SearchView: View {
     @State private var showingSummary = false
     @State private var isNoAIMode = false
     @State private var errorMessage: String?
+    @FocusState private var isSearchFieldFocused: Bool
 
     // Settings
     @State private var settings = AppSettings()
@@ -48,6 +53,30 @@ struct SearchView: View {
     @State private var LLMS_cust_config = LLMStreamConfiguration(
         colors: Self.llmCustomColorConfig
     )
+
+    private var windowBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.windowBackgroundColor)
+        #else
+        return Color(UIColor.systemBackground)
+        #endif
+    }
+
+    private var controlBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.controlBackgroundColor)
+        #else
+        return Color(UIColor.secondarySystemBackground)
+        #endif
+    }
+
+    private var textBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.textBackgroundColor)
+        #else
+        return Color(UIColor.tertiarySystemBackground)
+        #endif
+    }
 
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
@@ -77,8 +106,15 @@ struct SearchView: View {
                 emptyStateView
             }
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(windowBackgroundColor)
         .animation(.easeInOut, value: showSettings)
+        #if canImport(UIKit)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                dismissKeyboard()
+            }
+        )
+        #endif
     }
 
     // MARK: - Header View
@@ -87,7 +123,7 @@ struct SearchView: View {
             Button(action: { goHome() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                    Text(settings.language == .french ? "Recommencer" : "Start Over")
+                    Text(settings.language == .french ? "Nettoyer" : "Start Over")
                         .fontWeight(.medium)
                 }
             }
@@ -103,31 +139,42 @@ struct SearchView: View {
             .buttonStyle(.plain)
         }
         .padding()
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(controlBackgroundColor)
     }
 
     // MARK: - Search Bar View
     private var searchBarView: some View {
-        HStack {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.secondary)
+        VStack(spacing: 10) {
+            HStack {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
 
-            TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .font(.body)
-                .onSubmit {
-                    performSearch()
-                }
+                TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.body)
+                    .focused($isSearchFieldFocused)
+                    .submitLabel(.search)
+                    #if canImport(UIKit)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+                    #endif
+                    .onSubmit {
+                        performSearch()
+                    }
 
-            if !searchQuery.isEmpty {
-                Button(action: { searchQuery = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.secondary)
+                if !searchQuery.isEmpty {
+                    Button(action: { searchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(10)
+            .background(controlBackgroundColor)
+            .cornerRadius(8)
 
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true, generationProfile: .fast) }) {
                     Label(
                         "No AI",
@@ -136,28 +183,31 @@ struct SearchView: View {
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
-                    Text(settings.language == .french ? "Rechercher" : "Search")
+                    Text(settings.language == .french ? "Go" : "Search")
                         .fontWeight(.medium)
                 }
                 .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
                 Button(action: { performSearch(maxResults: 10, maxScrapingChars: 7000, generationProfile: .deep) }) {
                     Label(
-                        settings.language == .french ? "Approfondi" : "Deep",
+                        settings.language == .french ? "Deep" : "Deep",
                         systemImage: "sparkle.magnifyingglass"
                     )
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
             }
         }
         .padding()
-        .background(Color(NSColor.textBackgroundColor))
+        .background(textBackgroundColor)
         .cornerRadius(10)
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -225,7 +275,7 @@ struct SearchView: View {
                 
                 LLMStreamView(text: aiService.summary, configuration: LLMS_cust_config) { urlString in
                     guard let url = URL(string: urlString) else { return }
-                    NSWorkspace.shared.open(url)
+                    openExternalURL(url)
                 }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -408,9 +458,24 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(controlBackgroundColor)
         .cornerRadius(12)
     }
+
+    private func openExternalURL(_ url: URL) {
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif canImport(UIKit)
+        UIApplication.shared.open(url)
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private func dismissKeyboard() {
+        isSearchFieldFocused = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+    #endif
 
     // MARK: - Empty State View
     private var emptyStateView: some View {
@@ -430,6 +495,10 @@ struct SearchView: View {
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
     private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
+        #if canImport(UIKit)
+        dismissKeyboard()
+        #endif
+
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
 
@@ -547,8 +616,16 @@ struct SearchResultCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(platformControlBackgroundColor)
         .cornerRadius(8)
+    }
+
+    private var platformControlBackgroundColor: Color {
+        #if os(macOS)
+        return Color(NSColor.controlBackgroundColor)
+        #else
+        return Color(UIColor.secondarySystemBackground)
+        #endif
     }
 
     /// Extracts a readable host from a URL string.
