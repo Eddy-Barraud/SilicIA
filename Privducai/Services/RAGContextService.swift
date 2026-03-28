@@ -71,7 +71,7 @@ struct RAGSelectionOptions {
     let longChunkCharacterThreshold: Int
     let longChunkBonusScore: Double
 
-    static let `default` = RAGSelectionOptions(
+    nonisolated static let `default` = RAGSelectionOptions(
         contextWindowLimit: 4096,
         avgCharsPerToken: 3,
         instructionTokens: 120,

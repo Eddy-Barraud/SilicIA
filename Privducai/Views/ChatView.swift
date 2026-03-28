@@ -112,7 +112,10 @@ struct ChatView: View {
     @ViewBuilder
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
-            LLMStreamView(text: message.content)
+            LLMStreamView(text: message.content) { urlString in
+                guard let url = URL(string: urlString) else { return }
+                NSWorkspace.shared.open(url)
+            }
         } else {
             Text(message.content)
         }

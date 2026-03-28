@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 import LLMStream
 
 /// Main search experience that fetches web results and generates AI summaries.
@@ -191,7 +192,10 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {
-                LLMStreamView(text: aiService.summary)
+                LLMStreamView(text: aiService.summary) { urlString in
+                    guard let url = URL(string: urlString) else { return }
+                    NSWorkspace.shared.open(url)
+                }
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
