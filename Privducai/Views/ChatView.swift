@@ -22,6 +22,24 @@ struct ChatView: View {
     @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
     @State private var preanalysisTask: Task<Void, Never>?
 
+    private static let llmCustomColorConfig = ColorConfiguration(
+        textColor: .black,
+        backgroundColor: .clear,
+        codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
+        codeBorderColor: .black,
+        linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        thoughtBackgroundColor: Color.gray.opacity(0.8),
+        tableHeaderBackgroundColor: Color.gray.opacity(0.5),
+        tableBorderColor: .black,
+        tableRowEvenColor: .black,
+        tableRowHoverColor: .black,
+        theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        proofBorderColor: .black
+    )
+    @State private var LLMS_cust_config = LLMStreamConfiguration(
+        colors: Self.llmCustomColorConfig
+    )
+
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
         VStack(spacing: 12) {
@@ -112,7 +130,7 @@ struct ChatView: View {
     @ViewBuilder
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
-            LLMStreamView(text: message.content) { urlString in
+            LLMStreamView(text: message.content, configuration: LLMS_cust_config) { urlString in
                 guard let url = URL(string: urlString) else { return }
                 NSWorkspace.shared.open(url)
             }
