@@ -19,6 +19,7 @@ struct ContentView: View {
 
     @State private var selectedTab: AppTab = .searchAssist
     @State private var chatResetID = UUID()
+    @State private var searchResetID = UUID()
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
 
@@ -38,11 +39,35 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .searchAssist:
-                    SearchView()
+                    VStack(spacing: 0) {
+                        HStack {
+                            Spacer()
+                            Button(action: {
+                                // Recreate SearchView to reset its state
+                                searchResetID = UUID()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "arrow.2.circlepath")
+                                    Text("Start Over")
+                                        .fontWeight(.medium)
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            Spacer()
+                        }
+                        .padding()
+                        .background(Color(NSColor.controlBackgroundColor))
+
+                        Divider()
+
+                        SearchView()
+                            .id(searchResetID)
+                    }
                 case .chat:
                     VStack(spacing: 0) {
                         // Chat header with Start Over button
                         HStack {
+                            Spacer()
                             Button(action: {
                                 // Clear any shared context and recreate ChatView to reset conversation
                                 sharedURLs.removeAll()
