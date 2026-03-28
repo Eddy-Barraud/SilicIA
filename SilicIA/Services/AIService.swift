@@ -13,8 +13,24 @@ import FoundationModels
 @MainActor
 /// Generates search summaries using Foundation Models with deterministic fallbacks.
 class AIService: ObservableObject {
+    enum GenerationProfile: String {
+        case fast
+        case deep
+    }
+
     @Published var isSummarizing = false
     @Published var summary: String = ""
+
+    #if DEBUG
+    struct TimingMetric: Identifiable {
+        let id = UUID()
+        let name: String
+        let seconds: Double
+    }
+
+    @Published var debugTimings: [TimingMetric] = []
+    @Published var debugNotes: [String] = []
+    #endif
 
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
@@ -28,21 +44,57 @@ class AIService: ObservableObject {
     private static let avgCharsPerToken = 3
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
+    private static let fastSummaryResponseHardCap = 550
+    private static let deepSummaryResponseHardCap = 700
+    private static let fastSummaryContextUtilizationFactor = 0.50
+    private static let deepSummaryContextUtilizationFactor = 0.65
+    private static let fastSummaryTargetWordCount = 180
+    private static let deepSummaryTargetWordCount = 220
 
     /// Summarize search results using Foundation Models or fallback to NLP.
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
     /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, skipPerPageSummary: Bool = false) async -> String {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false) async -> String {
         isSummarizing = true
         defer { isSummarizing = false }
 
+        #if DEBUG
+        debugTimings = []
+        debugNotes = []
+        let summarizeStart = Date()
+        #endif
+
         // Scrape content from top pages
         let urls = results.map { $0.url }
-        let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
+        let scrapedContent: [String: String]
+        #if DEBUG
+        let scrapeStart = Date()
+        scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
+        debugTimings.append(TimingMetric(
+            name: "WebScrapingService.scrapeMultiplePages",
+            seconds: Date().timeIntervalSince(scrapeStart)
+        ))
+        if let stats = webScraper.lastDebugStats {
+            if stats.candidateURLCount <= stats.requestedLimit {
+                debugNotes.append(
+                    "overfetch unavailable: candidates (\(stats.candidateURLCount)) <= requested (\(stats.requestedLimit))"
+                )
+            }
+            debugNotes.append(
+                "scrape stats: requested=\(stats.requestedLimit), candidates=\(stats.candidateURLCount), launched=\(stats.launchedTasks), completed=\(stats.completedTasks), succeeded=\(stats.succeededPages), canceled=\(stats.canceledTasks), pool=\(stats.poolSize), overfetch=+\(stats.overfetchCount), earlyCancel=\(stats.didEarlyCancel)"
+            )
+            debugNotes.append(String(format: "scrape elapsed (service): %.3f s", stats.elapsedSeconds))
+        }
+        #else
+        scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
+        #endif
 
         _ = skipPerPageSummary
         var chunks: [RAGChunk] = []
+        #if DEBUG
+        let contextPrepStart = Date()
+        #endif
         for result in results {
             if let pageContent = scrapedContent[result.url] {
                 let chunked = ragChunker.chunk(
@@ -64,74 +116,84 @@ class AIService: ObservableObject {
                 chunks.append(contentsOf: chunked)
             }
         }
+
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
             maxResponseTokens: maxTokens
         )
 
+        #if DEBUG
+        debugTimings.append(TimingMetric(
+            name: "RAG context prep (chunk + select)",
+            seconds: Date().timeIntervalSince(contextPrepStart)
+        ))
+        #endif
+
         // Try Foundation Models first, fallback to NLP if it fails
+        #if DEBUG
+        let generationStart = Date()
+        #endif
         let summary = await generateSummaryWithFoundationModels(
             query: query,
             context: selected.selectedContext,
             results: results,
             temperature: temperature,
             maxTokens: maxTokens,
-            language: language
+            language: language,
+            profile: profile
         )
+
+        #if DEBUG
+        debugTimings.append(TimingMetric(
+            name: "generateSummaryWithFoundationModels",
+            seconds: Date().timeIntervalSince(generationStart)
+        ))
+        #endif
         let withCitations = summary + RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
+
+        #if DEBUG
+        debugTimings.append(TimingMetric(
+            name: "AIService.summarize (total)",
+            seconds: Date().timeIntervalSince(summarizeStart)
+        ))
+        #endif
 
         self.summary = withCitations
         return withCitations
     }
 
-    /// Builds dynamic instructions matching the user's query language (French or English).
-    private func buildInstructions(for userMessage: String) -> String {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(userMessage)
-        let language = recognizer.dominantLanguage
-
+    /// Builds compact instructions for the selected response language.
+    private func buildInstructions(for language: ModelLanguage) -> String {
         if language == .french {
             return """
-            Vous êtes un assistant IA utile qui fournit des résumés concis et précis des résultats de recherche web.
-            Votre tâche est d'analyser le contenu web fourni et de générer un résumé clair et informatif qui répond directement à la requête de l'utilisateur.
-
-            Directives :
-            - Soyez concis mais complet
-            - Concentrez-vous sur les informations les plus pertinentes
-            - Incluez les faits et détails clés
-            - Maintenez la précision
-            - Utilisez un langage clair et facile à comprendre
-            - Symboles et maths encapsulée par $...$
-            - Expressions mathématique générale encapsulée par \\[...\\]
-            Répondez dans la même langue que la question de l'utilisateur (ici: français).
+            Tu produis un résumé web précis et concis.
+            Réponds en français.
+            Donne une réponse directe, puis 1 à 3 points clés.
+            Si une information est incertaine, indique-le clairement.
             """
         }
 
         return """
-        You are a helpful AI assistant that provides concise, accurate summaries of web search results.
-        Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
-
-        Guidelines:
-        - Be concise but comprehensive
-        - Focus on the most relevant information
-        - Include key facts and details
-        - Maintain accuracy
-        - Use clear, easy-to-understand language
-        - Symbols and math encapsulated using $...$
-        - Display math using \\[...\\]
-        Respond in the same language as the user's latest question.
+        You produce concise, accurate web summaries.
+        Respond in English.
+        Give a direct answer, then 1 to 3 key points.
+        If information is uncertain, state it explicitly.
         """
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
-    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
+    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast) async -> String {
         do {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
-            // Build instructions based on detected query language (French/English)
-            let instructions = buildInstructions(for: query)
+            let instructions = buildInstructions(for: language)
             let session = LanguageModelSession(instructions: instructions)
+
+            let isDeepProfile = profile == .deep
+            let responseHardCap = isDeepProfile ? Self.deepSummaryResponseHardCap : Self.fastSummaryResponseHardCap
+            let contextUtilizationFactor = isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
+            let targetWordCount = isDeepProfile ? Self.deepSummaryTargetWordCount : Self.fastSummaryTargetWordCount
 
             // Token budget for the final summary.
             // Apple on-device Foundation Models have a context window of ~4096 tokens.
@@ -144,14 +206,14 @@ class AIService: ObservableObject {
             let minContextTokens = 300
             let effectiveMaxTokens = min(
                 maxTokens,
+                responseHardCap,
                 AIService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
             )
             let reservedTokens = instructionTokens + promptOverheadTokens + effectiveMaxTokens
             // Apply a 20 % utilization buffer on top of the char-per-token estimate to
             // absorb tokeniser variance (French and other languages can be denser than English).
-            let utilizationFactor = 0.8
             let availableTokens = max(AIService.contextWindowLimit - reservedTokens, 0)
-            let maxContextChars = Int(Double(availableTokens * AIService.avgCharsPerToken) * utilizationFactor)
+            let maxContextChars = Int(Double(availableTokens * AIService.avgCharsPerToken) * contextUtilizationFactor)
             
             // If context fits, use it all; otherwise intelligently select summaries
             var selectedContext: String
@@ -179,40 +241,40 @@ class AIService: ObservableObject {
                 }
             }
 
-            let recognizer = NLLanguageRecognizer()
-            recognizer.processString(query)
-            let isFrench = recognizer.dominantLanguage == .french
+            let isFrench = language == .french
 
             let prompt: String
             if isFrench {
                 prompt = """
-                Requête de l'utilisateur : \(query)
+                Question : \(query)
 
-                Résumés des pages Web :
+                Contexte web :
                 \(selectedContext)
 
-                Veuillez fournir un résumé concis qui répond à la requête de l'utilisateur en fonction des résumés des pages web ci-dessus. Structurez votre réponse avec :
-                1. Une réponse directe à la requête
-                2. Les éléments clés
-                3. Tout contexte important ou mise en garde
-
-                Limitez le résumé à moins de 300 mots.
+                Réponds avec :
+                1. Une réponse directe.
+                2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
+                Limite : ~\(targetWordCount) mots.
                 """
             } else {
                 prompt = """
-                User Query: \(query)
+                Question: \(query)
 
-                Web Page Summaries:
+                Web context:
                 \(selectedContext)
 
-                Please provide a concise summary that answers the user's query based on the above web content. Structure your response with:
-                1. A direct answer to the query
-                2. Key supporting details
-                3. Any important context or caveats
-
-                Keep the summary under 300 words.
+                Respond with:
+                1. A direct answer.
+                2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
+                Limit: about \(targetWordCount) words.
                 """
             }
+
+            #if DEBUG
+            debugNotes.append(
+                "generation profile=\(profile.rawValue), budget: reqTokens=\(maxTokens), effTokens=\(effectiveMaxTokens), contextCharsIn=\(context.count), contextCharsUsed=\(selectedContext.count), promptChars=\(prompt.count)"
+            )
+            #endif
 
             // Configure generation options using the effective (clamped) token limit
             let options = GenerationOptions(

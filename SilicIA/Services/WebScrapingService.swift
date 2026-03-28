@@ -13,14 +13,33 @@ import Combine
 class WebScrapingService: ObservableObject {
     @Published var isScrapingContent = false
 
+    #if DEBUG
+    struct ScrapeDebugStats {
+        let requestedLimit: Int
+        let candidateURLCount: Int
+        let launchedTasks: Int
+        let completedTasks: Int
+        let succeededPages: Int
+        let canceledTasks: Int
+        let poolSize: Int
+        let overfetchCount: Int
+        let didEarlyCancel: Bool
+        let elapsedSeconds: Double
+    }
+
+    @Published var lastDebugStats: ScrapeDebugStats?
+    #endif
+
     private let session: URLSession
+    private static let scrapeConcurrency = 8
+    private static let overfetchCount = 3
 
     /// Creates a scraping session configured for resilient low-overhead requests.
     init() {
         // Configure URLSession for efficient scraping
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest = 5
+        config.waitsForConnectivity = false
         config.requestCachePolicy = .returnCacheDataElseLoad
         self.session = URLSession(configuration: config)
     }
@@ -53,23 +72,78 @@ class WebScrapingService: ObservableObject {
         isScrapingContent = true
         defer { isScrapingContent = false }
 
-        let limitedURLs = Array(urls.prefix(limit))
+        let targetSuccessCount = max(0, limit)
+        guard targetSuccessCount > 0 else { return [:] }
+
+        let fetchCount = targetSuccessCount + Self.overfetchCount
+        let limitedURLs = Array(urls.prefix(fetchCount))
         var results: [String: String] = [:]
+        var urlIterator = limitedURLs.makeIterator()
+        let initialWorkers = min(Self.scrapeConcurrency, limitedURLs.count)
+
+        #if DEBUG
+        let scrapeStart = Date()
+        var launchedTasks = 0
+        var completedTasks = 0
+        var didEarlyCancel = false
+        #endif
 
         await withTaskGroup(of: (String, String?).self) { group in
-            for url in limitedURLs {
+            for _ in 0..<initialWorkers {
+                guard let nextURL = urlIterator.next() else { break }
+                #if DEBUG
+                launchedTasks += 1
+                #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: url, maxCharacters: maxCharacters)
-                    return (url, content)
+                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                    return (nextURL, content)
                 }
             }
 
             for await (url, content) in group {
+                #if DEBUG
+                completedTasks += 1
+                #endif
+
                 if let content = content {
                     results[url] = content
+                    // Keep the fastest successful pages only.
+                    if results.count >= targetSuccessCount {
+                        #if DEBUG
+                        didEarlyCancel = completedTasks < limitedURLs.count
+                        #endif
+                        group.cancelAll()
+                        break
+                    }
+                }
+
+                if let nextURL = urlIterator.next() {
+                    #if DEBUG
+                    launchedTasks += 1
+                    #endif
+                    group.addTask {
+                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                        return (nextURL, content)
+                    }
                 }
             }
         }
+
+        #if DEBUG
+        let canceledTasks = max(launchedTasks - completedTasks, 0)
+        lastDebugStats = ScrapeDebugStats(
+            requestedLimit: targetSuccessCount,
+            candidateURLCount: limitedURLs.count,
+            launchedTasks: launchedTasks,
+            completedTasks: completedTasks,
+            succeededPages: results.count,
+            canceledTasks: canceledTasks,
+            poolSize: Self.scrapeConcurrency,
+            overfetchCount: Self.overfetchCount,
+            didEarlyCancel: didEarlyCancel,
+            elapsedSeconds: Date().timeIntervalSince(scrapeStart)
+        )
+        #endif
 
         return results
     }

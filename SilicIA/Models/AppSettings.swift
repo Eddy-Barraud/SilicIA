@@ -16,13 +16,13 @@ enum ModelLanguage: String, CaseIterable {
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings {
     var maxSearchResults: Int = 5
-    var maxResponseTokens: Int = 1000
+    var maxResponseTokens: Int = 700
     var temperature: Double = 0.3
     var maxScrapingCharacters: Int = 3000
     var language: ModelLanguage = .french
 
     // Value ranges for validation
-    static let maxSearchResultsRange = 3...20
+    static let maxSearchResultsRange = 1...20
     static let maxResponseTokensRange = 500...3000
     static let temperatureRange = 0.0...1.0
     static let maxScrapingCharactersRange = 1000...10000

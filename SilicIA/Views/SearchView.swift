@@ -11,6 +11,8 @@ import LLMStream
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
+    private static let aiSummaryOverfetchResults = 3
+
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
 
@@ -23,6 +25,7 @@ struct SearchView: View {
     // Settings
     @State private var settings = AppSettings()
     @State private var showSettings = false
+    @State private var activeGenerationProfile: AIService.GenerationProfile = .fast
 
     // Generation timer
     @State private var summaryStartTime: Date? = nil
@@ -55,6 +58,14 @@ struct SearchView: View {
             // Search Bar
             searchBarView
 
+            // Settings panel available in every search state
+            if showSettings {
+                settingsPanel
+                    .padding(.horizontal)
+                    .padding(.bottom, 8)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Content
             if searchService.isSearching {
                 loadingView
@@ -67,6 +78,7 @@ struct SearchView: View {
             }
         }
         .background(Color(NSColor.windowBackgroundColor))
+        .animation(.easeInOut, value: showSettings)
     }
 
     // MARK: - Header View
@@ -116,7 +128,7 @@ struct SearchView: View {
             }
 
             HStack(spacing: 6) {
-                Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true) }) {
+                Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true, generationProfile: .fast) }) {
                     Label(
                         "No AI",
                         systemImage: "bolt.fill"
@@ -126,14 +138,14 @@ struct SearchView: View {
                 .buttonStyle(.bordered)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
-                Button(action: { performSearch() }) {
+                Button(action: { performSearch(generationProfile: .fast) }) {
                     Text(settings.language == .french ? "Rechercher" : "Search")
                         .fontWeight(.medium)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
-                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 7000) }) {
+                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 7000, generationProfile: .deep) }) {
                     Label(
                         settings.language == .french ? "Approfondi" : "Deep",
                         systemImage: "sparkle.magnifyingglass"
@@ -219,15 +231,45 @@ struct SearchView: View {
             }
 
             // Generation time shown at the bottom-right once complete
-            if !aiService.isSummarizing, let elapsed = summaryElapsedSeconds {
+            if !aiService.isSummarizing {
                 HStack {
                     Spacer()
-                    let label = settings.language == .french
-                        ? String(format: "Généré en %.1f s", elapsed)
-                        : String(format: "Generated in %.1f s", elapsed)
-                    Text(label)
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+
+                    VStack(alignment: .trailing, spacing: 3) {
+                        if let elapsed = summaryElapsedSeconds {
+                            let label = settings.language == .french
+                                ? String(format: "Généré en %.1f s", elapsed)
+                                : String(format: "Generated in %.1f s", elapsed)
+                            Text(label)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
+                        #if DEBUG
+                        if !aiService.debugTimings.isEmpty {
+                            Text("DEBUG timings")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+
+                            ForEach(aiService.debugTimings) { metric in
+                                Text("\(metric.name): \(String(format: "%.3f s", metric.seconds))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+
+                        if !aiService.debugNotes.isEmpty {
+                            ForEach(aiService.debugNotes, id: \.self) { note in
+                                Text(note)
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                        }
+                        #endif
+                    }
                 }
             }
         }
@@ -268,16 +310,10 @@ struct SearchView: View {
 
                 .padding(.top)
 
-                // Settings Panel
-                if showSettings {
-                    settingsPanel
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
             }
             .padding()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut, value: showSettings)
     }
 
     // MARK: - Settings Panel
@@ -393,7 +429,7 @@ struct SearchView: View {
 
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
-    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, noAIOnly: Bool = false) {
+    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
 
@@ -402,16 +438,30 @@ struct SearchView: View {
         aiService.summary = ""
         showingSummary = false
         isNoAIMode = noAIOnly
+        activeGenerationProfile = generationProfile
+        #if DEBUG
+        aiService.debugTimings = []
+        aiService.debugNotes = []
+        #endif
         
         Task {
             do {
-                searchResults = try await searchService.search(query: searchQuery, maxResults: resultsCount)
+                let searchLimit = noAIOnly
+                    ? resultsCount
+                    : resultsCount + Self.aiSummaryOverfetchResults
+                let fetchedResults = try await searchService.search(query: searchQuery, maxResults: searchLimit)
+                searchResults = Array(fetchedResults.prefix(resultsCount))
                 errorMessage = nil
 
                 // Auto-generate summary only when AI mode is enabled
                 if !noAIOnly && !searchResults.isEmpty && !showingSummary {
                     showingSummary = true
-                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars)
+                    await generateSummary(
+                        maxScrapingResults: resultsCount,
+                        maxScrapingChars: scrapingChars,
+                        summaryResults: fetchedResults,
+                        generationProfile: generationProfile
+                    )
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -426,23 +476,24 @@ struct SearchView: View {
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
             Task {
-                await generateSummary()
+                await generateSummary(generationProfile: activeGenerationProfile)
             }
         }
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         _ = await aiService.summarize(
             query: searchQuery,
-            results: searchResults,
+            results: summaryResults ?? searchResults,
             maxScrapingResults: maxScrapingResults ?? settings.maxSearchResults,
             maxScrapingChars: maxScrapingChars ?? settings.maxScrapingCharacters,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
-            language: settings.language
+            language: settings.language,
+            profile: generationProfile ?? activeGenerationProfile
         )
         if let start = summaryStartTime {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
@@ -459,6 +510,10 @@ struct SearchView: View {
         errorMessage = nil
         summaryStartTime = nil
         summaryElapsedSeconds = nil
+        #if DEBUG
+        aiService.debugTimings = []
+        aiService.debugNotes = []
+        #endif
     }
 }
 
