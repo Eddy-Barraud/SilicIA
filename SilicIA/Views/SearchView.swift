@@ -155,8 +155,8 @@ struct SearchView: View {
                     .focused($isSearchFieldFocused)
                     .submitLabel(.search)
                     #if canImport(UIKit)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
                     #endif
                     .onSubmit {
                         performSearch()

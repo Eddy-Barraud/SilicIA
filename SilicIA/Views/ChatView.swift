@@ -204,6 +204,10 @@ struct ChatView: View {
                 .lineLimit(1...5)
                 .textFieldStyle(.roundedBorder)
                 .focused($isInputFieldFocused)
+                #if canImport(UIKit)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                #endif
                 .onSubmit {
                     submitMessage()
                 }
