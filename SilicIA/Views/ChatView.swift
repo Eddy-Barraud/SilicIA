@@ -16,8 +16,6 @@ import UIKit
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
-    private static let avgCharsPerTokenEstimate = 3
-
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Environment(\.colorScheme) private var colorScheme
@@ -50,7 +48,11 @@ struct ChatView: View {
     }
 
     private var estimatedMaxOutputCharacters: Int {
-        settings.maxResponseTokens * Self.avgCharsPerTokenEstimate
+        TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
+    }
+
+    private var estimatedMaxOutputSentences: Int {
+        TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
     }
 
     /// Renders chat transcript, composer, and context inputs.
@@ -173,8 +175,8 @@ struct ChatView: View {
 
                 Text(
                     settings.language == .french
-                    ? "Sortie max estimée : \(estimatedMaxOutputCharacters) caractères"
-                    : "Estimated max output: \(estimatedMaxOutputCharacters) characters"
+                    ? "Sortie max estimée : ~\(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
+                    : "Estimated max output: ~\(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)

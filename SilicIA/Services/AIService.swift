@@ -39,16 +39,8 @@ class AIService: ObservableObject {
     private var firstGuessSession: LanguageModelSession
     private var firstGuessSessionLanguage: ModelLanguage
 
-    // Apple on-device Foundation Models context window (tokens)
-    private static let contextWindowLimit = 4096
-    // Conservative chars-per-token estimate: French/European text averages ~3 chars per
-    // subword token which is more compact than the ~4 chars typical for English.  Using 3
-    // ensures we stay within budget for the denser language rather than the sparser one.
-    private static let avgCharsPerToken = 3
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
-    private static let fastSummaryResponseHardCap = 550
-    private static let deepSummaryResponseHardCap = 700
     private static let fastSummaryContextUtilizationFactor = 0.50
     private static let deepSummaryContextUtilizationFactor = 0.65
     private static let fastSummaryTargetWordCount = 180
@@ -80,9 +72,10 @@ class AIService: ObservableObject {
                 replacements: ["query": trimmedQuery]
             ) ?? fallbackFirstGuessPrompt(for: trimmedQuery, language: language)
 
+            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
             let options = GenerationOptions(
                 temperature: temperature,
-                maximumResponseTokens: maxTokens
+                maximumResponseTokens: effectiveMaxTokens
             )
 
             let response = try await session.respond(to: prompt, options: options)
@@ -166,10 +159,12 @@ class AIService: ObservableObject {
             }
         }
 
+        let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
-            maxInputTokens: maxTokens
+            requestedOutputTokens: effectiveMaxTokens,
+            contextUtilizationFactor: profile == .deep ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
         )
 
         #if DEBUG
@@ -282,29 +277,14 @@ class AIService: ObservableObject {
             let session = LanguageModelSession(instructions: instructions)
 
             let isDeepProfile = profile == .deep
-            let responseHardCap = isDeepProfile ? Self.deepSummaryResponseHardCap : Self.fastSummaryResponseHardCap
-            let contextUtilizationFactor = isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
             let targetWordCount = isDeepProfile ? Self.deepSummaryTargetWordCount : Self.fastSummaryTargetWordCount
 
             // Token budget for the final summary.
-            // Apple on-device Foundation Models have a context window of ~4096 tokens.
-            // Tokens consumed by: session instructions (~100), prompt template overhead –
-            // query label, section headers, closing instructions (~80), and the response.
-            let instructionTokens = 100
-            let promptOverheadTokens = 80
-            // Ensure maxTokens never crowds out context entirely: reserve at least 300 tokens
-            // for the combined page summaries so the model has something to work with.
-            let minContextTokens = 300
-            let effectiveMaxTokens = min(
-                maxTokens,
-                responseHardCap,
-                AIService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
+            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
+            let maxContextChars = TokenBudgeting.maxContextCharacters(
+                requestedOutputTokens: effectiveMaxTokens,
+                contextUtilizationFactor: isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
             )
-            let reservedTokens = instructionTokens + promptOverheadTokens + effectiveMaxTokens
-            // Apply a 20 % utilization buffer on top of the char-per-token estimate to
-            // absorb tokeniser variance (French and other languages can be denser than English).
-            let availableTokens = max(AIService.contextWindowLimit - reservedTokens, 0)
-            let maxContextChars = Int(Double(availableTokens * AIService.avgCharsPerToken) * contextUtilizationFactor)
             
             // If context fits, use it all; otherwise intelligently select summaries
             var selectedContext: String

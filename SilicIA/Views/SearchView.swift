@@ -66,6 +66,14 @@ struct SearchView: View {
         #endif
     }
 
+    private var estimatedMaxOutputCharacters: Int {
+        TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
+    }
+
+    private var estimatedMaxOutputSentences: Int {
+        TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
+    }
+
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
         VStack(spacing: 0) {
@@ -527,6 +535,14 @@ struct SearchView: View {
                     get: { Double(settings.maxResponseTokens) },
                     set: { settings.maxResponseTokens = Int($0) }
                 ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
+
+                Text(
+                    settings.language == .french
+                    ? "Sortie max estimée : ~\(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
+                    : "Estimated max output: ~\(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
 
             // Max Scraping Characters
@@ -639,7 +655,8 @@ struct SearchView: View {
                 let firstGuessStart = Date()
                 let firstGuess = await aiService.generateFirstGuess(
                     query: trimmedQuery,
-                    language: settings.language
+                    language: settings.language,
+                    maxTokens: settings.maxResponseTokens
                 )
                 guard activeSearchRequestID == requestID else { return }
                 firstGuessText = firstGuess

@@ -30,12 +30,6 @@ final class ChatService: ObservableObject {
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
-    private static let avgCharsPerToken = 3
-    private static let avgCharsPerSentence = 140
-    private static let contextWindowLimit = 4096
-    private static let instructionTokens = 100
-    private static let promptOverheadTokens = 80
-    private static let minContextTokens = 300
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
     // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
@@ -89,14 +83,16 @@ final class ChatService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
-            maxInputTokens: effectiveMaxOutputTokens,)
+            requestedOutputTokens: effectiveMaxOutputTokens,
+            contextUtilizationFactor: 0.8
+        )
         debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) topChunkCount=\(selected.topChunks.count)")
 
         do {
             let instructions = buildInstructions(for: language)
             let session = LanguageModelSession(instructions: instructions)
-            let maxOutputCharacters = effectiveMaxOutputTokens * Self.avgCharsPerToken
-            let maxOutputSentences = max(1, maxOutputCharacters / Self.avgCharsPerSentence)
+            let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
+            let maxOutputSentences = TokenBudgeting.estimatedOutputSentences(forTokens: effectiveMaxOutputTokens)
             let prompt = buildPrompt(
                 for: message,
                 selectedContext: selected.selectedContext,
@@ -368,9 +364,11 @@ final class ChatService: ObservableObject {
 
     /// Clamps requested output tokens to fit the shared 4096-token context window budget.
     private func calculateEffectiveMaxOutputTokens(_ requestedMaxTokens: Int) -> Int {
-        min(
-            requestedMaxTokens,
-            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
+        TokenBudgeting.clampedOutputTokens(
+            requestedMaxTokens: requestedMaxTokens,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens
         )
     }
 
