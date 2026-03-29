@@ -1,5 +1,5 @@
 {
-  "originHash" : "37f6584838fbdbda23e8f9058f70a89fc45433a735ea160065f75d12203c543a",
+  "originHash" : "b140f3f1d712255eeb37b97690b39c645244dd30e74e60408e907a0e2ee00020",
   "pins" : [
     {
       "identity" : "latexswiftui",
@@ -8,6 +8,33 @@
       "state" : {
         "revision" : "c45e0fd45f64923c49c5904a9f9626bc8939f05f",
         "version" : "1.5.0"
+      }
+    },
+    {
+      "identity" : "mathjaxswift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/colinc86/MathJaxSwift",
+      "state" : {
+        "revision" : "e23d6eab941da699ac4a60fb0e60f3ba5c937459",
+        "version" : "3.4.0"
+      }
+    },
+    {
+      "identity" : "swift-html-entities",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Kitura/swift-html-entities",
+      "state" : {
+        "revision" : "d8ca73197f59ce260c71bd6d7f6eb8bbdccf508b",
+        "version" : "4.0.1"
+      }
+    },
+    {
+      "identity" : "swiftdraw",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swhitty/SwiftDraw",
+      "state" : {
+        "revision" : "776456051ea2b099343e18ed8a53fca9dd2e9807",
+        "version" : "0.27.0"
       }
     }
   ],
