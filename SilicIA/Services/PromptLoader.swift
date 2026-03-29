@@ -45,17 +45,22 @@ struct PromptLoader {
     }
 
     private static func loadPrompt(named name: String) -> String? {
-        guard let url = Bundle.main.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
-              let data = try? Data(contentsOf: url),
-              var prompt = String(data: data, encoding: .utf8) else {
-            return nil
+        let candidateURLs: [URL?] = [
+            Bundle.main.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
+            Bundle.main.url(forResource: name, withExtension: "txt")
+        ]
+
+        for url in candidateURLs.compactMap({ $0 }) {
+            if let data = try? Data(contentsOf: url),
+               var prompt = String(data: data, encoding: .utf8) {
+                if prompt.hasSuffix("\n") {
+                    prompt = String(prompt.dropLast())
+                }
+                return prompt
+            }
         }
 
-        if prompt.hasSuffix("\n") {
-            prompt = String(prompt.dropLast())
-        }
-
-        return prompt
+        return nil
     }
 
     private static func applyReplacements(in raw: String, replacements: [String: String]) -> String {
