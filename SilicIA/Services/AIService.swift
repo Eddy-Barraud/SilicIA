@@ -35,6 +35,8 @@ class AIService: ObservableObject {
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
+    private var firstGuessSession: LanguageModelSession
+    private var firstGuessSessionLanguage: ModelLanguage
 
     // Apple on-device Foundation Models context window (tokens)
     private static let contextWindowLimit = 4096
@@ -51,6 +53,13 @@ class AIService: ObservableObject {
     private static let fastSummaryTargetWordCount = 180
     private static let deepSummaryTargetWordCount = 220
 
+    init(initialFirstGuessLanguage: ModelLanguage = .french) {
+        self.firstGuessSessionLanguage = initialFirstGuessLanguage
+        self.firstGuessSession = LanguageModelSession(
+            instructions: Self.buildFirstGuessInstructions(for: initialFirstGuessLanguage)
+        )
+    }
+
     /// Generates a tiny no-context intuition to provide immediate feedback.
     func generateFirstGuess(
         query: String,
@@ -62,7 +71,7 @@ class AIService: ObservableObject {
         guard !trimmedQuery.isEmpty else { return "" }
 
         do {
-            let session = LanguageModelSession(instructions: buildFirstGuessInstructions(for: language))
+            let session = firstGuessSession(for: language)
             let prompt: String
             if language == .french {
                 prompt = """
@@ -237,7 +246,7 @@ class AIService: ObservableObject {
     }
 
     /// Builds instructions for an ultra-short first-guess response.
-    private func buildFirstGuessInstructions(for language: ModelLanguage) -> String {
+    private static func buildFirstGuessInstructions(for language: ModelLanguage) -> String {
         if language == .french {
             return """
             Vous êtes un assistant de chat utile. Répondez clairement et précisément.
@@ -249,6 +258,18 @@ class AIService: ObservableObject {
         You are a helpful chat assistant. Answer the user clearly and accurately.
         Respond in english.
         """
+    }
+
+    /// Returns a long-lived first-guess session and rebuilds it when language changes.
+    private func firstGuessSession(for language: ModelLanguage) -> LanguageModelSession {
+        if language != firstGuessSessionLanguage {
+            firstGuessSessionLanguage = language
+            firstGuessSession = LanguageModelSession(
+                instructions: Self.buildFirstGuessInstructions(for: language)
+            )
+        }
+
+        return firstGuessSession
     }
 
     /// Fallback guess used when on-device generation is unavailable.
@@ -333,9 +354,10 @@ class AIService: ObservableObject {
                 1. Une réponse directe.
                 2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
                 Limite : ~\(targetWordCount) mots.
-                Quand c'est pertinent, inclus des formules mathématiques en LaTeX simple.
+                Réponds en format Markdown.
+                Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
                 Format math attendu: inline avec $...$ et blocs avec \\[...\\].
-                N'utilise jamais d'environnements \\begin{...}.
+                N'utilise jamais d'environnements \\begin{.
                 """
             } else {
                 prompt = """
@@ -348,9 +370,10 @@ class AIService: ObservableObject {
                 1. A direct answer.
                 2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
                 Limit: about \(targetWordCount) words.
+                Answer in Markdown format.
                 When relevant, include mathematical formulas in simple LaTeX.
                 Required math format: use $...$ inline and \\[...\\].
-                Never use environments with \\begin{...}.
+                Never use environments with \\begin{.
                 """
             }
 

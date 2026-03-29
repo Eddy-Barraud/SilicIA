@@ -359,7 +359,7 @@ final class ChatService: ObservableObject {
         - Use $...$ for inline math.
         - Use \\[...\\] for block math.
         - Use simple LaTeX compatible with MathJax/LLMStream.
-        - Never use environments with \\begin{...}.
+        - Never use environments with \\begin{.
         """
     }
 
