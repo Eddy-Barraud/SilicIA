@@ -186,9 +186,27 @@ struct ChatView: View {
     @ViewBuilder
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
-            LaTeX(message.content)
-                .font(.body)
-                .foregroundColor(colorScheme == .dark ? .white : .black)
+            VStack(alignment: .leading, spacing: 8) {
+                LaTeX(message.content)
+                    .font(.body)
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+
+                if let citations = message.citations,
+                   !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Divider()
+
+                    if let attributedCitations = try? AttributedString(markdown: citations) {
+                        Text(attributedCitations)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                            .tint(.accentColor)
+                    } else {
+                        Text(citations)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         } else {
             Text(message.content)
         }

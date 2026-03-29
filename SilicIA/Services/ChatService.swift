@@ -81,8 +81,8 @@ final class ChatService: ObservableObject {
             let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
             let response = try await session.respond(to: prompt, options: options)
             let content = normalizeModelOutput(String(describing: response.content))
-                + RAGCitationFormatter.citationBlock(from: selected.topChunks)
-            messages.append(ChatMessage(role: .assistant, content: content))
+            let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks)
+            messages.append(ChatMessage(role: .assistant, content: content, citations: citations))
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             messages.append(ChatMessage(role: .assistant, content: fallback))
@@ -468,4 +468,11 @@ struct ChatMessage: Identifiable {
     let id = UUID()
     let role: Role
     let content: String
+    let citations: String?
+
+    init(role: Role, content: String, citations: String? = nil) {
+        self.role = role
+        self.content = content
+        self.citations = citations
+    }
 }

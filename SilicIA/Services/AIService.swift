@@ -20,6 +20,7 @@ class AIService: ObservableObject {
 
     @Published var isSummarizing = false
     @Published var summary: String = ""
+    @Published var citations: String = ""
 
     #if DEBUG
     struct TimingMetric: Identifiable {
@@ -65,7 +66,7 @@ class AIService: ObservableObject {
         query: String,
         language: ModelLanguage = .french,
         temperature: Double = 0.2,
-        maxTokens: Int = 90
+        maxTokens: Int = 150
     ) async -> String {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return "" }
@@ -102,7 +103,7 @@ class AIService: ObservableObject {
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
     /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false) async -> String {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -197,7 +198,7 @@ class AIService: ObservableObject {
             seconds: Date().timeIntervalSince(generationStart)
         ))
         #endif
-        let withCitations = summary + RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
+        let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
 
         #if DEBUG
         debugTimings.append(TimingMetric(
@@ -206,8 +207,9 @@ class AIService: ObservableObject {
         ))
         #endif
 
-        self.summary = withCitations
-        return withCitations
+        self.summary = summary
+        self.citations = citations
+        return (summary: summary, citations: citations)
     }
 
     /// Builds compact instructions for the selected response language.
@@ -345,7 +347,7 @@ class AIService: ObservableObject {
         }
     }
 
-    /// Builds an extractive fallback summary and appends top source links.
+    /// Builds an extractive fallback summary.
     private func generateConciseSummary(query: String, context: String, results: [SearchResult], language: ModelLanguage = .french) async -> String {
         // For M3 MacBooks without full Apple Intelligence, we'll create an efficient
         // extractive summary that highlights key information
@@ -400,12 +402,6 @@ class AIService: ObservableObject {
                 }
             }
             summaryParts.append("")
-        }
-
-        // Add top sources with links
-        summaryParts.append(isFrench ? "**Principales sources :**" : "**Top Sources:**")
-        for (index, result) in results.prefix(5).enumerated() {
-            summaryParts.append("\(index + 1). \\href{\(result.url)}{\(result.title)}")
         }
 
         return summaryParts.joined(separator: "\n")

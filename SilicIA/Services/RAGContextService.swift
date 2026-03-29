@@ -196,22 +196,24 @@ enum RAGCitationFormatter {
     static func citationBlock(from chunks: [RankedRAGChunk], language: ModelLanguage? = nil) -> String {
         guard !chunks.isEmpty else { return "" }
 
-        let title = "Top sources:"
-        let pageLabel = "PDF Page"
+        let pageLabel = language == .french ? "Page PDF" : "PDF Page"
 
-        let lines = chunks.enumerated().flatMap { index, ranked -> [String] in
-            var row: [String] = []
-            
+        let lines = chunks.enumerated().map { index, ranked -> String in
+            var itemLines: [String] = []
+
             if let url = ranked.chunk.url {
-                row.append("\(index + 1)- \(url) \n")
+                itemLines.append("\(index + 1). [\(url)](\(url))")
+            } else {
+                itemLines.append("\(index + 1). \(ranked.chunk.source)")
             }
+
             if let page = ranked.chunk.pdfPage {
-                row.append("\(index + 1)- Source: \(ranked.chunk.source)")
-                row.append("   \(pageLabel): \(page) \n")
+                itemLines.append("   \(pageLabel): \(page)")
             }
-            return row
+
+            return itemLines.joined(separator: "\n")
         }
 
-        return "\n\n---------\n\n\(title)\n\n" + lines.joined(separator: "\n")
+        return lines.joined(separator: "\n\n")
     }
 }

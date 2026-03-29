@@ -310,6 +310,31 @@ struct SearchView: View {
                         .font(.body)
                         .foregroundColor(colorScheme == .dark ? .white : .black)
                         .frame(maxWidth: .infinity, alignment: .leading)
+
+                    if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Divider()
+                        Text("Top sources")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        if let attributedCitations = try? AttributedString(
+                            markdown: aiService.citations,
+                            options: AttributedString.MarkdownParsingOptions(
+                                interpretedSyntax: .inlineOnlyPreservingWhitespace
+                            )
+                        ) {
+                            Text(attributedCitations)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .tint(.accentColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else {
+                            Text(aiService.citations)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 } else {
                     Text(settings.language == .french ? "Réponse avec contexte web en attente..." : "Waiting for web-context answer...")
                         .foregroundColor(.secondary)
@@ -585,6 +610,7 @@ struct SearchView: View {
         // Clear previous results and state before starting new search
         searchResults = []
         aiService.summary = ""
+        aiService.citations = ""
         firstGuessText = ""
         firstGuessElapsedSeconds = nil
         isGeneratingFirstGuess = false
@@ -686,6 +712,7 @@ struct SearchView: View {
         firstGuessElapsedSeconds = nil
         isGeneratingFirstGuess = false
         aiService.summary = ""
+        aiService.citations = ""
         errorMessage = nil
         summaryStartTime = nil
         summaryElapsedSeconds = nil
