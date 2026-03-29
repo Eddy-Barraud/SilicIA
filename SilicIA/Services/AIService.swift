@@ -56,7 +56,7 @@ class AIService: ObservableObject {
         query: String,
         language: ModelLanguage = .french,
         temperature: Double = 0.2,
-        maxTokens: Int = 50
+        maxTokens: Int = 90
     ) async -> String {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return "" }
@@ -71,6 +71,8 @@ class AIService: ObservableObject {
                 Réponds de manière courte, précise et factuelle.
                 Réponds en français.
                 Réponds en une phrase maximum.
+                Si pertinent, inclus une expression mathématique courte.
+                Format math attendu: inline avec $...$.
                 """
             } else {
                 prompt = """
@@ -79,6 +81,8 @@ class AIService: ObservableObject {
                 Answer in a short, precise and factual manner.
                 Answer in English.
                 Answer in one sentence maximum.
+                If relevant, include a short mathematical expression.
+                Required math format: use $...$ inline.
                 """
             }
 
@@ -329,6 +333,9 @@ class AIService: ObservableObject {
                 1. Une réponse directe.
                 2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
                 Limite : ~\(targetWordCount) mots.
+                Quand c'est pertinent, inclus des formules mathématiques en LaTeX simple.
+                Format math attendu: inline avec $...$ et blocs avec \\[...\\].
+                N'utilise jamais d'environnements \\begin{...}.
                 """
             } else {
                 prompt = """
@@ -341,6 +348,9 @@ class AIService: ObservableObject {
                 1. A direct answer.
                 2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
                 Limit: about \(targetWordCount) words.
+                When relevant, include mathematical formulas in simple LaTeX.
+                Required math format: use $...$ inline and \\[...\\].
+                Never use environments with \\begin{...}.
                 """
             }
 

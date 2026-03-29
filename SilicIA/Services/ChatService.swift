@@ -80,7 +80,7 @@ final class ChatService: ObservableObject {
             let prompt = buildPrompt(for: message, selectedContext: selected.selectedContext)
             let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
             let response = try await session.respond(to: prompt, options: options)
-            let content = String(describing: response.content)
+            let content = normalizeModelOutput(String(describing: response.content))
                 + RAGCitationFormatter.citationBlock(from: selected.topChunks)
             messages.append(ChatMessage(role: .assistant, content: content))
         } catch {
@@ -354,6 +354,12 @@ final class ChatService: ObservableObject {
         \(userMessage)
 
         Answer in a concise and practical way.
+        When relevant, include mathematical expressions or formulas.
+        Math format requirements:
+        - Use $...$ for inline math.
+        - Use \\[...\\] for block math.
+        - Use simple LaTeX compatible with MathJax/LLMStream.
+        - Never use environments with \\begin{...}.
         """
     }
 
@@ -366,6 +372,17 @@ final class ChatService: ObservableObject {
         }
         
         return content
+    }
+
+    /// Normalizes escaped sequences emitted by the model so Markdown/KaTeX render correctly.
+    private func normalizeModelOutput(_ raw: String) -> String {
+        var normalized = raw
+        normalized = normalized.replacingOccurrences(of: "\\\\", with: "\\")
+        normalized = normalized.replacingOccurrences(of: "\\n", with: "\n")
+        normalized = normalized.replacingOccurrences(of: "\\t", with: "\t")
+        normalized = normalized.replacingOccurrences(of: "\\r", with: "\r")
+        normalized = normalized.replacingOccurrences(of: "\\$", with: "$")
+        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Builds dynamic chat instructions matching the user's query language.
