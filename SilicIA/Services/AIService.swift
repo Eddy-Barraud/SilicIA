@@ -421,7 +421,7 @@ class AIService: ObservableObject {
 
         return """
         You are a helpful chat assistant. Answer the user clearly and accurately.
-        Respond in english.
+        Respond in English.
         """
     }
 
