@@ -18,6 +18,7 @@ import UIKit
 struct ChatView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
+    @Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var chatService = ChatService()
 
@@ -28,8 +29,9 @@ struct ChatView: View {
     @State private var settings = AppSettings()
     @FocusState private var isInputFieldFocused: Bool
 
-    private static let llmCustomColorConfig = ColorConfiguration(
-        textColor: .black,
+    private var llmCustomColorConfig: ColorConfiguration {
+        ColorConfiguration(
+        textColor: colorScheme == .dark ? .white : .black,
         backgroundColor: .clear,
         codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
         codeBorderColor: .black,
@@ -42,9 +44,11 @@ struct ChatView: View {
         theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
         proofBorderColor: .black
     )
-    @State private var LLMS_cust_config = LLMStreamConfiguration(
-        colors: Self.llmCustomColorConfig
-    )
+    }
+
+    private var llmStreamConfig: LLMStreamConfiguration {
+        LLMStreamConfiguration(colors: llmCustomColorConfig)
+    }
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -180,7 +184,7 @@ struct ChatView: View {
     @ViewBuilder
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
-            LLMStreamView(text: message.content, configuration: LLMS_cust_config) { urlString in
+            LLMStreamView(text: message.content, configuration: llmStreamConfig) { urlString in
                 guard let url = URL(string: urlString) else { return }
                 openExternalURL(url)
             }

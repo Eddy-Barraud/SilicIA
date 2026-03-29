@@ -16,6 +16,7 @@ import UIKit
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
+    @Environment(\.colorScheme) private var colorScheme
 
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
@@ -36,8 +37,9 @@ struct SearchView: View {
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
     
-    private static let llmCustomColorConfig = ColorConfiguration(
-        textColor: .black,
+    private var llmCustomColorConfig: ColorConfiguration {
+        ColorConfiguration(
+        textColor: colorScheme == .dark ? .white : .black,
         backgroundColor: .clear,
         codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
         codeBorderColor: .black,
@@ -50,9 +52,11 @@ struct SearchView: View {
         theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
         proofBorderColor: .black
     )
-    @State private var LLMS_cust_config = LLMStreamConfiguration(
-        colors: Self.llmCustomColorConfig
-    )
+    }
+
+    private var llmStreamConfig: LLMStreamConfiguration {
+        LLMStreamConfiguration(colors: llmCustomColorConfig)
+    }
 
     private var windowBackgroundColor: Color {
         #if os(macOS)
@@ -273,7 +277,7 @@ struct SearchView: View {
                     .italic()
             } else if !aiService.summary.isEmpty {
                 
-                LLMStreamView(text: aiService.summary, configuration: LLMS_cust_config) { urlString in
+                LLMStreamView(text: aiService.summary, configuration: llmStreamConfig) { urlString in
                     guard let url = URL(string: urlString) else { return }
                     openExternalURL(url)
                 }
