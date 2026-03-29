@@ -103,10 +103,13 @@ struct RAGSelectionResult {
 /// Shared context selection/relevance service for chat and search.
 actor RAGContextService {
     /// Selects the highest-ranked chunks that fit the context budget.
+    /// - Parameter maxOutputTokens: Requested response-token budget used to compute remaining context space.
+    /// - Parameter contextUtilizationFactor: Optional context budget multiplier.
+    ///   When nil, `options.contextUtilizationFactor` is used.
     func selectContext(
         chunks: [RAGChunk],
         query: String,
-        requestedOutputTokens: Int,
+        maxOutputTokens: Int,
         contextUtilizationFactor: Double? = nil,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
@@ -119,7 +122,7 @@ actor RAGContextService {
 
         let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
         let maxContextChars = calculateMaxContextCharacters(
-            requestedOutputTokens: requestedOutputTokens,
+            maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: utilization,
             options: options
         )
@@ -166,12 +169,12 @@ actor RAGContextService {
     }
 
     private func calculateMaxContextCharacters(
-        requestedOutputTokens: Int,
+        maxOutputTokens: Int,
         contextUtilizationFactor: Double,
         options: RAGSelectionOptions
     ) -> Int {
         TokenBudgeting.maxContextCharacters(
-            requestedOutputTokens: requestedOutputTokens,
+            maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: contextUtilizationFactor,
             instructionTokens: options.instructionTokens,
             promptOverheadTokens: options.promptOverheadTokens,

@@ -83,8 +83,8 @@ final class ChatService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
-            requestedOutputTokens: effectiveMaxOutputTokens,
-            contextUtilizationFactor: 0.8
+            maxOutputTokens: effectiveMaxOutputTokens,
+            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
         debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) topChunkCount=\(selected.topChunks.count)")
 

@@ -72,7 +72,12 @@ class AIService: ObservableObject {
                 replacements: ["query": trimmedQuery]
             ) ?? fallbackFirstGuessPrompt(for: trimmedQuery, language: language)
 
-            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
+            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
+                requestedMaxTokens: maxTokens,
+                instructionTokens: TokenBudgeting.instructionTokens,
+                promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+                minContextTokens: TokenBudgeting.minContextTokens
+            )
             let options = GenerationOptions(
                 temperature: temperature,
                 maximumResponseTokens: effectiveMaxTokens
@@ -159,12 +164,20 @@ class AIService: ObservableObject {
             }
         }
 
-        let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
+        let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
+            requestedMaxTokens: maxTokens,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens
+        )
+        let contextUtilizationFactor = profile == .deep
+            ? Self.deepSummaryContextUtilizationFactor
+            : Self.fastSummaryContextUtilizationFactor
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
-            requestedOutputTokens: effectiveMaxTokens,
-            contextUtilizationFactor: profile == .deep ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
+            maxOutputTokens: effectiveMaxTokens,
+            contextUtilizationFactor: contextUtilizationFactor
         )
 
         #if DEBUG
@@ -280,9 +293,14 @@ class AIService: ObservableObject {
             let targetWordCount = isDeepProfile ? Self.deepSummaryTargetWordCount : Self.fastSummaryTargetWordCount
 
             // Token budget for the final summary.
-            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: maxTokens)
+            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
+                requestedMaxTokens: maxTokens,
+                instructionTokens: TokenBudgeting.instructionTokens,
+                promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+                minContextTokens: TokenBudgeting.minContextTokens
+            )
             let maxContextChars = TokenBudgeting.maxContextCharacters(
-                requestedOutputTokens: effectiveMaxTokens,
+                maxOutputTokens: effectiveMaxTokens,
                 contextUtilizationFactor: isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
             )
             

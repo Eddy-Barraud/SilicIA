@@ -42,7 +42,7 @@ enum TokenBudgeting {
 
     /// Computes how many context characters can be used while preserving room for output.
     static func maxContextCharacters(
-        requestedOutputTokens: Int,
+        maxOutputTokens: Int,
         contextUtilizationFactor: Double,
         instructionTokens: Int = instructionTokens,
         promptOverheadTokens: Int = promptOverheadTokens,
@@ -50,7 +50,7 @@ enum TokenBudgeting {
         avgCharsPerToken: Int = avgCharsPerToken
     ) -> Int {
         let effectiveOutputTokens = clampedOutputTokens(
-            requestedMaxTokens: requestedOutputTokens,
+            requestedMaxTokens: maxOutputTokens,
             instructionTokens: instructionTokens,
             promptOverheadTokens: promptOverheadTokens,
             minContextTokens: minContextTokens
