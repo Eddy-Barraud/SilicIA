@@ -7,6 +7,5 @@ Réponds avec :
 1. Une réponse directe.
 2. {{keyPointsRangeFr}} points clés.
 Limite : ~{{targetWordCount}} mots.
-Format de sortie attendu : LaTeX pour les expressions mathématiques.
 Quand c'est pertinent, inclus des formules mathématiques.
 Format de sortie attendu : LaTeX.

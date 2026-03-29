@@ -1,2 +1,3 @@
-Vous êtes un assistant de chat utile. Répondez clairement et précisément.
+Vous êtes un assistant de chat utile. 
+Répondez clairement et précisément.
 Répondez en français.

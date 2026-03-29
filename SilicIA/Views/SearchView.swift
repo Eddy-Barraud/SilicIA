@@ -39,6 +39,7 @@ struct SearchView: View {
     @State private var firstGuessText = ""
     @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
+    @State private var didCopySummary = false
     
     private var windowBackgroundColor: Color {
         #if os(macOS)
@@ -247,6 +248,24 @@ struct SearchView: View {
                     .fontWeight(.semibold)
 
                 Spacer()
+
+                Button {
+                    let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
+                    guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                    copyPlainTextToClipboard(textToCopy)
+                    didCopySummary = true
+                    Task {
+                        try? await Task.sleep(for: .seconds(1.2))
+                        didCopySummary = false
+                    }
+                } label: {
+                    Image(systemName: didCopySummary ? "checkmark.circle.fill" : "doc.on.doc")
+                        .foregroundColor(didCopySummary ? .green : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(settings.language == .french ? "Copier" : "Copy")
+                .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                 if aiService.isSummarizing || isGeneratingFirstGuess {
                     ProgressView()
                         .scaleEffect(0.8)
@@ -511,6 +530,15 @@ struct SearchView: View {
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
     #endif
+
+    private func copyPlainTextToClipboard(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #elseif canImport(UIKit)
+        UIPasteboard.general.string = text
+        #endif
+    }
 
     // MARK: - Empty State View
     private var emptyStateView: some View {

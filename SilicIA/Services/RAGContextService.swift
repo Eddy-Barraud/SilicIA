@@ -203,7 +203,7 @@ enum RAGCitationFormatter {
             var row: [String] = []
             
             if let url = ranked.chunk.url {
-                row.append("\(index + 1)- \\href{\(url)}{\(url)} \n")
+                row.append("\(index + 1)- \(url) \n")
             }
             if let page = ranked.chunk.pdfPage {
                 row.append("\(index + 1)- Source: \(ranked.chunk.source)")
@@ -212,6 +212,6 @@ enum RAGCitationFormatter {
             return row
         }
 
-        return "\n\n***\n\n\(title)\n\n" + lines.joined(separator: "\n")
+        return "\n\n---------\n\n\(title)\n\n" + lines.joined(separator: "\n")
     }
 }

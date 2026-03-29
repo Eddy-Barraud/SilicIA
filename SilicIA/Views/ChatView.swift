@@ -28,6 +28,7 @@ struct ChatView: View {
     @State private var preanalysisTask: Task<Void, Never>?
     @State private var settings = AppSettings()
     @FocusState private var isInputFieldFocused: Bool
+    @State private var copiedMessageID: ChatMessage.ID?
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -123,9 +124,31 @@ struct ChatView: View {
 
                 ForEach(chatService.messages) { message in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(message.role == .user ? settings.language == .french ? "Vous" : "You" : settings.language == .french ? "Assistant" : "Assistant")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 8) {
+                            Text(message.role == .user ? settings.language == .french ? "Vous" : "You" : settings.language == .french ? "Assistant" : "Assistant")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+
+                            Spacer()
+
+                            if message.role == .assistant {
+                                Button {
+                                    copyPlainTextToClipboard(message.content)
+                                    copiedMessageID = message.id
+                                    Task {
+                                        try? await Task.sleep(for: .seconds(1.2))
+                                        if copiedMessageID == message.id {
+                                            copiedMessageID = nil
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: copiedMessageID == message.id ? "checkmark.circle.fill" : "doc.on.doc")
+                                        .foregroundColor(copiedMessageID == message.id ? .green : .secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .help(settings.language == .french ? "Copier" : "Copy")
+                            }
+                        }
                         renderedMessageContent(message)
                             .textSelection(.enabled)
                     }
@@ -457,6 +480,15 @@ struct ChatView: View {
     private func debugDrop(_ message: @autoclosure () -> String) {
         #if DEBUG
         print("[ChatView][PDFDrop] \(message())")
+        #endif
+    }
+
+    private func copyPlainTextToClipboard(_ text: String) {
+        #if os(macOS)
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        #elseif canImport(UIKit)
+        UIPasteboard.general.string = text
         #endif
     }
 
