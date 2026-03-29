@@ -30,9 +30,14 @@ final class ChatService: ObservableObject {
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
+    private static let avgCharsPerToken = 3
+    private static let avgCharsPerSentence = 140
+    private static let contextWindowLimit = 4096
+    private static let instructionTokens = 100
+    private static let promptOverheadTokens = 80
+    private static let minContextTokens = 300
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
-    private static let maxWebScrapeCharacters = 8000
     // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
@@ -40,13 +45,20 @@ final class ChatService: ObservableObject {
     private static let pdfChunkOverlapTokens = 30
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
-    // Response budget for chat generation while preserving room for retrieved context.
-    private static let chatResponseTokens = 700
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
+    private var preAnalyzedMaxScrapingCharacters: Int?
 
     /// Sends a user message and appends the assistant response.
-    func sendMessage(_ message: String, contextInput: String, pdfURLs: [URL]) async {
+    func sendMessage(
+        _ message: String,
+        contextInput: String,
+        pdfURLs: [URL],
+        language: ModelLanguage,
+        temperature: Double,
+        maxResponseTokens: Int,
+        maxScrapingCharacters: Int
+    ) async {
         messages.append(ChatMessage(role: .user, content: message))
         errorMessage = nil
 
@@ -55,33 +67,47 @@ final class ChatService: ObservableObject {
 
         let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
         let hasRequestedContext = !contextKey.isEmpty
+        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
+            && maxScrapingCharacters == preAnalyzedMaxScrapingCharacters
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
         let chunks: [RAGChunk]
         if canUsePreAnalyzed {
             chunks = preAnalyzedChunks
         } else {
-            chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
+            chunks = await collectChunks(
+                contextInput: contextInput,
+                pdfURLs: pdfURLs,
+                maxScrapingCharacters: maxScrapingCharacters
+            )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
+            preAnalyzedMaxScrapingCharacters = maxScrapingCharacters
         }
         debugContext("sendMessage collected chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
-            maxResponseTokens: Self.chatResponseTokens
-        )
+            maxInputTokens: effectiveMaxOutputTokens,)
         debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) topChunkCount=\(selected.topChunks.count)")
 
         do {
-            let instructions = buildInstructions(for: message)
+            let instructions = buildInstructions(for: language)
             let session = LanguageModelSession(instructions: instructions)
-            let prompt = buildPrompt(for: message, selectedContext: selected.selectedContext)
-            let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
+            let maxOutputCharacters = effectiveMaxOutputTokens * Self.avgCharsPerToken
+            let maxOutputSentences = max(1, maxOutputCharacters / Self.avgCharsPerSentence)
+            let prompt = buildPrompt(
+                for: message,
+                selectedContext: selected.selectedContext,
+                language: language,
+                maxOutputCharacters: maxOutputCharacters,
+                maxOutputSentences: maxOutputSentences
+            )
+            let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let response = try await session.respond(to: prompt, options: options)
             let content = normalizeModelOutput(String(describing: response.content))
-            let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks)
+            let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
             messages.append(ChatMessage(role: .assistant, content: content, citations: citations))
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
@@ -91,23 +117,33 @@ final class ChatService: ObservableObject {
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
-    func preAnalyzeContext(contextInput: String, pdfURLs: [URL]) async {
+    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], maxScrapingCharacters: Int) async {
         let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
             preAnalyzedChunks = []
+            preAnalyzedMaxScrapingCharacters = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             return
         }
-        if contextKey == preAnalyzedContextKey { return }
+        if contextKey == preAnalyzedContextKey,
+           maxScrapingCharacters == preAnalyzedMaxScrapingCharacters {
+            return
+        }
 
         isAnalyzingContext = true
         contextAnalysisProgress = 0
         debugContext("preAnalyzeContext started for pdfCount=\(pdfURLs.count)")
-        let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs, reportProgress: true)
+        let chunks = await collectChunks(
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            maxScrapingCharacters: maxScrapingCharacters,
+            reportProgress: true
+        )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
+        preAnalyzedMaxScrapingCharacters = maxScrapingCharacters
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -120,10 +156,16 @@ final class ChatService: ObservableObject {
         contextAnalysisProgress = 0
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
+        preAnalyzedMaxScrapingCharacters = nil
     }
 
     /// Collects web and PDF chunks from provided context.
-    private func collectChunks(contextInput: String, pdfURLs: [URL], reportProgress: Bool = false) async -> [RAGChunk] {
+    private func collectChunks(
+        contextInput: String,
+        pdfURLs: [URL],
+        maxScrapingCharacters: Int,
+        reportProgress: Bool = false
+    ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
         if reportProgress {
             isAnalyzingContext = true
@@ -145,7 +187,7 @@ final class ChatService: ObservableObject {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, Self.maxWebContextURLs),
-                maxCharacters: Self.maxWebScrapeCharacters
+                maxCharacters: maxScrapingCharacters
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
@@ -324,8 +366,22 @@ final class ChatService: ObservableObject {
         #endif
     }
 
+    /// Clamps requested output tokens to fit the shared 4096-token context window budget.
+    private func calculateEffectiveMaxOutputTokens(_ requestedMaxTokens: Int) -> Int {
+        min(
+            requestedMaxTokens,
+            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
+        )
+    }
+
     /// Builds the model prompt from recent history and retrieved context.
-    private func buildPrompt(for userMessage: String, selectedContext: String) -> String {
+    private func buildPrompt(
+        for userMessage: String,
+        selectedContext: String,
+        language: ModelLanguage,
+        maxOutputCharacters: Int,
+        maxOutputSentences: Int
+    ) -> String {
         let historyMessages: [ChatMessage]
         if let last = messages.last, last.role == .user, last.content == userMessage {
             historyMessages = Array(messages.dropLast())
@@ -337,15 +393,11 @@ final class ChatService: ObservableObject {
             .suffix(Self.historyMessageLimit)
             .map { item in
                 if item.role == .assistant {
-                    return "Assistant: \(sanitizeAssistantContentForPrompt(item.content))"
+                    return "Assistant: \(sanitizeLaTeXDocumentWrappers(item.content))"
                 }
                 return "User: \(item.content)"
             }
             .joined(separator: "\n")
-
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(userMessage)
-        let language: ModelLanguage = recognizer.dominantLanguage == .french ? .french : .english
 
         return PromptLoader.loadPrompt(
             mode: "normal",
@@ -354,20 +406,45 @@ final class ChatService: ObservableObject {
             replacements: [
                 "history": history,
                 "context": selectedContext,
-                "question": userMessage
+                "question": userMessage,
+                "maxOutputCharacters": "\(maxOutputCharacters)",
+                "maxOutputSentences": "\(maxOutputSentences)"
             ]
-        ) ?? fallbackChatPrompt(history: history, selectedContext: selectedContext, userMessage: userMessage, language: language)
+        ) ?? fallbackChatPrompt(
+            history: history,
+            selectedContext: selectedContext,
+            userMessage: userMessage,
+            language: language,
+            maxOutputCharacters: maxOutputCharacters,
+            maxOutputSentences: maxOutputSentences
+        )
     }
 
-    /// Removes citation blocks from assistant messages before they are reused as conversation history.
-    private func sanitizeAssistantContentForPrompt(_ content: String) -> String {
-        let marker = "\n\n**Top 3 sources :**\n\n"
-        
-        if let range = content.range(of: marker) {
-            return String(content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+    /// Removes full LaTeX document wrappers that the renderer does not expect.
+    private func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let beginRange = cleaned.range(of: "\\begin{document}"),
+           let endRange = cleaned.range(of: "\\end{document}"),
+           beginRange.upperBound <= endRange.lowerBound {
+            cleaned = String(cleaned[beginRange.upperBound..<endRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        
-        return content
+
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(of: "\\begin{document}", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Normalizes escaped sequences emitted by the model so Markdown/KaTeX render correctly.
@@ -382,11 +459,7 @@ final class ChatService: ObservableObject {
     }
 
     /// Builds dynamic chat instructions matching the user's query language.
-    private func buildInstructions(for userMessage: String) -> String {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(userMessage)
-        let language: ModelLanguage = recognizer.dominantLanguage == .french ? .french : .english
-
+    private func buildInstructions(for language: ModelLanguage) -> String {
         return PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
             ?? fallbackChatInstructions(for: language)
     }
@@ -411,7 +484,9 @@ final class ChatService: ObservableObject {
         history: String,
         selectedContext: String,
         userMessage: String,
-        language: ModelLanguage
+        language: ModelLanguage,
+        maxOutputCharacters: Int,
+        maxOutputSentences: Int
     ) -> String {
         if language == .french {
             return """
@@ -425,6 +500,7 @@ final class ChatService: ObservableObject {
             \(userMessage)
 
             Réponds de façon concise et pratique.
+            Limite de sortie : environ \(maxOutputSentences) phrases courtes maximum (environ \(maxOutputCharacters) caractères).
             Quand c'est pertinent, inclus des expressions ou formules mathématiques.
             Format de sortie attendu : LaTeX pour les expressions mathématiques.
             Règles de format math :
@@ -446,6 +522,7 @@ final class ChatService: ObservableObject {
         \(userMessage)
 
         Answer in a concise and practical way.
+        Output limit: about \(maxOutputSentences) short sentences maximum (about \(maxOutputCharacters) characters).
         When relevant, include mathematical expressions or formulas.
         Required output format: LaTeX for mathematical expressions.
         Math format requirements:

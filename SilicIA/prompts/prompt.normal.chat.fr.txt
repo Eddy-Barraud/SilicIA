@@ -8,5 +8,9 @@ Question de l'utilisateur :
 {{question}}
 
 Réponds de façon concise et pratique.
+Limite de sortie : {{maxOutputSentences}} phrases courtes maximum (environ {{maxOutputCharacters}} caractères).
 Quand c'est pertinent, inclus des expressions ou formules mathématiques.
-Format de sortie attendu : LaTeX.
+Format de sortie attendu : texte concis avec du LaTeX léger quand utile.
+Formats math autorisés : inline $...$ et bloc simple \\[...\\].
+N'écris jamais un document LaTeX complet.
+N'utilise jamais \documentclass, \begin{document} ou \end{document}.

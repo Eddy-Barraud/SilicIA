@@ -93,7 +93,8 @@ class AIService: ObservableObject {
                 return fallbackFirstGuess(for: trimmedQuery, language: language)
             }
 
-            return content
+            let sanitized = sanitizeLaTeXDocumentWrappers(content)
+            return sanitized.isEmpty ? fallbackFirstGuess(for: trimmedQuery, language: language) : sanitized
         } catch {
             return fallbackFirstGuess(for: trimmedQuery, language: language)
         }
@@ -168,7 +169,7 @@ class AIService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
-            maxResponseTokens: maxTokens
+            maxInputTokens: maxTokens
         )
 
         #if DEBUG
@@ -243,6 +244,33 @@ class AIService: ObservableObject {
         }
 
         return "Quick intuition: the answer depends on the exact context. I am checking web sources to confirm the key points about \"\(query)\"."
+    }
+
+    /// Removes full LaTeX document wrappers that the renderer does not expect.
+    private func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if let beginRange = cleaned.range(of: "\\begin{document}"),
+           let endRange = cleaned.range(of: "\\end{document}"),
+           beginRange.upperBound <= endRange.lowerBound {
+            cleaned = String(cleaned[beginRange.upperBound..<endRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(
+            of: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+            with: "",
+            options: .regularExpression
+        )
+        cleaned = cleaned.replacingOccurrences(of: "\\begin{document}", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
+
+        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
@@ -352,9 +380,7 @@ class AIService: ObservableObject {
         // For M3 MacBooks without full Apple Intelligence, we'll create an efficient
         // extractive summary that highlights key information
 
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(query)
-        let isFrench = recognizer.dominantLanguage == .french
+        let isFrench = language == .french
 
         // Split context into sentences
         let tokenizer = NLTokenizer(unit: .sentence)

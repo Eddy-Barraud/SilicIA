@@ -2,6 +2,9 @@ Question: {{query}}
 
 Réponds de manière courte, précise et factuelle.
 Réponds en français.
-Réponds en une phrase maximum.
+Réponds en deux phrases maximum.
 Si pertinent, inclus une expression mathématique courte.
-Format de sortie attendu : LaTeX.
+Format de sortie attendu : texte concis avec du LaTeX léger quand utile.
+Formats math autorisés : inline $...$ et bloc simple \\[...\\].
+N'écris jamais un document LaTeX complet.
+N'utilise jamais \documentclass, \begin{document} ou \end{document}.

@@ -106,7 +106,7 @@ actor RAGContextService {
     func selectContext(
         chunks: [RAGChunk],
         query: String,
-        maxResponseTokens: Int,
+        maxInputTokens: Int,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
@@ -116,7 +116,7 @@ actor RAGContextService {
             )
         }
 
-        let maxContextChars = calculateMaxContextCharacters(maxResponseTokens: maxResponseTokens, options: options)
+        let maxContextChars = calculateMaxContextCharacters(maxInputTokens: maxInputTokens, options: options)
 
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(chunks.count)
@@ -159,12 +159,12 @@ actor RAGContextService {
         )
     }
 
-    private func calculateMaxContextCharacters(maxResponseTokens: Int, options: RAGSelectionOptions) -> Int {
-        let effectiveResponseTokens = min(
-            maxResponseTokens,
+    private func calculateMaxContextCharacters(maxInputTokens: Int, options: RAGSelectionOptions) -> Int {
+        let effectiveInputTokens = min(
+            maxInputTokens,
             options.contextWindowLimit - options.instructionTokens - options.promptOverheadTokens - options.minContextTokens
         )
-        let reservedTokens = options.instructionTokens + options.promptOverheadTokens + effectiveResponseTokens
+        let reservedTokens = options.instructionTokens + options.promptOverheadTokens + effectiveInputTokens
         let availableTokens = max(options.contextWindowLimit - reservedTokens, 0)
         return Int(Double(availableTokens * options.avgCharsPerToken) * options.contextUtilizationFactor)
     }

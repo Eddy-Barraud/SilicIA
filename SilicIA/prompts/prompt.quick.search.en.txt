@@ -2,6 +2,9 @@ Question: {{query}}
 
 Answer in a short, precise and factual manner.
 Answer in English.
-Answer in one sentence maximum.
+Answer in two sentences maximum.
 If relevant, include a short mathematical expression.
-Output format : plain LaTeX.
+Output format: concise text with lightweight LaTeX formatting when useful.
+Allowed math formatting: inline $...$ and simple block \\[...\\].
+Never output a full LaTeX document.
+Never use \documentclass, \begin{document}, or \end{document}.

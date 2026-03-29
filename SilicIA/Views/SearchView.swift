@@ -29,7 +29,7 @@ struct SearchView: View {
     @FocusState private var isSearchFieldFocused: Bool
 
     // Settings
-    @State private var settings = AppSettings()
+    @State private var settings = AppSettings.load()
     @State private var showSettings = false
     @State private var activeGenerationProfile: AIService.GenerationProfile = .fast
 
@@ -96,6 +96,12 @@ struct SearchView: View {
         }
         .background(windowBackgroundColor)
         .animation(.easeInOut, value: showSettings)
+        .onAppear {
+            settings = AppSettings.load()
+        }
+        .onChange(of: settings) {
+            settings.save()
+        }
         #if canImport(UIKit)
         .simultaneousGesture(
             TapGesture().onEnded {

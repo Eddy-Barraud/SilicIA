@@ -16,6 +16,8 @@ import UIKit
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
+    private static let avgCharsPerTokenEstimate = 3
+
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Environment(\.colorScheme) private var colorScheme
@@ -26,7 +28,8 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
     @State private var preanalysisTask: Task<Void, Never>?
-    @State private var settings = AppSettings()
+    @State private var settings = AppSettings.load()
+    @State private var showSettings = false
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
 
@@ -46,10 +49,18 @@ struct ChatView: View {
         #endif
     }
 
+    private var estimatedMaxOutputCharacters: Int {
+        settings.maxResponseTokens * Self.avgCharsPerTokenEstimate
+    }
+
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
         VStack(spacing: 12) {
             chatHeaderView
+
+            if showSettings {
+                chatSettingsPanel
+            }
 
             messagesView
 
@@ -83,7 +94,11 @@ struct ChatView: View {
             }
         }
         .onAppear {
+            settings = AppSettings.load()
             mergeSharedInputsIfNeeded()
+        }
+        .onChange(of: settings) {
+            settings.save()
         }
         .onChange(of: sharedURLs) {
             mergeSharedInputsIfNeeded()
@@ -96,8 +111,6 @@ struct ChatView: View {
     /// Renders top-level chat actions.
     private var chatHeaderView: some View {
         HStack {
-            Spacer()
-
             Button(action: { startOver() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
@@ -108,9 +121,83 @@ struct ChatView: View {
             .buttonStyle(.bordered)
 
             Spacer()
+
+            Button(action: { showSettings.toggle() }) {
+                Image(systemName: "gear")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
+    }
+
+    /// Renders chat-specific tuning controls.
+    private var chatSettingsPanel: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text(settings.language == .french ? "Paramètres de chat" : "Chat Settings")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Température de l'IA" : "AI Temperature")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(String(format: "%.2f", settings.temperature))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: $settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Tokens de réponse max" : "Max Response Tokens")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxResponseTokens)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxResponseTokens) },
+                    set: { settings.maxResponseTokens = Int($0) }
+                ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
+
+                Text(
+                    settings.language == .french
+                    ? "Sortie max estimée : \(estimatedMaxOutputCharacters) caractères"
+                    : "Estimated max output: \(estimatedMaxOutputCharacters) characters"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Caractères de scraping max" : "Max Scraping Characters")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxScrapingCharacters)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxScrapingCharacters) },
+                    set: { settings.maxScrapingCharacters = Int($0) }
+                ), in: Double(AppSettings.maxScrapingCharactersRange.lowerBound)...Double(AppSettings.maxScrapingCharactersRange.upperBound), step: 500)
+            }
+        }
+        .padding()
+        .background(controlBackgroundColor)
+        .cornerRadius(12)
     }
 
     /// Renders message history and in-progress state.
@@ -353,7 +440,15 @@ struct ChatView: View {
         }
 
         Task {
-            await chatService.sendMessage(message, contextInput: contextInput, pdfURLs: selectedPDFs)
+            await chatService.sendMessage(
+                message,
+                contextInput: contextInput,
+                pdfURLs: selectedPDFs,
+                language: settings.language,
+                temperature: settings.temperature,
+                maxResponseTokens: settings.maxResponseTokens,
+                maxScrapingCharacters: settings.maxScrapingCharacters
+            )
         }
     }
 
@@ -555,7 +650,11 @@ struct ChatView: View {
         preanalysisTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            await chatService.preAnalyzeContext(contextInput: contextInput, pdfURLs: selectedPDFs)
+            await chatService.preAnalyzeContext(
+                contextInput: contextInput,
+                pdfURLs: selectedPDFs,
+                maxScrapingCharacters: settings.maxScrapingCharacters
+            )
         }
     }
 
