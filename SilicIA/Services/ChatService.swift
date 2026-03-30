@@ -41,6 +41,8 @@ final class ChatService: ObservableObject {
     private static let contextSelectionOutputReserveTokens = 1100
     private static let minWebScrapingCharacters = 1500
     private static let maxWebScrapingCharacters = 12000
+    private static let maxRecentMessagesForWebSearch = 4
+    private static let maxWebSearchQueryLength = 500
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
     private var preAnalyzedContextKey: String?
@@ -209,6 +211,7 @@ final class ChatService: ObservableObject {
 
         let contextURLs = extractURLs(from: contextInput)
         var discoveredURLs: [String] = []
+        // DuckDuckGo discovery is send-time only because it needs the current user query.
         if includeWebSearch && !currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let searchQuery = buildWebSearchQuery(
                 currentMessage: currentMessage,
@@ -269,10 +272,10 @@ final class ChatService: ObservableObject {
     }
 
     private func buildWebSearchQuery(currentMessage: String, contextInput: String) -> String {
-        let recentMessages = messages.suffix(4)
+        let recentMessages = messages.suffix(Self.maxRecentMessagesForWebSearch)
             .filter { $0.role == .user || $0.role == .assistant }
             .map(\.content)
-            .joined(separator: " ")
+            .joined(separator: ". ")
 
         let combined = [
             currentMessage.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -282,7 +285,7 @@ final class ChatService: ObservableObject {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
 
-        return String(combined.prefix(500))
+        return String(combined.prefix(Self.maxWebSearchQueryLength))
     }
 
     private func discoverWebURLs(for query: String) async -> [String] {
@@ -324,7 +327,20 @@ final class ChatService: ObservableObject {
 
     private func deduplicatedURLs(_ urls: [String]) -> [String] {
         var seen = Set<String>()
-        return urls.filter { seen.insert($0).inserted }
+        return urls.filter { url in
+            let normalized = normalizedURLString(url)
+            return seen.insert(normalized).inserted
+        }
+    }
+
+    private func normalizedURLString(_ rawURL: String) -> String {
+        guard var components = URLComponents(string: rawURL) else {
+            return rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        return components.string ?? rawURL.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Extracts unique HTTP(S) URLs from free-form text.
