@@ -37,11 +37,14 @@ final class ChatService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     private static let pdfChunkMaxTokens = 220
     private static let pdfChunkOverlapTokens = 30
+    private static let contextSelectionOutputReserveTokens = 1100
+    private static let minWebScrapingCharacters = 1500
+    private static let maxWebScrapingCharacters = 12000
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
-    private var preAnalyzedMaxScrapingCharacters: Int?
+    private var preAnalyzedMaxContextTokens: Int?
 
     /// Sends a user message and appends the assistant response.
     func sendMessage(
@@ -51,7 +54,7 @@ final class ChatService: ObservableObject {
         language: ModelLanguage,
         temperature: Double,
         maxResponseTokens: Int,
-        maxScrapingCharacters: Int
+        maxContextTokens: Int
     ) async {
         messages.append(ChatMessage(role: .user, content: message))
         errorMessage = nil
@@ -63,7 +66,7 @@ final class ChatService: ObservableObject {
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
-            && maxScrapingCharacters == preAnalyzedMaxScrapingCharacters
+            && maxContextTokens == preAnalyzedMaxContextTokens
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
         let chunks: [RAGChunk]
@@ -73,20 +76,32 @@ final class ChatService: ObservableObject {
             chunks = await collectChunks(
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
-                maxScrapingCharacters: maxScrapingCharacters
+                maxContextTokens: maxContextTokens
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
-            preAnalyzedMaxScrapingCharacters = maxScrapingCharacters
+            preAnalyzedMaxContextTokens = maxContextTokens
         }
         debugContext("sendMessage collected chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
-            maxOutputTokens: effectiveMaxOutputTokens,
+            maxOutputTokens: Self.contextSelectionOutputReserveTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
-        debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) topChunkCount=\(selected.topChunks.count)")
+        let contextTokenCap = clampContextTokens(maxContextTokens)
+        let contextWordEstimate = TokenBudgeting.estimatedContextWords(forTokens: contextTokenCap)
+        let contextCharacterCap = TokenBudgeting.estimatedContextCharacters(forTokens: contextTokenCap)
+        let cappedSelectedContext = String(selected.selectedContext.prefix(contextCharacterCap))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wordLimitedSelectedContext = TokenBudgeting.truncateToApproxWordCount(
+            selected.selectedContext,
+            maxWords: contextWordEstimate
+        )
+        let finalSelectedContext = wordLimitedSelectedContext.count < cappedSelectedContext.count
+            ? wordLimitedSelectedContext
+            : cappedSelectedContext
+        debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) cappedContextChars=\(finalSelectedContext.count) contextTokenCap=\(contextTokenCap) topChunkCount=\(selected.topChunks.count)")
 
         do {
             let instructions = buildInstructions(for: language)
@@ -95,7 +110,7 @@ final class ChatService: ObservableObject {
             let maxOutputSentences = TokenBudgeting.estimatedOutputSentences(forTokens: effectiveMaxOutputTokens)
             let prompt = buildPrompt(
                 for: message,
-                selectedContext: selected.selectedContext,
+                selectedContext: finalSelectedContext,
                 language: language,
                 maxOutputCharacters: maxOutputCharacters,
                 maxOutputSentences: maxOutputSentences
@@ -113,18 +128,18 @@ final class ChatService: ObservableObject {
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
-    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], maxScrapingCharacters: Int) async {
+    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], maxContextTokens: Int) async {
         let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
             preAnalyzedChunks = []
-            preAnalyzedMaxScrapingCharacters = nil
+            preAnalyzedMaxContextTokens = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             return
         }
         if contextKey == preAnalyzedContextKey,
-           maxScrapingCharacters == preAnalyzedMaxScrapingCharacters {
+           maxContextTokens == preAnalyzedMaxContextTokens {
             return
         }
 
@@ -134,12 +149,12 @@ final class ChatService: ObservableObject {
         let chunks = await collectChunks(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
-            maxScrapingCharacters: maxScrapingCharacters,
+            maxContextTokens: maxContextTokens,
             reportProgress: true
         )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
-        preAnalyzedMaxScrapingCharacters = maxScrapingCharacters
+        preAnalyzedMaxContextTokens = maxContextTokens
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -152,14 +167,14 @@ final class ChatService: ObservableObject {
         contextAnalysisProgress = 0
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
-        preAnalyzedMaxScrapingCharacters = nil
+        preAnalyzedMaxContextTokens = nil
     }
 
     /// Collects web and PDF chunks from provided context.
     private func collectChunks(
         contextInput: String,
         pdfURLs: [URL],
-        maxScrapingCharacters: Int,
+        maxContextTokens: Int,
         reportProgress: Bool = false
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
@@ -178,12 +193,13 @@ final class ChatService: ObservableObject {
         let uniquePDFs = Array(Set(pdfURLs))
         let totalWorkItems = max(urls.count + uniquePDFs.count, 1)
         var completedWorkItems = 0
+        let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
 
         if !urls.isEmpty {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, Self.maxWebContextURLs),
-                maxCharacters: maxScrapingCharacters
+                maxCharacters: webScrapingCharacters
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
@@ -370,6 +386,17 @@ final class ChatService: ObservableObject {
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
         )
+    }
+
+    private func clampContextTokens(_ requestedTokens: Int) -> Int {
+        min(max(requestedTokens, AppSettings.maxContextTokensRange.lowerBound), AppSettings.maxContextTokensRange.upperBound)
+    }
+
+    private func webScrapingCharacterBudget(forContextTokens contextTokens: Int) -> Int {
+        let clampedTokens = clampContextTokens(contextTokens)
+        let approxContextChars = TokenBudgeting.estimatedContextCharacters(forTokens: clampedTokens)
+        let scrapeBudget = approxContextChars * 2
+        return min(max(scrapeBudget, Self.minWebScrapingCharacters), Self.maxWebScrapingCharacters)
     }
 
     /// Builds the model prompt from recent history and retrieved context.

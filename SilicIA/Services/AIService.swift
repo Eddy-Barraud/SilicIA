@@ -57,7 +57,7 @@ class AIService: ObservableObject {
     func generateFirstGuess(
         query: String,
         language: ModelLanguage = .french,
-        temperature: Double = 0.2,
+        temperature: Double = 0.3,
         maxTokens: Int = 150
     ) async -> String {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -72,15 +72,9 @@ class AIService: ObservableObject {
                 replacements: ["query": trimmedQuery]
             ) ?? fallbackFirstGuessPrompt(for: trimmedQuery, language: language)
 
-            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
-                requestedMaxTokens: maxTokens,
-                instructionTokens: TokenBudgeting.instructionTokens,
-                promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-                minContextTokens: TokenBudgeting.minContextTokens
-            )
             let options = GenerationOptions(
                 temperature: temperature,
-                maximumResponseTokens: effectiveMaxTokens
+                maximumResponseTokens: maxTokens
             )
 
             let response = try await session.respond(to: prompt, options: options)

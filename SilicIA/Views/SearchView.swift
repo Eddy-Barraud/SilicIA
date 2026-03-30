@@ -74,6 +74,14 @@ struct SearchView: View {
         TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
     }
 
+    private var estimatedMaxContextWords: Int {
+        TokenBudgeting.estimatedContextWords(forTokens: settings.maxContextTokens)
+    }
+
+    private var defaultScrapingCharactersFromContextTokens: Int {
+        max(TokenBudgeting.estimatedContextCharacters(forTokens: settings.maxContextTokens) * 2, 1500)
+    }
+
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
         VStack(spacing: 0) {
@@ -545,20 +553,28 @@ struct SearchView: View {
                 .foregroundColor(.secondary)
             }
 
-            // Max Scraping Characters
+            // Max Context Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Caractères de scraping max" : "Max Scraping Characters")
+                    Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(settings.maxScrapingCharacters)")
+                    Text("\(settings.maxContextTokens)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Slider(value: Binding(
-                    get: { Double(settings.maxScrapingCharacters) },
-                    set: { settings.maxScrapingCharacters = Int($0) }
-                ), in: Double(AppSettings.maxScrapingCharactersRange.lowerBound)...Double(AppSettings.maxScrapingCharactersRange.upperBound), step: 500)
+                    get: { Double(settings.maxContextTokens) },
+                    set: { settings.maxContextTokens = Int($0) }
+                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(AppSettings.maxContextTokensRange.upperBound), step: 50)
+
+                Text(
+                    settings.language == .french
+                    ? "Contexte estimé : ~\(estimatedMaxContextWords) mots"
+                    : "Estimated context: ~\(estimatedMaxContextWords) words"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
 
             // Model Language
@@ -630,7 +646,7 @@ struct SearchView: View {
         activeSearchRequestID = requestID
 
         let resultsCount = maxResults ?? settings.maxSearchResults
-        let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
+        let scrapingChars = maxScrapingChars ?? defaultScrapingCharactersFromContextTokens
 
         // Clear previous results and state before starting new search
         searchResults = []
@@ -716,7 +732,7 @@ struct SearchView: View {
             query: searchQuery,
             results: summaryResults ?? searchResults,
             maxScrapingResults: maxScrapingResults ?? settings.maxSearchResults,
-            maxScrapingChars: maxScrapingChars ?? settings.maxScrapingCharacters,
+            maxScrapingChars: maxScrapingChars ?? defaultScrapingCharactersFromContextTokens,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,

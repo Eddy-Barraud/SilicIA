@@ -12,6 +12,7 @@ enum TokenBudgeting {
     static let contextWindowLimit = 4096
     static let avgCharsPerToken = 3
     static let avgCharsPerSentence = 140
+    static let avgCharsPerWord = 5
 
     // Shared budget assumptions used by chat/search prompts.
     static let instructionTokens = 100
@@ -38,6 +39,52 @@ enum TokenBudgeting {
 
     static func estimatedOutputSentences(forTokens tokens: Int) -> Int {
         max(1, estimatedOutputCharacters(forTokens: tokens) / avgCharsPerSentence)
+    }
+
+    static func estimatedContextCharacters(forTokens tokens: Int) -> Int {
+        max(tokens, 0) * avgCharsPerToken
+    }
+
+    static func estimatedContextWords(forTokens tokens: Int) -> Int {
+        max(1, estimatedContextCharacters(forTokens: tokens) / avgCharsPerWord)
+    }
+
+    static func estimatedTokens(forApproxWords words: Int) -> Int {
+        max(1, Int((Double(max(words, 0)) * Double(avgCharsPerWord)) / Double(avgCharsPerToken)))
+    }
+
+    static func estimatedContextCharacters(forWords words: Int) -> Int {
+        max(words, 0) * avgCharsPerWord
+    }
+
+    static func truncateToApproxWordCount(_ text: String, maxWords: Int) -> String {
+        guard maxWords > 0 else { return "" }
+        var wordsSeen = 0
+        var inWord = false
+        var cutIndex: String.Index?
+
+        for index in text.indices {
+            let character = text[index]
+            let isWordCharacter = character.isLetter || character.isNumber
+            if isWordCharacter {
+                if !inWord {
+                    wordsSeen += 1
+                    if wordsSeen > maxWords {
+                        cutIndex = index
+                        break
+                    }
+                }
+                inWord = true
+            } else {
+                inWord = false
+            }
+        }
+
+        guard let cutIndex else {
+            return text
+        }
+
+        return String(text[..<cutIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Computes how many context characters can be used while preserving room for output.

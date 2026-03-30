@@ -55,6 +55,10 @@ struct ChatView: View {
         TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
     }
 
+    private var estimatedMaxContextWords: Int {
+        TokenBudgeting.estimatedContextWords(forTokens: settings.maxContextTokens)
+    }
+
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
         VStack(spacing: 12) {
@@ -184,17 +188,25 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Caractères de scraping max" : "Max Scraping Characters")
+                    Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(settings.maxScrapingCharacters)")
+                    Text("\(settings.maxContextTokens)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Slider(value: Binding(
-                    get: { Double(settings.maxScrapingCharacters) },
-                    set: { settings.maxScrapingCharacters = Int($0) }
-                ), in: Double(AppSettings.maxScrapingCharactersRange.lowerBound)...Double(AppSettings.maxScrapingCharactersRange.upperBound), step: 500)
+                    get: { Double(settings.maxContextTokens) },
+                    set: { settings.maxContextTokens = Int($0) }
+                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(AppSettings.maxContextTokensRange.upperBound), step: 50)
+
+                Text(
+                    settings.language == .french
+                    ? "Contexte estimé : ~\(estimatedMaxContextWords) mots"
+                    : "Estimated context: ~\(estimatedMaxContextWords) words"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
         }
         .padding()
@@ -449,7 +461,7 @@ struct ChatView: View {
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
-                maxScrapingCharacters: settings.maxScrapingCharacters
+                maxContextTokens: settings.maxContextTokens
             )
         }
     }
@@ -655,7 +667,7 @@ struct ChatView: View {
             await chatService.preAnalyzeContext(
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
-                maxScrapingCharacters: settings.maxScrapingCharacters
+                maxContextTokens: settings.maxContextTokens
             )
         }
     }

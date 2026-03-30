@@ -119,7 +119,7 @@ actor RAGContextService {
         }
 
         let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
-        let maxContextChars = calculateMaxContextCharacters(
+        let maxContextChars = await calculateMaxContextCharacters(
             maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: utilization,
             options: options
@@ -170,15 +170,17 @@ actor RAGContextService {
         maxOutputTokens: Int,
         contextUtilizationFactor: Double,
         options: RAGSelectionOptions
-    ) -> Int {
-        TokenBudgeting.maxContextCharacters(
-            maxOutputTokens: maxOutputTokens,
-            contextUtilizationFactor: contextUtilizationFactor,
-            instructionTokens: options.instructionTokens,
-            promptOverheadTokens: options.promptOverheadTokens,
-            minContextTokens: options.minContextTokens,
-            avgCharsPerToken: options.avgCharsPerToken
-        )
+    ) async -> Int {
+        await MainActor.run {
+            TokenBudgeting.maxContextCharacters(
+                maxOutputTokens: maxOutputTokens,
+                contextUtilizationFactor: contextUtilizationFactor,
+                instructionTokens: options.instructionTokens,
+                promptOverheadTokens: options.promptOverheadTokens,
+                minContextTokens: options.minContextTokens,
+                avgCharsPerToken: options.avgCharsPerToken
+            )
+        }
     }
 
     private func relevanceScore(text: String, query: String, options: RAGSelectionOptions) -> Double {
