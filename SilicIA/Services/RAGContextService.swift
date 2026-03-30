@@ -61,7 +61,6 @@ struct RAGChunker {
 
 /// Parameters used to keep retrieved context within the model context window.
 struct RAGSelectionOptions {
-    let contextWindowLimit: Int
     let avgCharsPerToken: Int
     let instructionTokens: Int
     let promptOverheadTokens: Int
@@ -72,11 +71,10 @@ struct RAGSelectionOptions {
     let longChunkBonusScore: Double
 
     nonisolated static let `default` = RAGSelectionOptions(
-        contextWindowLimit: 4096,
-        avgCharsPerToken: 3,
-        instructionTokens: 120,
-        promptOverheadTokens: 120,
-        minContextTokens: 300,
+        avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
+        instructionTokens: TokenBudgeting.instructionTokens,
+        promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+        minContextTokens: TokenBudgeting.minContextTokens,
         contextUtilizationFactor: 0.8,
         minimumFallbackContextCharacters: 200,
         longChunkCharacterThreshold: 300,
@@ -103,10 +101,14 @@ struct RAGSelectionResult {
 /// Shared context selection/relevance service for chat and search.
 actor RAGContextService {
     /// Selects the highest-ranked chunks that fit the context budget.
+    /// - Parameter maxOutputTokens: Requested response-token budget used to compute remaining context space.
+    /// - Parameter contextUtilizationFactor: Optional context budget multiplier.
+    ///   When nil, `options.contextUtilizationFactor` is used.
     func selectContext(
         chunks: [RAGChunk],
         query: String,
-        maxInputTokens: Int,
+        maxOutputTokens: Int,
+        contextUtilizationFactor: Double? = nil,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
@@ -116,7 +118,12 @@ actor RAGContextService {
             )
         }
 
-        let maxContextChars = calculateMaxContextCharacters(maxInputTokens: maxInputTokens, options: options)
+        let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
+        let maxContextChars = await calculateMaxContextCharacters(
+            maxOutputTokens: maxOutputTokens,
+            contextUtilizationFactor: utilization,
+            options: options
+        )
 
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(chunks.count)
@@ -159,14 +166,21 @@ actor RAGContextService {
         )
     }
 
-    private func calculateMaxContextCharacters(maxInputTokens: Int, options: RAGSelectionOptions) -> Int {
-        let effectiveInputTokens = min(
-            maxInputTokens,
-            options.contextWindowLimit - options.instructionTokens - options.promptOverheadTokens - options.minContextTokens
-        )
-        let reservedTokens = options.instructionTokens + options.promptOverheadTokens + effectiveInputTokens
-        let availableTokens = max(options.contextWindowLimit - reservedTokens, 0)
-        return Int(Double(availableTokens * options.avgCharsPerToken) * options.contextUtilizationFactor)
+    private func calculateMaxContextCharacters(
+        maxOutputTokens: Int,
+        contextUtilizationFactor: Double,
+        options: RAGSelectionOptions
+    ) async -> Int {
+        await MainActor.run {
+            TokenBudgeting.maxContextCharacters(
+                maxOutputTokens: maxOutputTokens,
+                contextUtilizationFactor: contextUtilizationFactor,
+                instructionTokens: options.instructionTokens,
+                promptOverheadTokens: options.promptOverheadTokens,
+                minContextTokens: options.minContextTokens,
+                avgCharsPerToken: options.avgCharsPerToken
+            )
+        }
     }
 
     private func relevanceScore(text: String, query: String, options: RAGSelectionOptions) -> Double {

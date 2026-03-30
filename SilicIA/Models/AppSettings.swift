@@ -18,10 +18,26 @@ struct AppSettings: Codable, Equatable {
     var maxSearchResults: Int = 5
     var maxResponseTokens: Int = 700
     var temperature: Double = 0.3
-    var maxScrapingCharacters: Int = 3000
+    var maxContextTokens: Int = 1000
     var language: ModelLanguage = .french
 
     private static let storageKey = "SilicIA.AppSettings"
+    private static let defaultSettings = AppSettings()
+
+    private enum CodingKeys: String, CodingKey {
+        case maxSearchResults
+        case maxResponseTokens
+        case temperature
+        case maxContextTokens
+        case language
+    }
+
+    private enum LegacyCodingKeys: String, CodingKey {
+        case maxContextWords
+        case maxScrapingCharacters
+    }
+
+    init() {}
 
     /// Loads settings from UserDefaults and falls back to defaults if unavailable.
     static func load() -> AppSettings {
@@ -34,6 +50,39 @@ struct AppSettings: Codable, Equatable {
         } catch {
             return AppSettings()
         }
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
+        maxSearchResults = try container.decodeIfPresent(Int.self, forKey: .maxSearchResults)
+            ?? Self.defaultSettings.maxSearchResults
+        maxResponseTokens = try container.decodeIfPresent(Int.self, forKey: .maxResponseTokens)
+            ?? Self.defaultSettings.maxResponseTokens
+        temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+            ?? Self.defaultSettings.temperature
+        language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
+            ?? Self.defaultSettings.language
+
+        if let storedContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens) {
+            maxContextTokens = storedContextTokens
+        } else if let storedContextWords = try legacyContainer.decodeIfPresent(Int.self, forKey: .maxContextWords) {
+            maxContextTokens = max(1, TokenBudgeting.estimatedTokens(forApproxWords: storedContextWords))
+        } else if let legacyScrapeCharacters = try legacyContainer.decodeIfPresent(Int.self, forKey: .maxScrapingCharacters) {
+            // Preserve user intent from older builds where context was configured in characters.
+            maxContextTokens = max(1, legacyScrapeCharacters / TokenBudgeting.avgCharsPerToken)
+        } else {
+            maxContextTokens = Self.defaultSettings.maxContextTokens
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(maxSearchResults, forKey: .maxSearchResults)
+        try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
+        try container.encode(temperature, forKey: .temperature)
+        try container.encode(maxContextTokens, forKey: .maxContextTokens)
+        try container.encode(language, forKey: .language)
     }
 
     /// Persists settings in UserDefaults for future launches.
@@ -49,8 +98,8 @@ struct AppSettings: Codable, Equatable {
     }
 
     // Value ranges for validation
-    static let maxSearchResultsRange = 1...20
-    static let maxResponseTokensRange = 500...3000
-    static let temperatureRange = 0.0...1.0
-    static let maxScrapingCharactersRange = 1000...10000
+    static let maxSearchResultsRange = 1...30
+    static let maxResponseTokensRange = 500...4096
+    static let temperatureRange = 0.3...1.0
+    static let maxContextTokensRange = 300...4096
 }
