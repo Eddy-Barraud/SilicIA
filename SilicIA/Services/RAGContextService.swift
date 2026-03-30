@@ -61,7 +61,6 @@ struct RAGChunker {
 
 /// Parameters used to keep retrieved context within the model context window.
 struct RAGSelectionOptions {
-    let contextWindowLimit: Int
     let avgCharsPerToken: Int
     let instructionTokens: Int
     let promptOverheadTokens: Int
@@ -72,7 +71,6 @@ struct RAGSelectionOptions {
     let longChunkBonusScore: Double
 
     nonisolated static let `default` = RAGSelectionOptions(
-        contextWindowLimit: TokenBudgeting.contextWindowLimit,
         avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
         instructionTokens: TokenBudgeting.instructionTokens,
         promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
