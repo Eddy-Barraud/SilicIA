@@ -8,19 +8,19 @@
 
 /* Begin PBXBuildFile section */
 		36D25B9F2F78168800B52C37 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */; };
-		A1B2C3D42F79000100ABCDEF /* SilicIAWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D12F79000100ABCDEF /* SilicIAWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A1B2C3D42F79000100ABCDEF /* SilicIAWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A1B2C3D12F79000100ABCDEF /* SilicIAWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		A1B2C3D32F79000100ABCDEF /* Embed App Extensions */ = {
+		A1B2C3D32F79000100ABCDEF /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
-				A1B2C3D42F79000100ABCDEF /* SilicIAWidget.appex in Embed App Extensions */,
+				A1B2C3D42F79000100ABCDEF /* SilicIAWidget.appex in Embed Foundation Extensions */,
 			);
-			name = "Embed App Extensions";
+			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -30,6 +30,16 @@
 		A1B2C3D12F79000100ABCDEF /* SilicIAWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SilicIAWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3697DBCA2F7C7ACD0001C265 /* Exceptions for "SilicIAWidget" folder in "SilicIAWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = A1B2C3D02F79000100ABCDEF /* SilicIAWidget */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		36D5D0B62F7190B80090D706 /* SilicIA */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
@@ -38,6 +48,9 @@
 		};
 		A1B2C3D62F79000100ABCDEF /* SilicIAWidget */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3697DBCA2F7C7ACD0001C265 /* Exceptions for "SilicIAWidget" folder in "SilicIAWidget" target */,
+			);
 			path = SilicIAWidget;
 			sourceTree = "<group>";
 		};
@@ -90,7 +103,7 @@
 				36D5D0B02F7190B80090D706 /* Sources */,
 				36D5D0B12F7190B80090D706 /* Frameworks */,
 				36D5D0B22F7190B80090D706 /* Resources */,
-				A1B2C3D32F79000100ABCDEF /* Embed App Extensions */,
+				A1B2C3D32F79000100ABCDEF /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
@@ -429,6 +442,7 @@
 		A1B2C3DB2F79000100ABCDEF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WPBZAUF723;
@@ -450,6 +464,7 @@
 		A1B2C3DC2F79000100ABCDEF /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "-";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = WPBZAUF723;

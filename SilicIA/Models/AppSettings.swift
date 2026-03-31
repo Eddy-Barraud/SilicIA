@@ -18,7 +18,7 @@ struct AppSettings: Codable, Equatable {
     var maxSearchResults: Int = 5
     var maxResponseTokens: Int = 2000
     var temperature: Double = 0.3
-    var maxContextTokens: Int = 4050
+    var maxContextTokens: Int = 3500
     var language: ModelLanguage = .english
 
     private static let storageKey = "SilicIA.AppSettings"
@@ -99,9 +99,9 @@ struct AppSettings: Codable, Equatable {
 
     // Value ranges for validation
     static let maxSearchResultsRange = 1...30
-    static let maxResponseTokensRange = 500...4096
+    static let maxResponseTokensRange = 500...3500
     static let temperatureRange = 0.3...1.0
-    static let maxContextTokensRange = 300...4096
+    static let maxContextTokensRange = 300...3500
 
     private func normalized() -> AppSettings {
         var copy = self
