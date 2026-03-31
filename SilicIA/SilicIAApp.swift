@@ -15,6 +15,7 @@ import AppKit
 struct SilicIAApp: App {
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
+    @State private var pendingSearchQuery: String?
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
@@ -22,7 +23,11 @@ struct SilicIAApp: App {
     /// Declares the app's primary window scene.
     var body: some Scene {
         WindowGroup {
-            ContentView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs)
+            ContentView(
+                sharedURLs: $sharedURLs,
+                sharedPDFs: $sharedPDFs,
+                pendingSearchQuery: $pendingSearchQuery
+            )
                 .onOpenURL { url in
                     handleIncomingURL(url)
                 }
@@ -57,14 +62,27 @@ struct SilicIAApp: App {
 
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            url.scheme?.lowercased() == "SilicIA",
-           let sharedURL = components.queryItems?.first(where: { $0.name == "url" })?.value {
-            sharedURLs.append(sharedURL)
-            return
+           let queryItems = components.queryItems {
+            if (components.host?.lowercased() == "search" || components.path.lowercased().contains("search")),
+               queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value == nil {
+                pendingSearchQuery = ""
+                return
+            }
+            if let searchQuery = queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value,
+               !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                pendingSearchQuery = searchQuery
+                return
+            }
+            if let sharedURL = queryItems.first(where: { $0.name == "url" })?.value,
+               !sharedURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sharedURLs = [sharedURL]
+                return
+            }
         }
 
         let absolute = url.absoluteString
         if absolute.hasPrefix("http://") || absolute.hasPrefix("https://") {
-            sharedURLs.append(absolute)
+            sharedURLs = [absolute]
         }
     }
 }

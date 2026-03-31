@@ -42,13 +42,13 @@ struct AppSettings: Codable, Equatable {
     /// Loads settings from UserDefaults and falls back to defaults if unavailable.
     static func load() -> AppSettings {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return AppSettings()
+            return AppSettings().normalized()
         }
 
         do {
-            return try JSONDecoder().decode(AppSettings.self, from: data)
+            return try JSONDecoder().decode(AppSettings.self, from: data).normalized()
         } catch {
-            return AppSettings()
+            return AppSettings().normalized()
         }
     }
 
@@ -88,7 +88,7 @@ struct AppSettings: Codable, Equatable {
     /// Persists settings in UserDefaults for future launches.
     func save() {
         do {
-            let data = try JSONEncoder().encode(self)
+            let data = try JSONEncoder().encode(normalized())
             UserDefaults.standard.set(data, forKey: Self.storageKey)
         } catch {
             #if DEBUG
@@ -102,4 +102,13 @@ struct AppSettings: Codable, Equatable {
     static let maxResponseTokensRange = 500...4096
     static let temperatureRange = 0.3...1.0
     static let maxContextTokensRange = 300...4096
+
+    private func normalized() -> AppSettings {
+        var copy = self
+        copy.maxSearchResults = min(max(copy.maxSearchResults, Self.maxSearchResultsRange.lowerBound), Self.maxSearchResultsRange.upperBound)
+        copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
+        copy.maxContextTokens = min(max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound), Self.maxContextTokensRange.upperBound)
+        copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
+        return copy
+    }
 }
