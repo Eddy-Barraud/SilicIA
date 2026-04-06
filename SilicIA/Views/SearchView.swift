@@ -205,7 +205,11 @@ struct SearchView: View {
             .cornerRadius(8)
 
             HStack(spacing: 8) {
-                Button(action: { onOfflineQuery?(searchQuery) }) {
+                Button(action: {
+                    let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmedQuery.isEmpty else { return }
+                    onOfflineQuery?(trimmedQuery)
+                }) {
                     Label(
                         "Offline",
                         systemImage: "bolt.fill"
@@ -214,7 +218,7 @@ struct SearchView: View {
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
-                .disabled(searchQuery.isEmpty || searchService.isSearching)
+                .disabled(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching)
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
                     Text(settings.language == .french ? "Go" : "Search")
