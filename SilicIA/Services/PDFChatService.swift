@@ -47,39 +47,49 @@ final class PDFChatService: ObservableObject {
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
 
-    private struct ProcessedPDFData: Sendable {
-        let pageCount: Int
-        let extractedChunks: [RAGChunk]
-    }
-
     /// Loads a PDF and extracts its content into chunks.
     func loadPDF(_ url: URL) async {
-        var document = PDFDocumentInfo(url: url)
-        document.loadingStatus = .loading
-        currentPDF = document
-
         do {
-            let processed = try await Task.detached(priority: .userInitiated) {
-                try await Self.processPDF(at: url)
-            }.value
+            var document = PDFDocumentInfo(url: url)
+            document.loadingStatus = .loading
+            currentPDF = document
 
-            document.pageCount = processed.pageCount
-            document.extractedChunks = processed.extractedChunks
+            guard let pdfDocument = PDFKitDocument(url: url) else {
+                currentPDF?.loadingStatus = .error("Failed to load PDF")
+                return
+            }
+
+            document.pageCount = pdfDocument.pageCount
+            let pageTexts = await extractPDFPageTexts(pdfDocument)
+
+            // Create chunks with page metadata
+            var allChunks: [RAGChunk] = []
+            for (pageIndex, pageText) in pageTexts.enumerated() {
+                if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                    let chunks = ragChunker.chunk(
+                        text: pageText,
+                        source: url.lastPathComponent,
+                        maxChunkTokens: Self.pdfChunkMaxTokens,
+                        overlapTokens: Self.pdfChunkOverlapTokens,
+                        url: nil,
+                        pdfPage: pageIndex + 1
+                    )
+                    allChunks.append(contentsOf: chunks)
+                }
+            }
+
+            document.extractedChunks = allChunks
             document.loadingStatus = .loaded
             currentPDF = document
-            preAnalyzedChunks = processed.extractedChunks
+            preAnalyzedChunks = allChunks
             preAnalyzedContextKey = url.absoluteString
-            preAnalyzedMaxContextTokens = nil
 
             // Reset conversation for new PDF
             resetConversation(keepCurrentPDFContext: true)
-        } catch is CancellationError {
-            currentPDF?.loadingStatus = .error("PDF loading was cancelled")
         } catch {
             currentPDF?.loadingStatus = .error(error.localizedDescription)
         }
     }
-
     /// Sends a user message and appends the assistant response with PDF context.
     func sendMessage(
         _ message: String,
