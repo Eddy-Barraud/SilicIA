@@ -19,6 +19,8 @@ struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
+    let chatService: ChatService
+    let onOfflineQuery: ((String) -> Void)?
 
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
@@ -44,9 +46,16 @@ struct SearchView: View {
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
-    init(initialQuery: String? = nil, onInitialQueryHandled: (() -> Void)? = nil) {
+    init(
+        initialQuery: String? = nil,
+        onInitialQueryHandled: (() -> Void)? = nil,
+        chatService: ChatService,
+        onOfflineQuery: ((String) -> Void)? = nil
+    ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
+        self.chatService = chatService
+        self.onOfflineQuery = onOfflineQuery
     }
     
     private var windowBackgroundColor: Color {
@@ -196,16 +205,20 @@ struct SearchView: View {
             .cornerRadius(8)
 
             HStack(spacing: 8) {
-                Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true, generationProfile: .fast) }) {
+                Button(action: {
+                    let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmedQuery.isEmpty else { return }
+                    onOfflineQuery?(trimmedQuery)
+                }) {
                     Label(
-                        "No AI",
+                        "Offline",
                         systemImage: "bolt.fill"
                     )
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
-                .disabled(searchQuery.isEmpty || searchService.isSearching)
+                .disabled(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching)
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
                     Text(settings.language == .french ? "Go" : "Search")
@@ -872,6 +885,6 @@ struct FeatureRow: View {
 }
 
 #Preview {
-    SearchView()
+    SearchView(chatService: ChatService())
         .frame(width: 800, height: 600)
 }

@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 #if os(macOS)
 import AppKit
 #endif
@@ -50,6 +51,7 @@ struct SilicIAApp: App {
         #if os(macOS)
             .defaultSize(width: 1284, height: 1662)
         #endif
+        .modelContainer(for: [Conversation.self, Message.self])
     }
 
     /// Routes incoming shared URLs and files to chat context.

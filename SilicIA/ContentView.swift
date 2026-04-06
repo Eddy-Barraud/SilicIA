@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 /// Root container that switches between Search Assist and Chat experiences.
 struct ContentView: View {
@@ -18,9 +19,11 @@ struct ContentView: View {
     }
 
     @State private var selectedTab: AppTab = .searchAssist
+    @Environment(\.modelContext) private var modelContext
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
+    @StateObject private var chatService = ChatService()
 
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
@@ -38,11 +41,32 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .searchAssist:
-                    SearchView(initialQuery: pendingSearchQuery, onInitialQueryHandled: {
-                        pendingSearchQuery = nil
-                    })
+                    SearchView(
+                        initialQuery: pendingSearchQuery,
+                        onInitialQueryHandled: {
+                            pendingSearchQuery = nil
+                        },
+                        chatService: chatService,
+                        onOfflineQuery: { query in
+                            selectedTab = .chat
+                            chatService.modelContext = modelContext
+                            Task {
+                                let settings = AppSettings.load()
+                                await chatService.sendMessage(
+                                    query,
+                                    contextInput: "",
+                                    pdfURLs: [],
+                                    includeWebSearch: false,
+                                    language: settings.language,
+                                    temperature: 0.7,
+                                    maxResponseTokens: settings.maxResponseTokens,
+                                    maxContextTokens: settings.maxContextTokens
+                                )
+                            }
+                        }
+                    )
                 case .chat:
-                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs)
+                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs, chatService: chatService)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
