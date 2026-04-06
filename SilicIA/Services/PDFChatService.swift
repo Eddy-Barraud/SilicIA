@@ -47,50 +47,146 @@ final class PDFChatService: ObservableObject {
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
 
+    private struct ProcessedPDFData {
+        let pageCount: Int
+        let extractedChunks: [RAGChunk]
+    }
+
     /// Loads a PDF and extracts its content into chunks.
     func loadPDF(_ url: URL) async {
+        var document = PDFDocumentInfo(url: url)
+        document.loadingStatus = .loading
+        currentPDF = document
+
         do {
-            var document = PDFDocumentInfo(url: url)
-            document.loadingStatus = .loading
-            currentPDF = document
+            let processed = try await Task.detached(priority: .userInitiated) {
+                try await Self.processPDF(at: url)
+            }.value
 
-            guard let pdfDocument = PDFKitDocument(url: url) else {
-                currentPDF?.loadingStatus = .error("Failed to load PDF")
-                return
-            }
-
-            document.pageCount = pdfDocument.pageCount
-            let pageTexts = await extractPDFPageTexts(pdfDocument)
-
-            // Create chunks with page metadata
-            var allChunks: [RAGChunk] = []
-            for (pageIndex, pageText) in pageTexts.enumerated() {
-                if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                    let chunks = ragChunker.chunk(
-                        text: pageText,
-                        source: url.lastPathComponent,
-                        maxChunkTokens: Self.pdfChunkMaxTokens,
-                        overlapTokens: Self.pdfChunkOverlapTokens,
-                        url: nil,
-                        pdfPage: pageIndex + 1
-                    )
-                    allChunks.append(contentsOf: chunks)
-                }
-            }
-
-            document.extractedChunks = allChunks
+            document.pageCount = processed.pageCount
+            document.extractedChunks = processed.extractedChunks
             document.loadingStatus = .loaded
             currentPDF = document
-            preAnalyzedChunks = allChunks
+            preAnalyzedChunks = processed.extractedChunks
             preAnalyzedContextKey = url.absoluteString
 
             // Reset conversation for new PDF
             resetConversation(keepCurrentPDFContext: true)
+        } catch is CancellationError {
+            currentPDF?.loadingStatus = .error("PDF loading was cancelled")
         } catch {
             currentPDF?.loadingStatus = .error(error.localizedDescription)
         }
     }
 
+    private nonisolated static func processPDF(at url: URL) async throws -> ProcessedPDFData {
+        guard let pdfDocument = PDFKitDocument(url: url) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let pageTexts = try await extractPDFPageTexts(from: pdfDocument)
+        let ragChunker = RAGChunker()
+
+        var allChunks: [RAGChunk] = []
+        allChunks.reserveCapacity(pageTexts.count)
+
+        for (pageIndex, pageText) in pageTexts.enumerated() {
+            try Task.checkCancellation()
+
+            if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                let chunks = ragChunker.chunk(
+                    text: pageText,
+                    source: url.lastPathComponent,
+                    maxChunkTokens: Self.pdfChunkMaxTokens,
+                    overlapTokens: Self.pdfChunkOverlapTokens,
+                    url: nil,
+                    pdfPage: pageIndex + 1
+                )
+                allChunks.append(contentsOf: chunks)
+            }
+        }
+
+        return ProcessedPDFData(
+            pageCount: pdfDocument.pageCount,
+            extractedChunks: allChunks
+        )
+    }
+
+    private nonisolated static func extractPDFPageTexts(from pdfDocument: PDFKitDocument) async throws -> [String] {
+        var pageTexts: [String] = []
+        pageTexts.reserveCapacity(pdfDocument.pageCount)
+
+        for pageIndex in 0..<pdfDocument.pageCount {
+            try Task.checkCancellation()
+
+            guard let page = pdfDocument.page(at: pageIndex) else {
+                pageTexts.append("")
+                continue
+            }
+
+            let directText = page.string?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines) ?? ""
+            if !directText.isEmpty {
+                pageTexts.append(directText)
+                continue
+            }
+
+            let ocrText = try await recognizeText(in: renderPageImage(for: page))
+            pageTexts.append(ocrText)
+        }
+
+        return pageTexts
+    }
+
+    private nonisolated static func renderPageImage(for page: PDFPage) -> CGImage? {
+        let imageSize = CGSize(width: 1536, height: 1536)
+
+        #if os(macOS)
+        let image = page.thumbnail(of: imageSize, for: .mediaBox)
+        guard
+            let tiffRepresentation = image.tiffRepresentation,
+            let bitmapRepresentation = NSBitmapImageRep(data: tiffRepresentation)
+        else {
+            return nil
+        }
+        return bitmapRepresentation.cgImage
+        #elseif canImport(UIKit)
+        return page.thumbnail(of: imageSize, for: .mediaBox).cgImage
+        #else
+        return nil
+        #endif
+    }
+
+    private nonisolated static func recognizeText(in cgImage: CGImage?) async throws -> String {
+        guard let cgImage else {
+            return ""
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let request = VNRecognizeTextRequest { request, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                let recognizedText = (request.results as? [VNRecognizedTextObservation])?
+                    .compactMap { $0.topCandidates(1).first?.string }
+                    .joined(separator: "\n") ?? ""
+                continuation.resume(returning: recognizedText)
+            }
+
+            request.recognitionLevel = .accurate
+            request.usesLanguageCorrection = true
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                    try handler.perform([request])
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
     /// Sends a user message and appends the assistant response with PDF context.
     func sendMessage(
         _ message: String,
