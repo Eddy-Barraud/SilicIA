@@ -137,7 +137,7 @@ struct ChatView: View {
             Button(action: { startOver() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                    Text(settings.language == .french ? "New" : "New")
+                    Text(settings.language == .french ? "Nouveau" : "Start Over")
                         .fontWeight(.medium)
                 }
             }
