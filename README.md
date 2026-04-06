@@ -14,6 +14,7 @@ The app bundles context-aware chat experience, scraping web content, analyzing P
 - 🔗 **Direct Links**: Easy access to sources for detailed information
 - 💬 **Tabbed Chat Experience**: Switch between Search Assist and Chat
 - 📎 **Context-Aware Chat**: Add URL and PDF context (including drag-and-drop PDFs) for retrieval-augmented answers
+- 💾 **Chat History**: Persistent conversation storage with SwiftData (inspired by [FoundationChat](https://github.com/Dimillian/FoundationChat))
 - 🔒 **Privacy-First**: No tracking, no data collection
 
 ## Overview
@@ -73,6 +74,8 @@ Results Display
 #### **Models**
 - **SearchResult**: Structures for search results containing title, URL, description
 - **AppSettings**: Configuration for language preference, token limits, and AI parameters
+- **Conversation**: SwiftData model for persistent chat conversations with associated messages
+- **Message**: SwiftData model for individual messages in conversations
 
 #### **Services**
 - **DuckDuckGoService**: Handles privacy-respecting web search queries via DuckDuckGo's instant answer API
@@ -85,6 +88,7 @@ Results Display
 - **ContentView**: Root view managing tab navigation between Search and Chat modes
 - **SearchView**: Search interface with results display and summary toggling
 - **ChatView**: Conversational interface with context attachment support (drag-and-drop PDF support)
+- **ConversationsListView**: Displays saved chat conversations with load and delete capabilities
 
 ## Technical Details
 
@@ -119,12 +123,23 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
 - **Web Scraping**: Extracts full article content for deeper context
 - **RAG Pipeline**: Combines retrieved documents with user queries for context-aware responses
 
+### Chat History
+
+Chat conversations are persistently stored using **SwiftData**, inspired by [FoundationChat](https://github.com/Dimillian/FoundationChat):
+
+- **Conversation Model**: Stores conversation metadata (title, creation date, last update) with cascade delete rule for associated messages
+- **Message Model**: Embeddable within Conversation, stores individual messages with role, content, citations, and timestamp
+- **Auto-Generated Titles**: Conversation titles are automatically generated from the first user message (truncated to 50 characters)
+- **Conversation List**: Browse, load, and delete previous conversations from the History view
+- **Local Persistence**: All chat history stored locally on device; no cloud synchronization
+
 ### Privacy & Security
 
 - Uses DuckDuckGo's privacy-focused search
 - All AI processing happens on-device
 - No user data collection or tracking
 - No external API calls for language processing
+- Chat history stored locally with no cloud transmission
 
 ## Requirements
 
@@ -197,3 +212,4 @@ git clone https://github.com/eddybarraud/SilicIA.git
 
 - Created by Eddy Barraud
 - Uses [LaTeXSwiftUI](https://github.com/colinc86/LaTeXSwiftUI)
+- Chat history implementation inspired by [FoundationChat](https://github.com/Dimillian/FoundationChat)

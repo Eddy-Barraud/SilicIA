@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftData
 import FoundationModels
 import PDFKit
 import NaturalLanguage
@@ -30,6 +31,10 @@ final class ChatService: ObservableObject {
     private let webSearchService = DuckDuckGoService()
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
+
+    // SwiftData persistence
+    var modelContext: ModelContext?
+    private var currentConversation: Conversation?
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
@@ -60,6 +65,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int
     ) async {
         messages.append(ChatMessage(role: .user, content: message))
+        persistMessage(role: "user", content: message, citations: nil)
         errorMessage = nil
 
         isResponding = true
@@ -140,9 +146,11 @@ final class ChatService: ObservableObject {
             let content = normalizeModelOutput(String(describing: response.content))
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
             messages.append(ChatMessage(role: .assistant, content: content, citations: citations))
+            persistMessage(role: "assistant", content: content, citations: citations)
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             messages.append(ChatMessage(role: .assistant, content: fallback))
+            persistMessage(role: "assistant", content: fallback, citations: nil)
             errorMessage = error.localizedDescription
         }
     }
@@ -187,6 +195,7 @@ final class ChatService: ObservableObject {
 
     /// Clears conversation and cached context analysis so a new chat starts cleanly.
     func resetConversation() {
+        finalizeCurrentConversation()
         messages = []
         errorMessage = nil
         isResponding = false
@@ -195,6 +204,7 @@ final class ChatService: ObservableObject {
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
+        currentConversation = nil
     }
 
     /// Collects web and PDF chunks from provided context.
@@ -655,6 +665,72 @@ final class ChatService: ObservableObject {
         - Use simple LaTeX compatible with the app renderer.
         - Never use environments with \\begin{.
         """
+    }
+
+    /// Persists a message to the current SwiftData conversation.
+    private func persistMessage(role: String, content: String, citations: String?) {
+        guard let modelContext else { return }
+
+        // Create conversation if needed
+        if currentConversation == nil {
+            let conv = Conversation(
+                messages: [],
+                title: role == "user" ? generateTitle(from: content) : nil
+            )
+            currentConversation = conv
+            modelContext.insert(conv)
+        }
+
+        guard let conversation = currentConversation else { return }
+
+        // Create and add message
+        let message = Message(role: role, content: content, citations: citations)
+        conversation.messages.append(message)
+        conversation.updatedAt = Date()
+
+        // Save context
+        try? modelContext.save()
+    }
+
+    /// Auto-generates a title from the first user message.
+    private func generateTitle(from content: String) -> String {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxLength = 50
+        if trimmed.count <= maxLength {
+            return trimmed
+        }
+        let index = trimmed.index(trimmed.startIndex, offsetBy: maxLength)
+        return String(trimmed[..<index]) + "..."
+    }
+
+    /// Finalizes the current conversation by auto-generating a title if needed.
+    private func finalizeCurrentConversation() {
+        guard let modelContext, let conversation = currentConversation, !conversation.messages.isEmpty else { return }
+
+        // Auto-generate title from first user message if not set
+        if conversation.title == nil {
+            if let firstUserMessage = conversation.messages.first(where: { $0.role == "user" }) {
+                conversation.title = generateTitle(from: firstUserMessage.content)
+            }
+        }
+
+        try? modelContext.save()
+    }
+
+    /// Loads a previous conversation by ID and syncs it to the UI.
+    func loadConversation(id: UUID) {
+        guard let modelContext else { return }
+
+        // Find the conversation
+        let descriptor = FetchDescriptor<Conversation>(predicate: #Predicate { $0.id == id })
+        guard let conversation = try? modelContext.fetch(descriptor).first else { return }
+
+        currentConversation = conversation
+
+        // Convert SwiftData messages to ChatMessage for UI
+        messages = conversation.messages
+            .sorted { $0.timestamp < $1.timestamp }
+            .map { ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content, citations: $0.citations) }
     }
 }
 

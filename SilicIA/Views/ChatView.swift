@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 import UniformTypeIdentifiers
 import LaTeXSwiftUI
 #if os(macOS)
@@ -19,8 +20,9 @@ struct ChatView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.modelContext) private var modelContext
 
-    @StateObject private var chatService = ChatService()
+    let chatService: ChatService
 
     @State private var messageInput = ""
     @State private var showFileImporter = false
@@ -28,6 +30,7 @@ struct ChatView: View {
     @State private var preanalysisTask: Task<Void, Never>?
     @State private var settings = AppSettings.load()
     @State private var showSettings = false
+    @State private var showHistory = false
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
     @State private var isWebSearchEnabled = false
@@ -62,56 +65,69 @@ struct ChatView: View {
 
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
-        VStack(spacing: 12) {
-            chatHeaderView
+        if showHistory {
+            ConversationsListView(
+                onLoadConversation: { conversation in
+                    chatService.loadConversation(id: conversation.id)
+                    showHistory = false
+                },
+                onDismiss: {
+                    showHistory = false
+                }
+            )
+        } else {
+            VStack(spacing: 12) {
+                chatHeaderView
 
-            if showSettings {
-                chatSettingsPanel
+                if showSettings {
+                    chatSettingsPanel
+                }
+
+                messagesView
+
+                if let errorMessage = chatService.errorMessage {
+                    Text(errorMessage)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                composerView
+
+                contextBoxView
             }
-
-            messagesView
-
-            if let errorMessage = chatService.errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            #if canImport(UIKit)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissKeyboard()
+                }
+            )
+            #endif
+            .fileImporter(
+                isPresented: $showFileImporter,
+                allowedContentTypes: [.pdf],
+                allowsMultipleSelection: true
+            ) { result in
+                guard case .success(let urls) = result else { return }
+                Task { @MainActor in
+                    appendPDFSources(urls)
+                }
             }
-
-            composerView
-
-            contextBoxView
-        }
-        .padding()
-        #if canImport(UIKit)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                dismissKeyboard()
+            .onAppear {
+                settings = AppSettings.load()
+                chatService.modelContext = modelContext
+                mergeSharedInputsIfNeeded()
             }
-        )
-        #endif
-        .fileImporter(
-            isPresented: $showFileImporter,
-            allowedContentTypes: [.pdf],
-            allowsMultipleSelection: true
-        ) { result in
-            guard case .success(let urls) = result else { return }
-            Task { @MainActor in
-                appendPDFSources(urls)
+            .onChange(of: settings) {
+                settings.save()
             }
-        }
-        .onAppear {
-            settings = AppSettings.load()
-            mergeSharedInputsIfNeeded()
-        }
-        .onChange(of: settings) {
-            settings.save()
-        }
-        .onChange(of: sharedURLs) {
-            mergeSharedInputsIfNeeded()
-        }
-        .onChange(of: sharedPDFs) {
-            mergeSharedInputsIfNeeded()
+            .onChange(of: sharedURLs) {
+                mergeSharedInputsIfNeeded()
+            }
+            .onChange(of: sharedPDFs) {
+                mergeSharedInputsIfNeeded()
+            }
         }
     }
 
@@ -121,13 +137,22 @@ struct ChatView: View {
             Button(action: { startOver() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.2.circlepath")
-                    Text(settings.language == .french ? "Nettoyer" : "Start Over")
+                    Text(settings.language == .french ? "New" : "New")
                         .fontWeight(.medium)
                 }
             }
             .buttonStyle(.bordered)
 
             Spacer()
+
+            Button(action: { showHistory = true }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "clock")
+                    Text(settings.language == .french ? "Historique" : "History")
+                        .fontWeight(.medium)
+                }
+            }
+            .buttonStyle(.bordered)
 
             Button(action: { showSettings.toggle() }) {
                 Image(systemName: "gear")

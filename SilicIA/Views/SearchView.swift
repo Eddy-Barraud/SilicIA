@@ -19,6 +19,8 @@ struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
+    let chatService: ChatService
+    let onOfflineQuery: ((String) -> Void)?
 
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
@@ -44,9 +46,16 @@ struct SearchView: View {
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
-    init(initialQuery: String? = nil, onInitialQueryHandled: (() -> Void)? = nil) {
+    init(
+        initialQuery: String? = nil,
+        onInitialQueryHandled: (() -> Void)? = nil,
+        chatService: ChatService,
+        onOfflineQuery: ((String) -> Void)? = nil
+    ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
+        self.chatService = chatService
+        self.onOfflineQuery = onOfflineQuery
     }
     
     private var windowBackgroundColor: Color {
@@ -196,9 +205,9 @@ struct SearchView: View {
             .cornerRadius(8)
 
             HStack(spacing: 8) {
-                Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true, generationProfile: .fast) }) {
+                Button(action: { onOfflineQuery?(searchQuery) }) {
                     Label(
-                        "No AI",
+                        "Offline",
                         systemImage: "bolt.fill"
                     )
                     .font(.subheadline)
@@ -872,6 +881,6 @@ struct FeatureRow: View {
 }
 
 #Preview {
-    SearchView()
+    SearchView(chatService: ChatService())
         .frame(width: 800, height: 600)
 }

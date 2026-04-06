@@ -21,6 +21,7 @@ struct ContentView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
+    @StateObject private var chatService = ChatService()
 
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
@@ -38,11 +39,30 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .searchAssist:
-                    SearchView(initialQuery: pendingSearchQuery, onInitialQueryHandled: {
-                        pendingSearchQuery = nil
-                    })
+                    SearchView(
+                        initialQuery: pendingSearchQuery,
+                        onInitialQueryHandled: {
+                            pendingSearchQuery = nil
+                        },
+                        chatService: chatService,
+                        onOfflineQuery: { query in
+                            selectedTab = .chat
+                            Task {
+                                await chatService.sendMessage(
+                                    query,
+                                    contextInput: "",
+                                    pdfURLs: [],
+                                    includeWebSearch: false,
+                                    language: AppSettings.load().language,
+                                    temperature: 0.7,
+                                    maxResponseTokens: AppSettings.load().maxResponseTokens,
+                                    maxContextTokens: AppSettings.load().maxContextTokens
+                                )
+                            }
+                        }
+                    )
                 case .chat:
-                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs)
+                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs, chatService: chatService)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
