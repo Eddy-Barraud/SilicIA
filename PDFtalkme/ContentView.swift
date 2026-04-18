@@ -713,9 +713,10 @@ struct ContentView: View {
         }
     }
 
-    private func addPDFTabs(_ urls: [URL]) {
+    private func addPDFTabs(_ urls: [URL], allowSelectingExistingTab: Bool = true) {
         for url in urls where url.pathExtension.lowercased() == "pdf" {
-            if let existing = documents.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+            if allowSelectingExistingTab,
+               let existing = documents.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
                 selectedTabID = existing.id
                 continue
             }
@@ -785,9 +786,11 @@ struct ContentView: View {
     }
 
     private func consumePendingOpenRequests() {
-        let incoming = openRouter.drain()
-        guard !incoming.isEmpty else { return }
-        addPDFTabs(incoming)
+        let requests = openRouter.drain()
+        guard !requests.isEmpty else { return }
+        for request in requests {
+            addPDFTabs(request.urls, allowSelectingExistingTab: !request.openInNewTabs)
+        }
     }
 
     private func runFind(next: Bool) {

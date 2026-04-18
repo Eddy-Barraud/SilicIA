@@ -24,7 +24,7 @@ struct PDFtalkmeApp: App {
 #if os(macOS)
                 .onAppear {
                     appDelegate.onOpenURLs = { urls in
-                        openRouter.enqueue(urls)
+                        openRouter.enqueue(urls, openInNewTabs: true)
                     }
 
                     let pending = appDelegate.drainPendingURLs()
@@ -49,7 +49,7 @@ struct PDFtalkmeApp: App {
     }
 
     private func handleIncomingURL(_ url: URL) {
-        openRouter.enqueue([url])
+        openRouter.enqueue([url], openInNewTabs: true)
     }
 }
 
@@ -57,6 +57,11 @@ struct PDFtalkmeApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var onOpenURLs: (([URL]) -> Void)?
     private var pendingURLs: [URL] = []
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.servicesProvider = self
+        NSUpdateDynamicServices()
+    }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         if let onOpenURLs {
@@ -89,6 +94,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func drainPendingURLs() -> [URL] {
         defer { pendingURLs.removeAll() }
         return pendingURLs
+    }
+
+    @objc func askPDF(_ pboard: NSPasteboard, userData: String?, error: AutoreleasingUnsafeMutablePointer<NSString?>?) {
+        let classes: [AnyClass] = [NSURL.self]
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        guard let urls = pboard.readObjects(forClasses: classes, options: options) as? [URL] else {
+            error?.pointee = "No files were provided." as NSString
+            return
+        }
+
+        let pdfURLs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+        guard !pdfURLs.isEmpty else {
+            error?.pointee = "Please select at least one PDF file." as NSString
+            return
+        }
+
+        if let onOpenURLs {
+            onOpenURLs(pdfURLs)
+        } else {
+            pendingURLs.append(contentsOf: pdfURLs)
+        }
     }
 }
 #endif

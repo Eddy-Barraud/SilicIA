@@ -14,19 +14,24 @@ final class PDFOpenRouter: ObservableObject {
 
     @Published var signal = UUID()
 
-    private var pendingURLs: [URL] = []
+    private var pendingRequests: [PDFOpenRequest] = []
 
     private init() {}
 
-    func enqueue(_ urls: [URL]) {
+    func enqueue(_ urls: [URL], openInNewTabs: Bool = true) {
         let filtered = urls.filter { $0.pathExtension.lowercased() == "pdf" }
         guard !filtered.isEmpty else { return }
-        pendingURLs.append(contentsOf: filtered)
+        pendingRequests.append(PDFOpenRequest(urls: filtered, openInNewTabs: openInNewTabs))
         signal = UUID()
     }
 
-    func drain() -> [URL] {
-        defer { pendingURLs.removeAll() }
-        return pendingURLs
+    func drain() -> [PDFOpenRequest] {
+        defer { pendingRequests.removeAll() }
+        return pendingRequests
     }
+}
+
+struct PDFOpenRequest {
+    let urls: [URL]
+    let openInNewTabs: Bool
 }
