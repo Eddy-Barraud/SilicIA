@@ -103,11 +103,29 @@ struct AppSettings: Codable, Equatable {
     static let temperatureRange = 0.3...1.0
     static let maxContextTokensRange = 300...3500
 
+    static func maxAllowedContextTokens(forResponseTokens responseTokens: Int) -> Int {
+        let clampedResponse = min(max(responseTokens, maxResponseTokensRange.lowerBound), maxResponseTokensRange.upperBound)
+        let budgetCap = TokenBudgeting.maxAvailableContextTokens(
+            maxOutputTokens: clampedResponse,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens
+        )
+        return min(maxContextTokensRange.upperBound, max(maxContextTokensRange.lowerBound, budgetCap))
+    }
+
     private func normalized() -> AppSettings {
         var copy = self
         copy.maxSearchResults = min(max(copy.maxSearchResults, Self.maxSearchResultsRange.lowerBound), Self.maxSearchResultsRange.upperBound)
         copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
-        copy.maxContextTokens = min(max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound), Self.maxContextTokensRange.upperBound)
+        copy.maxContextTokens = TokenBudgeting.clampedContextTokens(
+            requestedContextTokens: copy.maxContextTokens,
+            maxOutputTokens: copy.maxResponseTokens,
+            settingsRange: Self.maxContextTokensRange,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens
+        )
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         return copy
     }

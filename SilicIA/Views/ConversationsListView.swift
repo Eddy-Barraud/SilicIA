@@ -70,6 +70,7 @@ struct ConversationsListView: View {
                     modelContext.delete(conversation)
                 }
                 _ = saveContext()
+                _ = DroppedPDFStore.clearAll()
             }
             Button("Cancel", role: .cancel) {}
         } message: {

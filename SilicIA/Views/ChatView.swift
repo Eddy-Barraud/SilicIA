@@ -59,8 +59,16 @@ struct ChatView: View {
         TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
     }
 
+    private var maxAllowedContextTokensForCurrentResponse: Int {
+        AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+    }
+
+    private var effectiveContextTokens: Int {
+        min(settings.maxContextTokens, maxAllowedContextTokensForCurrentResponse)
+    }
+
     private var estimatedMaxContextWords: Int {
-        TokenBudgeting.estimatedContextWords(forTokens: settings.maxContextTokens)
+        TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokens)
     }
 
     /// Renders chat transcript, composer, and context inputs.
@@ -200,7 +208,13 @@ struct ChatView: View {
                 }
                 Slider(value: Binding(
                     get: { Double(settings.maxResponseTokens) },
-                    set: { settings.maxResponseTokens = Int($0) }
+                    set: {
+                        settings.maxResponseTokens = Int($0)
+                        settings.maxContextTokens = min(
+                            settings.maxContextTokens,
+                            AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+                        )
+                    }
                 ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
 
                 Text(
@@ -217,14 +231,14 @@ struct ChatView: View {
                     Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(settings.maxContextTokens)")
+                    Text("\(effectiveContextTokens)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Slider(value: Binding(
-                    get: { Double(settings.maxContextTokens) },
+                    get: { Double(effectiveContextTokens) },
                     set: { settings.maxContextTokens = Int($0) }
-                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(AppSettings.maxContextTokensRange.upperBound), step: 50)
+                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(maxAllowedContextTokensForCurrentResponse), step: 50)
 
                 Text(
                     settings.language == .french
@@ -233,6 +247,16 @@ struct ChatView: View {
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+                if effectiveContextTokens < settings.maxContextTokens {
+                    Text(
+                        settings.language == .french
+                        ? "Le contexte est plafonné automatiquement avec la limite de réponse actuelle."
+                        : "Context is automatically capped by the current response-token limit."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
             }
         }
         .padding()
@@ -528,7 +552,8 @@ struct ChatView: View {
                         return
                     }
                     debugDrop("Provider[\(index)] loadFileRepresentation url=\(url.path)")
-                    guard let persistentURL = persistDroppedPDF(url) else {
+                    let preferredName = provider.suggestedName
+                    guard let persistentURL = persistDroppedPDF(url, preferredFileName: preferredName) else {
                         debugDrop("Provider[\(index)] failed to persist dropped PDF at \(url.path)")
                         return
                     }
@@ -574,26 +599,14 @@ struct ChatView: View {
     }
 
     /// Copies dropped PDF to a stable temporary location so it remains readable for later context analysis.
-    private func persistDroppedPDF(_ sourceURL: URL) -> URL? {
-        let fileManager = FileManager.default
-        let destinationDirectory = fileManager.temporaryDirectory.appendingPathComponent("SilicIADroppedPDFs", isDirectory: true)
-        do {
-            try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
-            let baseName = sourceURL.deletingPathExtension().lastPathComponent
-            let safeBaseName = baseName.isEmpty ? "dropped" : baseName
-            let destinationURL = destinationDirectory
-                .appendingPathComponent("\(UUID().uuidString)-\(safeBaseName)")
-                .appendingPathExtension("pdf")
-            if fileManager.fileExists(atPath: destinationURL.path) {
-                try fileManager.removeItem(at: destinationURL)
-            }
-            try fileManager.copyItem(at: sourceURL, to: destinationURL)
-            debugDrop("Copied dropped PDF from \(sourceURL.path) to \(destinationURL.path)")
-            return destinationURL
-        } catch {
-            debugDrop("Failed to persist dropped PDF from \(sourceURL.path): \(error.localizedDescription)")
-            return nil
+    private func persistDroppedPDF(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
+        let persistentURL = DroppedPDFStore.persist(sourceURL, preferredFileName: preferredFileName)
+        if let persistentURL {
+            debugDrop("Copied dropped PDF from \(sourceURL.path) to \(persistentURL.path)")
+        } else {
+            debugDrop("Failed to persist dropped PDF from \(sourceURL.path)")
         }
+        return persistentURL
     }
 
     /// Adds incoming shared URLs/PDFs to context rows once.
@@ -601,7 +614,11 @@ struct ChatView: View {
         let incomingURLs = sharedURLs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let incomingPDFs = sharedPDFs.filter { $0.pathExtension.lowercased() == "pdf" }
+        let incomingPDFs = sharedPDFs
+            .filter { $0.pathExtension.lowercased() == "pdf" }
+            .compactMap { sourceURL in
+                persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+            }
         guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty else { return }
 
         startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs)
@@ -674,7 +691,8 @@ struct ChatView: View {
     /// Appends multiple PDFs.
     private func appendPDFSources(_ urls: [URL]) {
         for url in urls {
-            insertPDFSource(url, at: nil)
+            let persisted = persistDroppedPDF(url, preferredFileName: url.lastPathComponent) ?? url
+            insertPDFSource(persisted, at: nil)
         }
     }
 
@@ -712,7 +730,8 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 includeWebSearch: isWebSearchEnabled,
-                maxContextTokens: settings.maxContextTokens
+                maxContextTokens: settings.maxContextTokens,
+                maxResponseTokens: settings.maxResponseTokens
             )
         }
     }
@@ -726,6 +745,7 @@ struct ChatView: View {
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
         chatService.resetConversation()
+        _ = DroppedPDFStore.clearAll()
     }
 }
 

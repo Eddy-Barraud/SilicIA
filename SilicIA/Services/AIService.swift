@@ -43,6 +43,8 @@ class AIService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     private static let fastSummaryContextUtilizationFactor = 0.50
     private static let deepSummaryContextUtilizationFactor = 0.65
+    private static let fastSummaryScrapingResultCap = 6
+    private static let fastSummaryScrapingCharacterCap = 4500
 
     init(initialFirstGuessLanguage: ModelLanguage = .french) {
         self.firstGuessSessionLanguage = initialFirstGuessLanguage
@@ -104,12 +106,23 @@ class AIService: ObservableObject {
         let summarizeStart = Date()
         #endif
 
+        let effectiveScrapingResults = profile == .fast
+            ? min(maxScrapingResults, Self.fastSummaryScrapingResultCap)
+            : maxScrapingResults
+        let effectiveScrapingChars = profile == .fast
+            ? min(maxScrapingChars, Self.fastSummaryScrapingCharacterCap)
+            : maxScrapingChars
+
         // Scrape content from top pages
         let urls = results.map { $0.url }
         let scrapedContent: [String: String]
         #if DEBUG
         let scrapeStart = Date()
-        scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
+        scrapedContent = await webScraper.scrapeMultiplePages(
+            urls: urls,
+            limit: effectiveScrapingResults,
+            maxCharacters: effectiveScrapingChars
+        )
         debugTimings.append(TimingMetric(
             name: "WebScrapingService.scrapeMultiplePages",
             seconds: Date().timeIntervalSince(scrapeStart)
@@ -126,7 +139,11 @@ class AIService: ObservableObject {
             debugNotes.append(String(format: "scrape elapsed (service): %.3f s", stats.elapsedSeconds))
         }
         #else
-        scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
+        scrapedContent = await webScraper.scrapeMultiplePages(
+            urls: urls,
+            limit: effectiveScrapingResults,
+            maxCharacters: effectiveScrapingChars
+        )
         #endif
 
         _ = skipPerPageSummary

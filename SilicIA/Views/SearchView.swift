@@ -16,6 +16,7 @@ import UIKit
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
+    private static let firstGuessTokenCap = 220
     @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
@@ -90,12 +91,20 @@ struct SearchView: View {
         TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
     }
 
+    private var maxAllowedContextTokensForCurrentResponse: Int {
+        AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+    }
+
+    private var effectiveContextTokens: Int {
+        min(settings.maxContextTokens, maxAllowedContextTokensForCurrentResponse)
+    }
+
     private var estimatedMaxContextWords: Int {
-        TokenBudgeting.estimatedContextWords(forTokens: settings.maxContextTokens)
+        TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokens)
     }
 
     private var defaultScrapingCharactersFromContextTokens: Int {
-        max(TokenBudgeting.estimatedContextCharacters(forTokens: settings.maxContextTokens) * 2, 1500)
+        max(TokenBudgeting.estimatedContextCharacters(forTokens: effectiveContextTokens) * 2, 1500)
     }
 
     /// Lays out header, search controls, and context-sensitive body content.
@@ -565,7 +574,13 @@ struct SearchView: View {
                 }
                 Slider(value: Binding(
                     get: { Double(settings.maxResponseTokens) },
-                    set: { settings.maxResponseTokens = Int($0) }
+                    set: {
+                        settings.maxResponseTokens = Int($0)
+                        settings.maxContextTokens = min(
+                            settings.maxContextTokens,
+                            AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+                        )
+                    }
                 ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
 
                 Text(
@@ -583,14 +598,14 @@ struct SearchView: View {
                     Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
                         .font(.subheadline)
                     Spacer()
-                    Text("\(settings.maxContextTokens)")
+                    Text("\(effectiveContextTokens)")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
                 Slider(value: Binding(
-                    get: { Double(settings.maxContextTokens) },
+                    get: { Double(effectiveContextTokens) },
                     set: { settings.maxContextTokens = Int($0) }
-                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(AppSettings.maxContextTokensRange.upperBound), step: 50)
+                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(maxAllowedContextTokensForCurrentResponse), step: 50)
 
                 Text(
                     settings.language == .french
@@ -599,6 +614,16 @@ struct SearchView: View {
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
+
+                if effectiveContextTokens < settings.maxContextTokens {
+                    Text(
+                        settings.language == .french
+                        ? "Le contexte est plafonné automatiquement avec la limite de réponse actuelle."
+                        : "Context is automatically capped by the current response-token limit."
+                    )
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                }
             }
 
             // Model Language
@@ -696,7 +721,7 @@ struct SearchView: View {
                 let firstGuess = await aiService.generateFirstGuess(
                     query: trimmedQuery,
                     language: settings.language,
-                    maxTokens: settings.maxResponseTokens
+                    maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap)
                 )
                 guard activeSearchRequestID == requestID else { return }
                 firstGuessText = firstGuess

@@ -33,6 +33,42 @@ enum TokenBudgeting {
         return min(max(requestedMaxTokens, 1), maxOutputTokens)
     }
 
+    /// Returns the context-token budget available once output/instructions are reserved.
+    static func maxAvailableContextTokens(
+        maxOutputTokens: Int,
+        instructionTokens: Int = instructionTokens,
+        promptOverheadTokens: Int = promptOverheadTokens,
+        minContextTokens: Int = minContextTokens
+    ) -> Int {
+        let effectiveOutputTokens = clampedOutputTokens(
+            requestedMaxTokens: maxOutputTokens,
+            instructionTokens: instructionTokens,
+            promptOverheadTokens: promptOverheadTokens,
+            minContextTokens: minContextTokens
+        )
+        return max(contextWindowLimit - instructionTokens - promptOverheadTokens - effectiveOutputTokens, minContextTokens)
+    }
+
+    /// Clamps context tokens against both user settings and the current output-token budget.
+    static func clampedContextTokens(
+        requestedContextTokens: Int,
+        maxOutputTokens: Int,
+        settingsRange: ClosedRange<Int>,
+        instructionTokens: Int = instructionTokens,
+        promptOverheadTokens: Int = promptOverheadTokens,
+        minContextTokens: Int = minContextTokens
+    ) -> Int {
+        let contextBudgetCap = maxAvailableContextTokens(
+            maxOutputTokens: maxOutputTokens,
+            instructionTokens: instructionTokens,
+            promptOverheadTokens: promptOverheadTokens,
+            minContextTokens: minContextTokens
+        )
+        let boundedUpper = min(settingsRange.upperBound, contextBudgetCap)
+        let boundedLower = min(settingsRange.lowerBound, boundedUpper)
+        return min(max(requestedContextTokens, boundedLower), boundedUpper)
+    }
+
     static func estimatedOutputCharacters(forTokens tokens: Int) -> Int {
         max(tokens, 0) * avgCharsPerToken
     }

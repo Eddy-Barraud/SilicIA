@@ -54,6 +54,7 @@ final class ChatService: ObservableObject {
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
+    private var preAnalyzedMaxOutputTokens: Int?
 
     /// Sends a user message and appends the assistant response.
     func sendMessage(
@@ -81,8 +82,13 @@ final class ChatService: ObservableObject {
         )
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
+        let effectiveMaxContextTokens = calculateEffectiveContextTokens(
+            requestedContextTokens: maxContextTokens,
+            maxOutputTokens: effectiveMaxOutputTokens
+        )
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
-            && maxContextTokens == preAnalyzedMaxContextTokens
+            && effectiveMaxContextTokens == preAnalyzedMaxContextTokens
+            && effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
         let chunks: [RAGChunk]
@@ -94,11 +100,12 @@ final class ChatService: ObservableObject {
                 pdfURLs: pdfURLs,
                 includeWebSearch: includeWebSearch,
                 currentMessage: message,
-                maxContextTokens: maxContextTokens
+                maxContextTokens: effectiveMaxContextTokens
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
-            preAnalyzedMaxContextTokens = maxContextTokens
+            preAnalyzedMaxContextTokens = effectiveMaxContextTokens
+            preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
         }
         debugContext("sendMessage collected chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
@@ -107,7 +114,7 @@ final class ChatService: ObservableObject {
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
-        let contextTokenCap = clampContextTokens(maxContextTokens)
+        let contextTokenCap = effectiveMaxContextTokens
         let maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: 1.0
@@ -158,23 +165,36 @@ final class ChatService: ObservableObject {
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
-    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], includeWebSearch: Bool, maxContextTokens: Int) async {
+    func preAnalyzeContext(
+        contextInput: String,
+        pdfURLs: [URL],
+        includeWebSearch: Bool,
+        maxContextTokens: Int,
+        maxResponseTokens: Int
+    ) async {
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             searchQuerySeed: ""
         )
+        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
+        let effectiveMaxContextTokens = calculateEffectiveContextTokens(
+            requestedContextTokens: maxContextTokens,
+            maxOutputTokens: effectiveMaxOutputTokens
+        )
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
             preAnalyzedChunks = []
             preAnalyzedMaxContextTokens = nil
+            preAnalyzedMaxOutputTokens = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             return
         }
         if contextKey == preAnalyzedContextKey,
-           maxContextTokens == preAnalyzedMaxContextTokens {
+           effectiveMaxContextTokens == preAnalyzedMaxContextTokens,
+           effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens {
             return
         }
 
@@ -186,12 +206,13 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             currentMessage: "",
-            maxContextTokens: maxContextTokens,
+            maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true
         )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
-        preAnalyzedMaxContextTokens = maxContextTokens
+        preAnalyzedMaxContextTokens = effectiveMaxContextTokens
+        preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -207,6 +228,7 @@ final class ChatService: ObservableObject {
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
+        preAnalyzedMaxOutputTokens = nil
         currentConversation = nil
     }
 
@@ -494,6 +516,20 @@ final class ChatService: ObservableObject {
     private func calculateEffectiveMaxOutputTokens(_ requestedMaxTokens: Int) -> Int {
         TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: requestedMaxTokens,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens
+        )
+    }
+
+    private func calculateEffectiveContextTokens(
+        requestedContextTokens: Int,
+        maxOutputTokens: Int
+    ) -> Int {
+        TokenBudgeting.clampedContextTokens(
+            requestedContextTokens: requestedContextTokens,
+            maxOutputTokens: maxOutputTokens,
+            settingsRange: AppSettings.maxContextTokensRange,
             instructionTokens: TokenBudgeting.instructionTokens,
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
