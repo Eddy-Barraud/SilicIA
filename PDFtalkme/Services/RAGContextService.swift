@@ -216,24 +216,16 @@ actor RAGContextService {
 }
 
 enum RAGCitationFormatter {
-    static func citationBlock(from chunks: [RankedRAGChunk], language: ModelLanguage? = nil) -> String {
-        guard !chunks.isEmpty else { return "" }
-
-        let pageLabel = language == .french ? "Page PDF" : "PDF Page"
-        let forcedLabel = language == .french ? "Contexte prioritaire" : "Priority Context"
-
-        let lines = chunks.enumerated().map { index, ranked -> String in
-            var itemLines: [String] = []
-            itemLines.append("\(index + 1). \(ranked.chunk.source)")
-            if let page = ranked.chunk.pdfPage {
-                itemLines.append("   \(pageLabel): \(page)")
-            }
-            if ranked.chunk.boostRankOne {
-                itemLines.append("   \(forcedLabel): rank 1")
-            }
-            return itemLines.joined(separator: "\n")
+    static func citations(from chunks: [RankedRAGChunk], language: ModelLanguage? = nil) -> [PDFCitation] {
+        _ = language
+        return chunks.enumerated().map { index, ranked in
+            PDFCitation(
+                rank: index + 1,
+                source: ranked.chunk.source,
+                page: ranked.chunk.pdfPage,
+                snippet: String(ranked.chunk.text.prefix(240)).trimmingCharacters(in: .whitespacesAndNewlines),
+                isPriority: ranked.chunk.boostRankOne
+            )
         }
-
-        return lines.joined(separator: "\n\n")
     }
 }

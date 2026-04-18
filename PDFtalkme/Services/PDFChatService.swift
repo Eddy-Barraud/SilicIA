@@ -113,7 +113,7 @@ final class PDFChatService: ObservableObject {
         if let pdfURL {
             let pageTexts = extractPDFPageTexts(from: pdfURL)
             for (pageIndex, pageText) in pageTexts.enumerated() {
-                let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
+                let source = "PDF: \(displayName(for: pdfURL)) page \(pageIndex + 1)"
                 let chunked = ragChunker.chunk(
                     text: pageText,
                     source: source,
@@ -186,7 +186,7 @@ final class PDFChatService: ObservableObject {
             )
             let response = try await session.respond(to: prompt, options: options)
             let content = normalizeModelOutput(String(describing: response.content))
-            let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: settings.language)
+            let citations = RAGCitationFormatter.citations(from: selected.topChunks, language: settings.language)
             messages.append(PDFChatMessage(role: .assistant, content: content, citations: citations))
             schedulePersist()
         } catch {
@@ -276,6 +276,15 @@ final class PDFChatService: ObservableObject {
 
     private func historyFileURL(for documentKey: String) -> URL {
         conversationsDirectory.appendingPathComponent("\(documentKey).json")
+    }
+
+    private func displayName(for url: URL) -> String {
+        let rawName = url.lastPathComponent
+        return rawName.replacingOccurrences(
+            of: #"-?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=\.pdf$)"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 
     private func documentKey(for url: URL) -> String? {
@@ -499,8 +508,36 @@ private struct PersistedConversation: Codable {
 private struct PersistedMessage: Codable {
     let role: String
     let content: String
-    let citations: String?
+    let citations: [PDFCitation]?
     let timestamp: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case role
+        case content
+        case citations
+        case timestamp
+    }
+
+    init(role: String, content: String, citations: [PDFCitation]?, timestamp: Date) {
+        self.role = role
+        self.content = content
+        self.citations = citations
+        self.timestamp = timestamp
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        role = try container.decode(String.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+
+        if let parsed = try? container.decode([PDFCitation].self, forKey: .citations) {
+            citations = parsed
+        } else {
+            _ = try? container.decode(String.self, forKey: .citations)
+            citations = nil
+        }
+    }
 }
 
 struct PDFChatMessage: Identifiable {
@@ -512,10 +549,10 @@ struct PDFChatMessage: Identifiable {
     let id = UUID()
     let role: Role
     let content: String
-    let citations: String?
+    let citations: [PDFCitation]?
     let timestamp: Date
 
-    init(role: Role, content: String, citations: String? = nil, timestamp: Date = Date()) {
+    init(role: Role, content: String, citations: [PDFCitation]? = nil, timestamp: Date = Date()) {
         self.role = role
         self.content = content
         self.citations = citations

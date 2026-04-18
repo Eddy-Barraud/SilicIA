@@ -55,6 +55,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        let url = URL(fileURLWithPath: filename)
+        if let onOpenURLs {
+            onOpenURLs([url])
+        } else {
+            pendingURLs.append(url)
+        }
+        return true
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let urls = filenames.map { URL(fileURLWithPath: $0) }
+        if let onOpenURLs {
+            onOpenURLs(urls)
+        } else {
+            pendingURLs.append(contentsOf: urls)
+        }
+        sender.reply(toOpenOrPrint: .success)
+    }
+
     func drainPendingURLs() -> [URL] {
         defer { pendingURLs.removeAll() }
         return pendingURLs

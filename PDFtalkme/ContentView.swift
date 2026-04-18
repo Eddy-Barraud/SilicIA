@@ -17,9 +17,9 @@ struct ContentView: View {
     @State private var selectedTabID: UUID?
     @State private var selectedSelectionText = ""
     @State private var prioritizedSelectionText: String?
+    @State private var focusedCitationRequest: PDFCitationFocusRequest?
     @State private var showImporter = false
     @State private var composerInput = ""
-    @State private var isDropTargeted = false
     @FocusState private var isComposerFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
@@ -95,9 +95,16 @@ struct ContentView: View {
 
                 Divider()
 
-                PDFDocumentView(pdfURL: selectedPDFURL) { text in
-                    selectedSelectionText = text
-                }
+                PDFDocumentView(
+                    pdfURL: selectedPDFURL,
+                    focusedCitationRequest: focusedCitationRequest,
+                    onSelectionChanged: { text in
+                        selectedSelectionText = text
+                    },
+                    onDropPDFURLs: { urls in
+                        addDroppedPDFs(urls)
+                    }
+                )
                 .overlay {
                     if selectedPDFURL == nil {
                         ContentUnavailableView(
@@ -115,20 +122,9 @@ struct ContentView: View {
                     .padding(.trailing, 18)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-
-            if isDropTargeted {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
-                    .padding(10)
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
-        .contentShape(Rectangle())
-        .onDrop(of: [.fileURL, .pdf], isTargeted: $isDropTargeted, perform: handlePDFDrop)
         .animation(.easeInOut(duration: 0.18), value: shouldShowSelectionPopup)
-        .animation(.easeInOut(duration: 0.12), value: isDropTargeted)
     }
 
     private var tabStrip: some View {
@@ -260,20 +256,9 @@ struct ContentView: View {
                             .textSelection(.enabled)
 
                         if let citations = message.citations,
-                           !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                           !citations.isEmpty {
                             Divider()
-                            if let attributed = try? AttributedString(markdown: citations) {
-                                Text(attributed)
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                                    .tint(.accentColor)
-                                    .textSelection(.enabled)
-                            } else {
-                                Text(citations)
-                                    .font(.footnote)
-                                    .foregroundColor(.secondary)
-                                    .textSelection(.enabled)
-                            }
+                            citationList(citations)
                         }
                     }
                     .padding(10)
@@ -333,6 +318,51 @@ struct ContentView: View {
                 chatService.isResponding
             )
         }
+    }
+
+    private func citationList(_ citations: [PDFCitation]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(settings.language == .french ? "Pages suggerees" : "Suggested pages")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+
+            ForEach(citations) { citation in
+                Button {
+                    focusedCitationRequest = PDFCitationFocusRequest(citation: citation)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(citationLabel(citation))
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.black)
+
+                        if let snippet = citation.snippet,
+                           !snippet.isEmpty {
+                            Text(snippet)
+                                .font(.caption2)
+                                .foregroundColor(.black.opacity(0.82))
+                                .lineLimit(2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(red: 0.83, green: 0.76, blue: 0.98))
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func citationLabel(_ citation: PDFCitation) -> String {
+        let pagePrefix = settings.language == .french ? "page" : "page"
+        let priority = citation.isPriority ? (settings.language == .french ? " • Priorite" : " • Priority") : ""
+        if let page = citation.page {
+            return "#\(citation.rank) \(pagePrefix) \(page)\(priority)"
+        }
+        return "#\(citation.rank)\(priority)"
     }
 
     private var selectionPopup: some View {
@@ -423,46 +453,16 @@ struct ContentView: View {
         addPDFTabs(urls)
     }
 
-    private func handlePDFDrop(_ providers: [NSItemProvider]) -> Bool {
-        let candidates = providers.filter {
-            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
-            || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
-        }
-        guard !candidates.isEmpty else { return false }
-
-        for provider in candidates {
-            if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
-                    guard let url,
-                          let stableURL = copyDroppedPDFToTemporaryStorage(url) else { return }
-                    Task { @MainActor in
-                        addPDFTabs([stableURL])
-                    }
-                }
-            } else {
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                    let fileURL: URL?
-                    if let data = item as? Data {
-                        fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-                    } else if let url = item as? URL {
-                        fileURL = url
-                    } else if let nsURL = item as? NSURL {
-                        fileURL = nsURL as URL
-                    } else {
-                        fileURL = nil
-                    }
-
-                    guard let fileURL,
-                          fileURL.pathExtension.lowercased() == "pdf" else {
-                        return
-                    }
-                    Task { @MainActor in
-                        addPDFTabs([fileURL])
-                    }
-                }
+    private func addDroppedPDFs(_ urls: [URL]) {
+        var persisted: [URL] = []
+        for url in urls where url.pathExtension.lowercased() == "pdf" {
+            if let stableURL = copyDroppedPDFToTemporaryStorage(url) {
+                persisted.append(stableURL)
             }
         }
-        return true
+        if !persisted.isEmpty {
+            addPDFTabs(persisted)
+        }
     }
 
     private func addPDFTabs(_ urls: [URL]) {
@@ -492,9 +492,9 @@ struct ContentView: View {
         do {
             try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
             let preferredName = sourceURL.lastPathComponent.isEmpty ? "dropped.pdf" : sourceURL.lastPathComponent
-            let baseName = (preferredName as NSString).deletingPathExtension
-            let ext = (preferredName as NSString).pathExtension.isEmpty ? "pdf" : (preferredName as NSString).pathExtension
-            let destination = folder.appendingPathComponent("\(baseName)-\(UUID().uuidString).\(ext)")
+            let uniqueFolder = folder.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try fileManager.createDirectory(at: uniqueFolder, withIntermediateDirectories: true)
+            let destination = uniqueFolder.appendingPathComponent(preferredName)
             if fileManager.fileExists(atPath: destination.path) {
                 try fileManager.removeItem(at: destination)
             }
@@ -543,7 +543,12 @@ private struct PDFDocumentTab: Identifiable, Equatable {
     init(id: UUID = UUID(), url: URL) {
         self.id = id
         self.url = url
-        self.title = url.deletingPathExtension().lastPathComponent
+        let rawTitle = url.deletingPathExtension().lastPathComponent
+        self.title = rawTitle.replacingOccurrences(
+            of: #"-?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"#,
+            with: "",
+            options: .regularExpression
+        )
     }
 }
 
