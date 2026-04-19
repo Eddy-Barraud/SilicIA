@@ -7,6 +7,9 @@
 
 import Foundation
 import Combine
+#if os(iOS)
+import UIKit
+#endif
 
 @MainActor
 /// Fetches and extracts readable text content from web pages.

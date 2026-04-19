@@ -40,8 +40,13 @@ struct ConversationsListView: View {
                     .foregroundColor(.red)
                 }
             }
-            .padding()
-            .background(Color(.controlBackgroundColor))
+#if os(iOS)
+            .background(Color(.secondarySystemBackground))
+#elseif os(macOS)
+            .background(Color(nsColor: .controlBackgroundColor))
+#else
+            .background(Color.gray.opacity(0.1))
+#endif
 
             if conversations.isEmpty {
                 VStack(spacing: 12) {
@@ -56,7 +61,13 @@ struct ConversationsListView: View {
                         .foregroundColor(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(.textBackgroundColor))
+#if os(iOS)
+                .background(Color(.systemBackground))
+#elseif os(macOS)
+                .background(Color(nsColor: .textBackgroundColor))
+#else
+                .background(Color.clear)
+#endif
             } else {
                 List(conversations) { conversation in
                     conversationRow(conversation)

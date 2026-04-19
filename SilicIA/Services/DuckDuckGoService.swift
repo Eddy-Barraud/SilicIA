@@ -7,6 +7,9 @@
 
 import Foundation
 import Combine
+#if os(iOS)
+import UIKit
+#endif
 
 /// Strip HTML tags and decode common HTML entities from a raw HTML string.
 private func htmlToPlainText(_ html: String) -> String {
