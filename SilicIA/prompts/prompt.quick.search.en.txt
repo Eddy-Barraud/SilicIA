@@ -1,5 +1,6 @@
 Question: {{query}}
 
+If not sure about answer, only output "Waiting web for precisions"
 Answer in a short, precise and factual manner.
 Answer in English.
 Answer in two sentences maximum.

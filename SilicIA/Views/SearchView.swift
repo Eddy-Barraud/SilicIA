@@ -17,6 +17,7 @@ import UIKit
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
     private static let firstGuessTokenCap = 220
+    private static let deepSearchDerivedQueryCount = 3
     @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
@@ -207,6 +208,7 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
 
                 TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery)
+                    .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .font(.body)
                     .focused($isSearchFieldFocused)
@@ -244,6 +246,14 @@ struct SearchView: View {
             if let speechError = speechRecognitionService.errorMessage,
                !speechError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text(speechError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let errorMessage,
+               !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(errorMessage)
                     .font(.caption)
                     .foregroundColor(.red)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -458,30 +468,6 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                         }
 
-                        #if DEBUG
-                        if !aiService.debugTimings.isEmpty {
-                            Text("DEBUG timings")
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-
-                            ForEach(aiService.debugTimings) { metric in
-                                Text("\(metric.name): \(String(format: "%.3f s", metric.seconds))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.trailing)
-                            }
-                        }
-
-                        if !aiService.debugNotes.isEmpty {
-                            ForEach(aiService.debugNotes, id: \.self) { note in
-                                Text(note)
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                                    .multilineTextAlignment(.trailing)
-                            }
-                        }
-                        #endif
                     }
                 }
             }
@@ -701,6 +687,12 @@ struct SearchView: View {
         #endif
     }
 
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        print("[SearchView] \(message)")
+        #endif
+    }
+
     // MARK: - Empty State View
     private var emptyStateView: some View {
         VStack(spacing: 16) {
@@ -736,6 +728,7 @@ struct SearchView: View {
 
         // Clear previous results and state before starting new search
         searchResults = []
+        errorMessage = nil
         aiService.summary = ""
         aiService.citations = ""
         firstGuessText = ""
@@ -772,7 +765,32 @@ struct SearchView: View {
                 let searchLimit = noAIOnly
                     ? resultsCount
                     : resultsCount + Self.aiSummaryOverfetchResults
-                let fetchedResults = try await searchService.search(query: trimmedQuery, maxResults: searchLimit)
+                let fetchedResults: [SearchResult]
+
+                if generationProfile == .deep && !noAIOnly {
+                    let derivedQueries = await aiService.expandSearchQueries(
+                        query: trimmedQuery,
+                        language: settings.language,
+                        maxDerivedQueries: Self.deepSearchDerivedQueryCount
+                    )
+
+                    #if DEBUG
+                    debugLog(
+                        "deep query expansion count: expectedDerived=\(Self.deepSearchDerivedQueryCount), obtainedDerived=\(derivedQueries.count), inputTotal=\(1 + derivedQueries.count)"
+                    )
+                    let allQueries = [trimmedQuery] + derivedQueries
+                    debugLog("deep query expansion: \(allQueries.joined(separator: " | "))")
+                    #endif
+
+                    fetchedResults = try await searchService.search(
+                        queries: [trimmedQuery] + derivedQueries,
+                        maxResultsPerQuery: searchLimit,
+                        mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount
+                    )
+                } else {
+                    fetchedResults = try await searchService.search(query: trimmedQuery, maxResults: searchLimit)
+                }
+
                 guard activeSearchRequestID == requestID else { return }
                 searchResults = Array(fetchedResults.prefix(resultsCount))
                 errorMessage = nil
@@ -791,6 +809,10 @@ struct SearchView: View {
                 guard activeSearchRequestID == requestID else { return }
                 errorMessage = error.localizedDescription
                 searchResults = []
+
+                #if DEBUG
+                debugLog("performSearch failed: \(error.localizedDescription)")
+                #endif
             }
 
             if activeSearchRequestID == requestID {
@@ -824,6 +846,16 @@ struct SearchView: View {
             language: settings.language,
             profile: generationProfile ?? activeGenerationProfile
         )
+
+        #if DEBUG
+        for metric in aiService.debugTimings {
+            debugLog("\(metric.name): \(String(format: "%.3f s", metric.seconds))")
+        }
+        for note in aiService.debugNotes {
+            debugLog(note)
+        }
+        #endif
+
         if let start = summaryStartTime {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
         }

@@ -38,6 +38,8 @@ class AIService: ObservableObject {
     private let ragContextService = RAGContextService()
     private var firstGuessSession: LanguageModelSession
     private var firstGuessSessionLanguage: ModelLanguage
+    private var queryExpanderSession: LanguageModelSession
+    private var queryExpanderSessionLanguage: ModelLanguage
 
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
@@ -46,10 +48,20 @@ class AIService: ObservableObject {
     private static let fastSummaryScrapingResultCap = 6
     private static let fastSummaryScrapingCharacterCap = 4500
 
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        print("[AIService] \(message)")
+        #endif
+    }
+
     init(initialFirstGuessLanguage: ModelLanguage = .french) {
         self.firstGuessSessionLanguage = initialFirstGuessLanguage
         self.firstGuessSession = LanguageModelSession(
             instructions: Self.buildFirstGuessInstructions(for: initialFirstGuessLanguage)
+        )
+        self.queryExpanderSessionLanguage = initialFirstGuessLanguage
+        self.queryExpanderSession = LanguageModelSession(
+            instructions: Self.buildQueryExpanderInstructions(for: initialFirstGuessLanguage)
         )
     }
 
@@ -89,6 +101,67 @@ class AIService: ObservableObject {
             return sanitized.isEmpty ? fallbackFirstGuess(for: trimmedQuery, language: language) : sanitized
         } catch {
             return fallbackFirstGuess(for: trimmedQuery, language: language)
+        }
+    }
+
+    /// Expands one query into up to `maxDerivedQueries` related web-search queries.
+    func expandSearchQueries(
+        query: String,
+        language: ModelLanguage = .french,
+        maxDerivedQueries: Int = 3
+    ) async -> [String] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty, maxDerivedQueries > 0 else { return [] }
+
+        let fallback = fallbackDerivedQueries(
+            for: trimmedQuery,
+            language: language,
+            maxDerivedQueries: maxDerivedQueries
+        )
+
+        do {
+            let session = queryExpanderSession(for: language)
+            let raw = String(describing: try await session.respond(
+                to: queryExpanderPrompt(for: trimmedQuery, language: language, maxDerivedQueries: maxDerivedQueries),
+                options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 140)
+            ).content)
+
+            let rawCandidates = raw
+                .components(separatedBy: .newlines)
+                .map { sanitizeDerivedQueryLine($0) }
+                .filter { !$0.isEmpty }
+
+            let parsed = parseDerivedQueries(
+                raw,
+                originalQuery: trimmedQuery,
+                maxDerivedQueries: maxDerivedQueries
+            )
+
+            let completed = completeDerivedQueries(
+                parsed,
+                originalQuery: trimmedQuery,
+                fallback: fallback,
+                language: language,
+                maxDerivedQueries: maxDerivedQueries
+            )
+
+            debugLog(
+                "query expansion counts: expected=\(maxDerivedQueries), raw=\(rawCandidates.count), keptNonURL=\(parsed.count), completed=\(completed.count)"
+            )
+            debugLog("query expansion final: \(completed.joined(separator: " | "))")
+
+            return completed
+        } catch {
+            let completed = completeDerivedQueries(
+                [],
+                originalQuery: trimmedQuery,
+                fallback: fallback,
+                language: language,
+                maxDerivedQueries: maxDerivedQueries
+            )
+            debugLog("query expansion fallback-only due to error: \(error.localizedDescription)")
+            debugLog("query expansion final: \(completed.joined(separator: " | "))")
+            return completed
         }
     }
 
@@ -242,6 +315,19 @@ class AIService: ObservableObject {
             ?? fallbackFirstGuessInstructions(for: language)
     }
 
+    /// Builds instructions for query expansion during deep web search.
+    private static func buildQueryExpanderInstructions(for language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Retourne des requêtes de recherche web pour la question.
+            """
+        }
+
+        return """
+        Return web search queries for the question.
+        """
+    }
+
     /// Returns a long-lived first-guess session and rebuilds it when language changes.
     private func firstGuessSession(for language: ModelLanguage) -> LanguageModelSession {
         if language != firstGuessSessionLanguage {
@@ -252,6 +338,276 @@ class AIService: ObservableObject {
         }
 
         return firstGuessSession
+    }
+
+    /// Returns a long-lived query-expander session and rebuilds it when language changes.
+    private func queryExpanderSession(for language: ModelLanguage) -> LanguageModelSession {
+        if language != queryExpanderSessionLanguage {
+            queryExpanderSessionLanguage = language
+            queryExpanderSession = LanguageModelSession(
+                instructions: Self.buildQueryExpanderInstructions(for: language)
+            )
+        }
+
+        return queryExpanderSession
+    }
+
+    /// Prompt used to produce search-query expansions in the active UI language.
+    private func queryExpanderPrompt(for query: String, language: ModelLanguage, maxDerivedQueries: Int) -> String {
+        if language == .french {
+            return """
+            Question: \(query)
+
+            Retourne exactement \(maxDerivedQueries) requêtes de recherche web pour la question, en texte brut, une par ligne, sans numérotation, sans commentaires.
+            """
+        }
+
+        return """
+        Question: \(query)
+
+        Output exactly \(maxDerivedQueries) search queries for the question, plain text, one per line, no numbering, no comments.
+        """
+    }
+
+    /// Parses one-query-per-line model output and removes duplicates/noise.
+    private func parseDerivedQueries(_ raw: String, originalQuery: String, maxDerivedQueries: Int) -> [String] {
+        var seen = Set<String>()
+        let normalizedOriginal = normalizeQueryKey(originalQuery)
+        seen.insert(normalizedOriginal)
+
+        let queries = raw
+            .components(separatedBy: .newlines)
+            .map { sanitizeDerivedQueryLine($0) }
+            .filter { !$0.isEmpty }
+            .filter { !isRawURLSearchQuery($0) }
+            .filter { isMeaningfullyDifferentFromOriginal($0, originalQuery: originalQuery) }
+            .filter { candidate in
+                seen.insert(normalizeQueryKey(candidate)).inserted
+            }
+            .filter { !isNearDuplicate(ofAny: $0, in: [originalQuery]) }
+
+        return Array(queries.prefix(maxDerivedQueries))
+    }
+
+    /// Removes bullets/numbering artifacts and trims wrapping quotes.
+    private func sanitizeDerivedQueryLine(_ line: String) -> String {
+        let withoutPrefix = line.replacingOccurrences(
+            of: #"^\s*(?:[-*•]|\d+[.)])\s*"#,
+            with: "",
+            options: .regularExpression
+        )
+
+        return withoutPrefix
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Normalizes a query for case-insensitive deduplication.
+    private func normalizeQueryKey(_ query: String) -> String {
+        query
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Detects lines that are raw links instead of plain search query text.
+    private func isRawURLSearchQuery(_ candidate: String) -> Bool {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+
+        if trimmed.range(
+            of: #"^(?i)(?:https?://|www\.)\S+$"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+
+        if trimmed.contains(" ") {
+            return false
+        }
+
+        guard let components = URLComponents(string: trimmed) else {
+            return false
+        }
+
+        let hasSchemeAndHost =
+            (components.scheme?.isEmpty == false) &&
+            (components.host?.isEmpty == false)
+
+        return hasSchemeAndHost
+    }
+
+    /// Tokenizes text for lightweight lexical-similarity checks.
+    private func queryTokenSet(_ query: String) -> Set<String> {
+        let normalized = normalizeQueryKey(query)
+        let separators = CharacterSet.alphanumerics.inverted
+        let tokens = normalized
+            .components(separatedBy: separators)
+            .filter { $0.count >= 3 }
+
+        return Set(tokens)
+    }
+
+    /// Returns true when candidate adds enough novel tokens vs original query.
+    private func isMeaningfullyDifferentFromOriginal(_ candidate: String, originalQuery: String) -> Bool {
+        let candidateTokens = queryTokenSet(candidate)
+        let originalTokens = queryTokenSet(originalQuery)
+        guard !candidateTokens.isEmpty else { return false }
+
+        let novelTokens = candidateTokens.subtracting(originalTokens)
+        return novelTokens.count >= 2
+    }
+
+    /// Rejects near-duplicate variants using Jaccard overlap on token sets.
+    private func isNearDuplicate(ofAny candidate: String, in existingQueries: [String]) -> Bool {
+        let candidateTokens = queryTokenSet(candidate)
+        guard !candidateTokens.isEmpty else { return true }
+
+        for existing in existingQueries {
+            let existingTokens = queryTokenSet(existing)
+            guard !existingTokens.isEmpty else { continue }
+
+            let intersectionCount = candidateTokens.intersection(existingTokens).count
+            let unionCount = candidateTokens.union(existingTokens).count
+            guard unionCount > 0 else { continue }
+
+            let similarity = Double(intersectionCount) / Double(unionCount)
+            if similarity >= 0.75 {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /// Ensures we always return exactly `maxDerivedQueries` non-URL alternatives.
+    private func completeDerivedQueries(
+        _ parsed: [String],
+        originalQuery: String,
+        fallback: [String],
+        language: ModelLanguage,
+        maxDerivedQueries: Int
+    ) -> [String] {
+        guard maxDerivedQueries > 0 else { return [] }
+
+        var completed: [String] = []
+        var seen = Set<String>()
+        seen.insert(normalizeQueryKey(originalQuery))
+
+        let intentFallbacks = fallbackDerivedQueries(
+            for: originalQuery,
+            language: language,
+            maxDerivedQueries: max(5, maxDerivedQueries)
+        )
+
+        func shouldKeep(_ cleaned: String) -> Bool {
+            guard !cleaned.isEmpty else { return false }
+            guard !isRawURLSearchQuery(cleaned) else { return false }
+            guard isMeaningfullyDifferentFromOriginal(cleaned, originalQuery: originalQuery) else { return false }
+            guard !isNearDuplicate(ofAny: cleaned, in: [originalQuery] + completed) else { return false }
+            return true
+        }
+
+        func appendIfValid(_ candidate: String) {
+            let cleaned = sanitizeDerivedQueryLine(candidate)
+            guard shouldKeep(cleaned) else { return }
+            guard seen.insert(normalizeQueryKey(cleaned)).inserted else { return }
+            completed.append(cleaned)
+        }
+
+        for candidate in parsed {
+            appendIfValid(candidate)
+            if completed.count == maxDerivedQueries { return completed }
+        }
+
+        for candidate in fallback {
+            appendIfValid(candidate)
+            if completed.count == maxDerivedQueries { return completed }
+        }
+
+        for candidate in intentFallbacks {
+            appendIfValid(candidate)
+            if completed.count == maxDerivedQueries { return completed }
+        }
+
+        var fillerIndex = 1
+        while completed.count < maxDerivedQueries {
+            if language == .french {
+                appendIfValid("\(originalQuery) méthode fiable \(fillerIndex)")
+            } else {
+                appendIfValid("\(originalQuery) reliable method \(fillerIndex)")
+            }
+            fillerIndex += 1
+
+            // Last resort to guarantee progress if strict filters reject too much.
+            if fillerIndex > 20 && completed.count < maxDerivedQueries {
+                let coarse = language == .french
+                    ? "\(originalQuery) guide complet \(completed.count + 1)"
+                    : "\(originalQuery) complete guide \(completed.count + 1)"
+                let cleaned = sanitizeDerivedQueryLine(coarse)
+                if seen.insert(normalizeQueryKey(cleaned)).inserted {
+                    completed.append(cleaned)
+                }
+            }
+        }
+
+        return completed
+    }
+
+    /// Language-aware intent-based fallback expansions.
+    private func fallbackDerivedQueries(for query: String, language: ModelLanguage, maxDerivedQueries: Int) -> [String] {
+        let isTravelDistance = looksLikeTravelDistanceQuery(query)
+
+        let candidates: [String]
+        if language == .french {
+            if isTravelDistance {
+                candidates = [
+                    "\(query) distance totale km",
+                    "\(query) durée trajet voiture train",
+                    "\(query) meilleur itinéraire avec péage",
+                    "\(query) carte et étapes détaillées",
+                    "\(query) données officielles de distance"
+                ]
+            } else {
+                candidates = [
+                    "\(query) définition et points clés",
+                    "\(query) comparaison des alternatives",
+                    "\(query) données récentes source officielle",
+                    "\(query) guide pratique étape par étape",
+                    "\(query) erreurs fréquentes et vérification"
+                ]
+            }
+        } else {
+            if isTravelDistance {
+                candidates = [
+                    "\(query) total distance in km",
+                    "\(query) travel time by car and train",
+                    "\(query) best route with toll options",
+                    "\(query) map with route steps",
+                    "\(query) official distance data sources"
+                ]
+            } else {
+                candidates = [
+                    "\(query) definition and key points",
+                    "\(query) alternatives comparison",
+                    "\(query) latest data official source",
+                    "\(query) step by step practical guide",
+                    "\(query) common mistakes and validation"
+                ]
+            }
+        }
+
+        return Array(candidates.prefix(maxDerivedQueries))
+    }
+
+    /// Heuristic detection for route/distance intents to improve fallback relevance.
+    private func looksLikeTravelDistanceQuery(_ query: String) -> Bool {
+        let q = normalizeQueryKey(query)
+        let travelKeywords = [
+            "distance", "trajet", "itineraire", "itinéraire", "route", "km", "kilometre", "kilomètre", "driving", "travel"
+        ]
+        return travelKeywords.contains { q.contains($0) }
     }
 
     /// Fallback guess used when on-device generation is unavailable.
