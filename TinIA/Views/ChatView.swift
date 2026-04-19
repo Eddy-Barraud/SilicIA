@@ -1,4 +1,5 @@
 import SwiftUI
+import LaTeXSwiftUI
 
 struct ChatView: View {
     @StateObject private var chatService = SimpleChatService()
@@ -6,6 +7,23 @@ struct ChatView: View {
     @State private var showSettings = false
     @State private var messageInput = ""
     @State private var showPromotionPopup = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var controlBackgroundColor: Color {
+        #if os(macOS)
+        return Color(nsColor: .controlBackgroundColor)
+        #else
+        return Color(uiColor: .secondarySystemBackground)
+        #endif
+    }
+
+    private var textBackgroundColor: Color {
+        #if os(macOS)
+        return Color(nsColor: .textBackgroundColor)
+        #else
+        return Color(uiColor: .systemBackground)
+        #endif
+    }
 
     private var estimatedMaxOutputCharacters: Int {
         TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
@@ -25,6 +43,10 @@ struct ChatView: View {
 
     private var estimatedMaxContextWords: Int {
         TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokens)
+    }
+
+    private func maxBubbleWidth(for containerWidth: CGFloat) -> CGFloat {
+        containerWidth * 0.6
     }
 
     var body: some View {
@@ -174,54 +196,78 @@ struct ChatView: View {
             }
         }
         .padding()
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(controlBackgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var messagesView: some View {
-        ScrollView {
-            LazyVStack(spacing: 10) {
-                if chatService.messages.isEmpty {
-                    Text(settings.language == .french ? "Discutez avec le modele foundation." : "Chat with the foundation model.")
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                ForEach(chatService.messages) { message in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(message.role == .user ? (settings.language == .french ? "Vous" : "You") : "Assistant")
-                            .font(.caption)
+        GeometryReader { geometry in
+            ScrollView {
+                LazyVStack(spacing: 10) {
+                    if chatService.messages.isEmpty {
+                        Text(settings.language == .french ? "Discutez avec le modele foundation." : "Chat with the foundation model.")
                             .foregroundColor(.secondary)
-
-                        Text(message.content)
-                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .padding(10)
-                    .frame(maxWidth: .infinity, alignment: message.role == .assistant ? .leading : .trailing)
-                    .background(
-                        message.role == .user
-                        ? Color.accentColor.opacity(0.15)
-                        : Color(nsColor: .controlBackgroundColor)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
 
-                if chatService.isResponding {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .controlSize(.small)
-                        Text("Thinking...")
-                            .foregroundColor(.secondary)
-                        Spacer()
+                    ForEach(chatService.messages) { message in
+                        HStack {
+                            if message.role == .assistant {
+                                bubbleView(message)
+                                    .frame(maxWidth: maxBubbleWidth(for: geometry.size.width), alignment: .leading)
+                                Spacer(minLength: 0)
+                            } else {
+                                Spacer(minLength: 0)
+                                bubbleView(message)
+                                    .frame(maxWidth: maxBubbleWidth(for: geometry.size.width), alignment: .trailing)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+
+                    if chatService.isResponding {
+                        HStack(spacing: 8) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("Thinking...")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
+            .padding(8)
+            .background(textBackgroundColor)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(8)
-        .background(Color(nsColor: .textBackgroundColor))
+    }
+
+    @ViewBuilder
+    private func bubbleView(_ message: ChatMessage) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(message.role == .user ? (settings.language == .french ? "Vous" : "You") : "Assistant")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if message.role == .assistant {
+                LaTeX(message.content)
+                    .font(.body)
+                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                    .textSelection(.enabled)
+            } else {
+                Text(message.content)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding(10)
+        .background(
+            message.role == .user
+            ? Color.accentColor.opacity(0.15)
+            : controlBackgroundColor
+        )
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var composerView: some View {
@@ -240,7 +286,7 @@ struct ChatView: View {
                     .padding(.horizontal, 10)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(nsColor: .textBackgroundColor))
+                    .background(textBackgroundColor)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8, style: .continuous)
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1)

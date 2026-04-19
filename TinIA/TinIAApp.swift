@@ -6,6 +6,8 @@ struct TinIAApp: App {
         WindowGroup {
             ContentView()
         }
-        .defaultSize(width: 1100, height: 760)
+        #if os(macOS)
+        .defaultSize(width: 900, height: 760)
+        #endif
     }
 }
