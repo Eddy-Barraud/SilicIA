@@ -353,13 +353,7 @@ private enum ModelOutputLaTeXSanitizer {
             pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
             with: " $1"
         )
-        sanitized = replacingRegex(
-            in: sanitized,
-            pattern: #"(\\[A-Za-z]+)(?=[0-9A-Za-z])"#,
-            with: "$1 "
-        )
         sanitized = replacingDigitPowers(in: sanitized)
-        sanitized = closeUnbalancedMathDelimiters(in: sanitized)
         return sanitized
     }
 
@@ -389,83 +383,6 @@ private enum ModelOutputLaTeXSanitizer {
             let exponent = String(output[exponentRange])
             output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
         }
-        return output
-    }
-
-    private static func closeUnbalancedMathDelimiters(in text: String) -> String {
-        var singleDollarCount = 0
-        var doubleDollarCount = 0
-        var openParenCount = 0
-        var closeParenCount = 0
-        var openBracketCount = 0
-        var closeBracketCount = 0
-
-        let characters = Array(text)
-        var index = 0
-
-        while index < characters.count {
-            let current = characters[index]
-
-            if current == "\\" {
-                if index + 1 < characters.count {
-                    let next = characters[index + 1]
-                    if next == "(" {
-                        openParenCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == ")" {
-                        closeParenCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "[" {
-                        openBracketCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "]" {
-                        closeBracketCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "$" {
-                        index += 2
-                        continue
-                    }
-                }
-                index += 1
-                continue
-            }
-
-            if current == "$" {
-                if index + 1 < characters.count, characters[index + 1] == "$" {
-                    doubleDollarCount += 1
-                    index += 2
-                } else {
-                    singleDollarCount += 1
-                    index += 1
-                }
-                continue
-            }
-
-            index += 1
-        }
-
-        var output = text
-        if doubleDollarCount % 2 != 0 {
-            output += "$$"
-        }
-        if singleDollarCount % 2 != 0 {
-            output += "$"
-        }
-        if openParenCount > closeParenCount {
-            output += String(repeating: "\\)", count: openParenCount - closeParenCount)
-        }
-        if openBracketCount > closeBracketCount {
-            output += String(repeating: "\\]", count: openBracketCount - closeBracketCount)
-        }
-
         return output
     }
 
