@@ -780,43 +780,21 @@ struct SearchView: View {
 
     @ViewBuilder
     private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
-        let sanitized = ModelOutputLaTeXSanitizer.sanitize(text)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
         if isStreaming {
-            let lines = sanitized.components(separatedBy: .newlines)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { lineNB, line in
-                    if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Color.clear.frame(height: 8)
-                    } ; if lineNB <= 3 {
-                        LaTeX(line)
-                            .font(.body)
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        } else {
-            let reconstructed = sanitized.components(separatedBy: .newlines).joined(separator: "\n")
-            let finalText = normalizedLaTeXComparisonText(reconstructed) == normalizedLaTeXComparisonText(sanitized)
-                ? sanitized
-                : reconstructed
-
-            LaTeX(finalText)
+            Text(text)
                 .font(.body)
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(text))
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                #if DEBUG
+                .errorMode(.error)
+                #endif
         }
     }
-
-    private func normalizedLaTeXComparisonText(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
     // MARK: - Empty State View
     private var emptyStateView: some View {
         VStack(spacing: 16) {
@@ -1040,73 +1018,6 @@ struct SearchView: View {
         searchQuery = trimmed
         onInitialQueryHandled?()
         performSearch()
-    }
-}
-
-private enum ModelOutputLaTeXSanitizer {
-    static func sanitize(_ input: String) -> String {
-        var sanitized = input
-        sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
-        sanitized = replacingRegex(
-            in: sanitized,
-            pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
-            with: " $1"
-        )
-        sanitized = replacingDigitPowers(in: sanitized)
-        return sanitized
-    }
-
-    private static func insertBoundarySpacesForKnownCommands(in text: String) -> String {
-        var output = text
-        let commands = ["per", "mathrm", "text"]
-
-        for command in commands {
-            output = replacingRegex(
-                in: output,
-                pattern: #"(?<!\s)(\\"# + command + #")"#,
-                with: " $1"
-            )
-            output = replacingRegex(
-                in: output,
-                pattern: #"(\\"# + command + #")(?=[A-Za-z0-9])"#,
-                with: "$1 "
-            )
-        }
-
-        return output
-    }
-
-    private static func replacingDigitPowers(in text: String) -> String {
-        var output = text
-        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^\{([^{}]+)\}"#)
-        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^(-?\d+)"#)
-        return output
-    }
-
-    private static func replacingDigitPowerMatches(in text: String, pattern: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let nsText = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
-        guard !matches.isEmpty else { return text }
-
-        var output = text
-        for match in matches.reversed() {
-            guard match.numberOfRanges >= 3,
-                  let wholeRange = Range(match.range(at: 0), in: output),
-                  let baseRange = Range(match.range(at: 1), in: output),
-                  let exponentRange = Range(match.range(at: 2), in: output) else {
-                continue
-            }
-
-            let base = String(output[baseRange])
-            let exponent = String(output[exponentRange])
-            output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
-        }
-        return output
-    }
-
-    private static func replacingRegex(in text: String, pattern: String, with template: String) -> String {
-        text.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
     }
 }
 

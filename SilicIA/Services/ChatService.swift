@@ -169,7 +169,7 @@ final class ChatService: ObservableObject {
             var latestPartial = ""
             let responseStream = session.streamResponse(to: prompt, options: options)
             for try await snapshot in responseStream {
-                let partial = normalizeModelOutput(String(describing: snapshot.content))
+                let partial = String(describing: snapshot.content)
                 guard !partial.isEmpty, partial != latestPartial else { continue }
                 latestPartial = partial
                 updateAssistantMessage(id: assistantID, content: partial, citations: citations)
@@ -178,7 +178,7 @@ final class ChatService: ObservableObject {
             let finalContent: String
             if latestPartial.isEmpty {
                 let response = try await session.respond(to: prompt, options: options)
-                finalContent = normalizeModelOutput(String(describing: response.content))
+                finalContent = String(describing: response.content)
                 updateAssistantMessage(id: assistantID, content: finalContent, citations: citations)
             } else {
                 finalContent = latestPartial
@@ -669,7 +669,7 @@ final class ChatService: ObservableObject {
             .suffix(Self.historyMessageLimit)
             .map { item in
                 if item.role == .assistant {
-                    return "Assistant: \(sanitizeLaTeXDocumentWrappers(item.content))"
+                    return "Assistant: \(item.content)"
                 }
                 return "User: \(item.content)"
             }
@@ -696,43 +696,6 @@ final class ChatService: ObservableObject {
         )
     }
 
-    /// Removes full LaTeX document wrappers that the renderer does not expect.
-    private func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let beginRange = cleaned.range(of: "\\begin{document}"),
-           let endRange = cleaned.range(of: "\\end{document}"),
-           beginRange.upperBound <= endRange.lowerBound {
-            cleaned = String(cleaned[beginRange.upperBound..<endRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-            with: "",
-            options: .regularExpression
-        )
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-            with: "",
-            options: .regularExpression
-        )
-        cleaned = cleaned.replacingOccurrences(of: "\\begin{document}", with: "")
-        cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Normalizes escaped sequences emitted by the model so Markdown/KaTeX render correctly.
-    private func normalizeModelOutput(_ raw: String) -> String {
-        var normalized = raw
-        normalized = normalized.replacingOccurrences(of: "\\\\", with: "\\")
-        normalized = normalized.replacingOccurrences(of: "\\n", with: "\n")
-        normalized = normalized.replacingOccurrences(of: "\\t", with: "\t")
-        normalized = normalized.replacingOccurrences(of: "\\r", with: "\r")
-        normalized = normalized.replacingOccurrences(of: "\\$", with: "$")
-        return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 
     private func updateAssistantMessage(id: UUID, content: String, citations: String?) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
@@ -814,7 +777,11 @@ final class ChatService: ObservableObject {
         - Never use environments with \\begin{.
         """
     }
-
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        print("[ChatView] \(message)")
+        #endif
+    }
     /// Persists a message to the current SwiftData conversation.
     private func persistMessage(role: String, content: String, citations: String?) {
         guard let modelContext else { return }
@@ -835,6 +802,12 @@ final class ChatService: ObservableObject {
         let message = Message(role: role, content: content, citations: citations)
         conversation.messages.append(message)
         conversation.updatedAt = Date()
+
+        // Debug log the new message and conversation state
+        #if DEBUG
+        debugLog("Persisted new message with role=\(role) content=\\n \"\(content))\" \\ncitations=\"\(citations ?? "none")\"")
+        debugLog("Current conversation now has \(conversation.messages.count) messages, last updated at \(conversation.updatedAt)")
+        #endif
 
         scheduleContextSave()
     }

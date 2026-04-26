@@ -144,8 +144,6 @@ struct ConversationsListView: View {
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "trash")
-                    Text("Delete")
-                        .fontWeight(.medium)
                 }
             }
             .buttonStyle(.bordered)

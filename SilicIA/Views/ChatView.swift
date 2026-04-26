@@ -37,12 +37,6 @@ struct ChatView: View {
     @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
     @State private var loggedAssistantSnapshots: [ChatMessage.ID: String] = [:]
 
-    private func debugLog(_ message: String) {
-        #if DEBUG
-        print("[ChatView] \(message)")
-        #endif
-    }
-
     private var controlBackgroundColor: Color {
         #if os(macOS)
         return Color(NSColor.controlBackgroundColor)
@@ -406,69 +400,35 @@ struct ChatView: View {
                     }
                 }
             }
-            .onAppear {
-                logAssistantContentIfNeeded(messageID: message.id, content: message.content)
-            }
-            .onChange(of: message.content) {
-                logAssistantContentIfNeeded(messageID: message.id, content: message.content)
-            }
         } else {
             Text(message.content)
         }
-    }
-
-    private func logAssistantContentIfNeeded(messageID: ChatMessage.ID, content: String) {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard loggedAssistantSnapshots[messageID] != content else { return }
-        loggedAssistantSnapshots[messageID] = content
-        debugLog("Model answer (pre-LaTeX): \(content)")
     }
 
     private func isStreamingAssistantMessage(_ message: ChatMessage) -> Bool {
         guard chatService.isResponding, message.role == .assistant else { return false }
         return chatService.messages.last?.id == message.id
     }
+    
 
     @ViewBuilder
     private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
-        let sanitized = ModelOutputLaTeXSanitizer.sanitize(text)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
         if isStreaming {
-            let lines = sanitized.components(separatedBy: .newlines)
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(lines.enumerated()), id: \.offset) { lineNB, line in
-                    if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Color.clear.frame(height: 8)
-                    }
-                    if lineNB <= 6 {
-                        LaTeX(line)
-                            .font(.body)
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        } else {
-            let reconstructed = sanitized.components(separatedBy: .newlines).joined(separator: "\n")
-            let finalText = normalizedLaTeXComparisonText(reconstructed) == normalizedLaTeXComparisonText(sanitized)
-                ? sanitized
-                : reconstructed
-            
-            LaTeX(finalText)
+            Text(text)
                 .font(.body)
                 .foregroundColor(colorScheme == .dark ? .white : .black)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(text))
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                #if DEBUG
+                .errorMode(.error)
+                #endif
         }
     }
-
-    private func normalizedLaTeXComparisonText(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
+    
 
     /// Renders input area and send action.
     private var composerView: some View {
@@ -960,150 +920,6 @@ struct ChatView: View {
     }
 }
 
-private enum ModelOutputLaTeXSanitizer {
-    static func sanitize(_ input: String) -> String {
-        var sanitized = input
-        sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
-        sanitized = replacingRegex(
-            in: sanitized,
-            pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
-            with: " $1"
-        )
-        sanitized = replacingDigitPowers(in: sanitized)
-        sanitized = closeUnbalancedMathDelimiters(in: sanitized)
-        return sanitized
-    }
-
-    private static func insertBoundarySpacesForKnownCommands(in text: String) -> String {
-        var output = text
-        let commands = ["per", "mathrm", "text"]
-
-        for command in commands {
-            output = replacingRegex(
-                in: output,
-                pattern: #"(?<!\s)(\\"# + command + #")"#,
-                with: " $1"
-            )
-            output = replacingRegex(
-                in: output,
-                pattern: #"(\\"# + command + #")(?=[A-Za-z0-9])"#,
-                with: "$1 "
-            )
-        }
-
-        return output
-    }
-
-    private static func replacingDigitPowers(in text: String) -> String {
-        var output = text
-        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^\{([^{}]+)\}"#)
-        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^(-?\d+)"#)
-        return output
-    }
-
-    private static func replacingDigitPowerMatches(in text: String, pattern: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-        let nsText = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
-        guard !matches.isEmpty else { return text }
-
-        var output = text
-        for match in matches.reversed() {
-            guard match.numberOfRanges >= 3,
-                  let wholeRange = Range(match.range(at: 0), in: output),
-                  let baseRange = Range(match.range(at: 1), in: output),
-                  let exponentRange = Range(match.range(at: 2), in: output) else {
-                continue
-            }
-
-            let base = String(output[baseRange])
-            let exponent = String(output[exponentRange])
-            output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
-        }
-        return output
-    }
-
-    private static func closeUnbalancedMathDelimiters(in text: String) -> String {
-        var singleDollarCount = 0
-        var doubleDollarCount = 0
-        var openParenCount = 0
-        var closeParenCount = 0
-        var openBracketCount = 0
-        var closeBracketCount = 0
-
-        let characters = Array(text)
-        var index = 0
-
-        while index < characters.count {
-            let current = characters[index]
-
-            if current == "\\" {
-                if index + 1 < characters.count {
-                    let next = characters[index + 1]
-                    if next == "(" {
-                        openParenCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == ")" {
-                        closeParenCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "[" {
-                        openBracketCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "]" {
-                        closeBracketCount += 1
-                        index += 2
-                        continue
-                    }
-                    if next == "$" {
-                        index += 2
-                        continue
-                    }
-                }
-                index += 1
-                continue
-            }
-
-            if current == "$" {
-                if index + 1 < characters.count, characters[index + 1] == "$" {
-                    doubleDollarCount += 1
-                    index += 2
-                } else {
-                    singleDollarCount += 1
-                    index += 1
-                }
-                continue
-            }
-
-            index += 1
-        }
-
-        var output = text
-        if doubleDollarCount % 2 != 0 {
-            output += "$$"
-        }
-        if singleDollarCount % 2 != 0 {
-            output += "$"
-        }
-        if openParenCount > closeParenCount {
-            output += String(repeating: "\\)", count: openParenCount - closeParenCount)
-        }
-        if openBracketCount > closeBracketCount {
-            output += String(repeating: "\\]", count: openBracketCount - closeBracketCount)
-        }
-
-        return output
-    }
-
-    private static func replacingRegex(in text: String, pattern: String, with template: String) -> String {
-        text.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
-    }
-}
 
 private struct ContextSource: Identifiable {
     enum Kind {
