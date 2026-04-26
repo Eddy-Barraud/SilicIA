@@ -1,6 +1,7 @@
 # SilicIA
 
 [![Build SilicIA](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml/badge.svg)](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml)
+[![Check Web Search Sources](https://github.com/Eddy-Barraud/SilicIA/actions/workflows/checkwebscrap.yml/badge.svg)](https://github.com/Eddy-Barraud/SilicIA/actions/workflows/checkwebscrap.yml)
 
 A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
 The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.
