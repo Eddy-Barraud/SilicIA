@@ -3,207 +3,207 @@ name: Check Web Search Sources
 on:
   workflow_dispatch:
   push:
-	branches: [ main, develop ]
-	paths:
-	  - SilicIA/Services/WebSearchService.swift
-	  - .github/workflows/checkwebscrap.yml
+    branches: [ main, develop ]
+    paths:
+      - SilicIA/Services/WebSearchService.swift
+      - .github/workflows/checkwebscrap.yml
   pull_request:
-	branches: [ main, develop ]
-	paths:
-	  - SilicIA/Services/WebSearchService.swift
-	  - .github/workflows/checkwebscrap.yml
+    branches: [ main, develop ]
+    paths:
+      - SilicIA/Services/WebSearchService.swift
+      - .github/workflows/checkwebscrap.yml
 
 jobs:
   check-websearchservice-sources:
-	runs-on: ubuntu-latest
+    runs-on: ubuntu-latest
 
-	steps:
-	  - uses: actions/checkout@v4
+    steps:
+      - uses: actions/checkout@v4
 
-	  - name: Set up Python
-		uses: actions/setup-python@v5
-		with:
-		  python-version: "3.12"
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-	  - name: Verify DuckDuckGo and Wikipedia retrieval
-		env:
-		  QUERY: Population in Paris
-		run: |
-		  set -euo pipefail
-		  python3 - <<'PY'
-		  import html
-		  import json
-		  import re
-		  import sys
-		  import time
-		  import urllib.parse
-		  import urllib.request
+      - name: Verify DuckDuckGo and Wikipedia retrieval
+        env:
+          QUERY: Population in Paris
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import html
+          import json
+          import re
+          import sys
+          import time
+          import urllib.parse
+          import urllib.request
 
-		  QUERY = "Population in Paris"
-		  USER_AGENT = "SilicIA-CI-WebSearchCheck/1.0 (+https://github.com/Eddy-Barraud/SilicIA)"
+          QUERY = "Population in Paris"
+          USER_AGENT = "SilicIA-CI-WebSearchCheck/1.0 (+https://github.com/Eddy-Barraud/SilicIA)"
 
-		  def fail(message: str) -> None:
-			  print(f"::error::{message}")
-			  sys.exit(1)
+          def fail(message: str) -> None:
+            print(f"::error::{message}")
+            sys.exit(1)
 
-		  def fetch_text(url: str, accept: str = "*/*", retries: int = 3) -> str:
-			  last_error = None
-			  for attempt in range(1, retries + 1):
-				  try:
-					  req = urllib.request.Request(
-						  url,
-						  headers={
-							  "User-Agent": USER_AGENT,
-							  "Accept": accept,
-						  },
-					  )
-					  with urllib.request.urlopen(req, timeout=20) as response:
-						  status = response.status
-						  body = response.read().decode("utf-8", errors="replace")
-					  if status != 200:
-						  raise RuntimeError(f"HTTP {status} for {url}")
-					  return body
-				  except Exception as exc:
-					  last_error = exc
-					  if attempt < retries:
-						  time.sleep(1.5 * attempt)
-			  raise RuntimeError(f"Failed after {retries} attempts for {url}: {last_error}")
+          def fetch_text(url: str, accept: str = "*/*", retries: int = 3) -> str:
+            last_error = None
+            for attempt in range(1, retries + 1):
+              try:
+                req = urllib.request.Request(
+                  url,
+                  headers={
+                    "User-Agent": USER_AGENT,
+                    "Accept": accept,
+                  },
+                )
+                with urllib.request.urlopen(req, timeout=20) as response:
+                  status = response.status
+                  body = response.read().decode("utf-8", errors="replace")
+                if status != 200:
+                  raise RuntimeError(f"HTTP {status} for {url}")
+                return body
+              except Exception as exc:
+                last_error = exc
+                if attempt < retries:
+                  time.sleep(1.5 * attempt)
+            raise RuntimeError(f"Failed after {retries} attempts for {url}: {last_error}")
 
-		  def html_to_plain_text(raw: str) -> str:
-			  without_tags = re.sub(r"<[^>]+>", "", raw)
-			  return html.unescape(without_tags).strip()
+          def html_to_plain_text(raw: str) -> str:
+            without_tags = re.sub(r"<[^>]+>", "", raw)
+            return html.unescape(without_tags).strip()
 
-		  def extract_actual_ddg_url(url: str) -> str:
-			  raw_url = url
-			  if raw_url.startswith("//"):
-				  raw_url = "https:" + raw_url
+          def extract_actual_ddg_url(url: str) -> str:
+            raw_url = url
+            if raw_url.startswith("//"):
+              raw_url = "https:" + raw_url
 
-			  parsed = urllib.parse.urlparse(raw_url)
-			  if "duckduckgo.com" in parsed.netloc and parsed.path.startswith("/l/"):
-				  uddg = urllib.parse.parse_qs(parsed.query).get("uddg", [None])[0]
-				  if uddg:
-					  return urllib.parse.unquote(uddg)
+            parsed = urllib.parse.urlparse(raw_url)
+            if "duckduckgo.com" in parsed.netloc and parsed.path.startswith("/l/"):
+              uddg = urllib.parse.parse_qs(parsed.query).get("uddg", [None])[0]
+              if uddg:
+                return urllib.parse.unquote(uddg)
 
-			  return raw_url
+            return raw_url
 
-		  def parse_ddg_like_websearchservice(html_doc: str):
-			  results = []
-			  parts = html_doc.split('class="result__a"')
-			  for component in parts[1:21]:
-				  href_anchor = component.find('href="')
-				  if href_anchor == -1:
-					  continue
-				  href_start = href_anchor + len('href="')
-				  href_end = component.find('"', href_start)
-				  if href_end == -1:
-					  continue
-				  raw_href = component[href_start:href_end]
+          def parse_ddg_like_websearchservice(html_doc: str):
+            results = []
+            parts = html_doc.split('class="result__a"')
+            for component in parts[1:21]:
+              href_anchor = component.find('href="')
+              if href_anchor == -1:
+                continue
+              href_start = href_anchor + len('href="')
+              href_end = component.find('"', href_start)
+              if href_end == -1:
+                continue
+              raw_href = component[href_start:href_end]
 
-				  title_start = component.find('>', href_end)
-				  if title_start == -1:
-					  continue
-				  title_end = component.find('</a>', title_start)
-				  if title_end == -1:
-					  continue
-				  title_html = component[title_start + 1:title_end]
-				  title = html_to_plain_text(title_html)
-				  if not title:
-					  continue
+              title_start = component.find('>', href_end)
+              if title_start == -1:
+                continue
+              title_end = component.find('</a>', title_start)
+              if title_end == -1:
+                continue
+              title_html = component[title_start + 1:title_end]
+              title = html_to_plain_text(title_html)
+              if not title:
+                continue
 
-				  clean_url = extract_actual_ddg_url(raw_href)
-				  results.append({"title": title, "url": clean_url})
-			  return results
+              clean_url = extract_actual_ddg_url(raw_href)
+              results.append({"title": title, "url": clean_url})
+            return results
 
-		  print(f"Running web source checks with query: {QUERY}")
+          print(f"Running web source checks with query: {QUERY}")
 
-		  # DuckDuckGo check (same parsing strategy as WebSearchService)
-		  encoded_query = urllib.parse.quote(QUERY)
-		  ddg_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
-		  ddg_html = fetch_text(ddg_url, accept="text/html")
-		  ddg_results = parse_ddg_like_websearchservice(ddg_html)
+          # DuckDuckGo check (same parsing strategy as WebSearchService)
+          encoded_query = urllib.parse.quote(QUERY)
+          ddg_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+          ddg_html = fetch_text(ddg_url, accept="text/html")
+          ddg_results = parse_ddg_like_websearchservice(ddg_html)
 
-		  if len(ddg_results) < 2:
-			  fail(
-				  f"DuckDuckGo extraction failed: expected at least 2 parsed results, got {len(ddg_results)}"
-			  )
+          if len(ddg_results) < 2:
+            fail(
+              f"DuckDuckGo extraction failed: expected at least 2 parsed results, got {len(ddg_results)}"
+            )
 
-		  valid_article_like = [
-			  r for r in ddg_results
-			  if r["url"].startswith("http") and "duckduckgo.com/l/?" not in r["url"]
-		  ]
+          valid_article_like = [
+            r for r in ddg_results
+            if r["url"].startswith("http") and "duckduckgo.com/l/?" not in r["url"]
+          ]
 
-		  if not valid_article_like:
-			  fail("DuckDuckGo extraction failed: no clean article URLs extracted")
+          if not valid_article_like:
+            fail("DuckDuckGo extraction failed: no clean article URLs extracted")
 
-		  print(f"DuckDuckGo OK: parsed {len(ddg_results)} results")
-		  print(f"Sample DDG result: {valid_article_like[0]['title']} -> {valid_article_like[0]['url']}")
+          print(f"DuckDuckGo OK: parsed {len(ddg_results)} results")
+          print(f"Sample DDG result: {valid_article_like[0]['title']} -> {valid_article_like[0]['url']}")
 
-		  # Wikipedia REST search + page content check
-		  wiki_search_url = (
-			  "https://en.wikipedia.org/w/rest.php/v1/search/page"
-			  f"?q={encoded_query}&limit=2"
-		  )
-		  wiki_search_raw = fetch_text(wiki_search_url, accept="application/json")
-		  wiki_search = json.loads(wiki_search_raw)
-		  pages = wiki_search.get("pages", [])
+          # Wikipedia REST search + page content check
+          wiki_search_url = (
+            "https://en.wikipedia.org/w/rest.php/v1/search/page"
+            f"?q={encoded_query}&limit=2"
+          )
+          wiki_search_raw = fetch_text(wiki_search_url, accept="application/json")
+          wiki_search = json.loads(wiki_search_raw)
+          pages = wiki_search.get("pages", [])
 
-		  if not pages:
-			  fail("Wikipedia search failed: no pages returned")
+          if not pages:
+            fail("Wikipedia search failed: no pages returned")
 
-		  first_key = pages[0].get("key")
-		  if not first_key:
-			  fail("Wikipedia search failed: first page has no key")
+          first_key = pages[0].get("key")
+          if not first_key:
+            fail("Wikipedia search failed: first page has no key")
 
-		  encoded_key = urllib.parse.quote(first_key, safe="")
-		  wiki_page_url = f"https://en.wikipedia.org/w/rest.php/v1/page/{encoded_key}"
-		  wiki_page_raw = fetch_text(wiki_page_url, accept="application/json")
-		  wiki_page = json.loads(wiki_page_raw)
-		  source = (wiki_page.get("source") or "").strip()
+          encoded_key = urllib.parse.quote(first_key, safe="")
+          wiki_page_url = f"https://en.wikipedia.org/w/rest.php/v1/page/{encoded_key}"
+          wiki_page_raw = fetch_text(wiki_page_url, accept="application/json")
+          wiki_page = json.loads(wiki_page_raw)
+          source = (wiki_page.get("source") or "").strip()
 
-		  if len(source) < 200:
-			  fail(
-				  "Wikipedia page retrieval failed: expected full source content to be present"
-			  )
+          if len(source) < 200:
+            fail(
+              "Wikipedia page retrieval failed: expected full source content to be present"
+            )
 
-		  print(
-			  f"Wikipedia OK: pages={len(pages)}, firstKey={first_key}, sourceChars={len(source)}"
-		  )
-		  
-		  # Additional check: Verify HTML structure changes that might break scraping
-		  # Look for key elements that are expected to be present in DuckDuckGo HTML
-		  expected_elements = ['class="result__a"', 'class="result__title"', 'class="result__snippet"']
-		  missing_elements = []
-		  for element in expected_elements:
-			  if element not in ddg_html:
-				  missing_elements.append(element)
-		  
-		  if missing_elements:
-			  fail(f"DuckDuckGo HTML structure changed: missing elements {missing_elements}")
-		  
-		  print("HTML structure validation passed")
-		  
-		  # Additional check: Verify Wikipedia API response structure changes
-		  # Check for expected fields in search response
-		  expected_search_fields = ['pages']
-		  missing_search_fields = []
-		  for field in expected_search_fields:
-			  if field not in wiki_search:
-				  missing_search_fields.append(field)
-				  
-		  if missing_search_fields:
-			  fail(f"Wikipedia search API structure changed: missing fields {missing_search_fields}")
-			  
-		  # Check for expected fields in page response
-		  expected_page_fields = ['key', 'title', 'source']
-		  missing_page_fields = []
-		  for field in expected_page_fields:
-			  if field not in wiki_page:
-				  missing_page_fields.append(field)
-				  
-		  if missing_page_fields:
-			  fail(f"Wikipedia page API structure changed: missing fields {missing_page_fields}")
-			  
-		  print("Wikipedia API structure validation passed")
-		  
-		  print("All WebSearchService source checks passed.")
-		  PY
+          print(
+            f"Wikipedia OK: pages={len(pages)}, firstKey={first_key}, sourceChars={len(source)}"
+          )
+          
+          # Additional check: Verify HTML structure changes that might break scraping
+          # Look for key elements that are expected to be present in DuckDuckGo HTML
+          expected_elements = ['class="result__a"', 'class="result__title"', 'class="result__snippet"']
+          missing_elements = []
+          for element in expected_elements:
+            if element not in ddg_html:
+              missing_elements.append(element)
+          
+          if missing_elements:
+            fail(f"DuckDuckGo HTML structure changed: missing elements {missing_elements}")
+          
+          print("HTML structure validation passed")
+          
+          # Additional check: Verify Wikipedia API response structure changes
+          # Check for expected fields in search response
+          expected_search_fields = ['pages']
+          missing_search_fields = []
+          for field in expected_search_fields:
+            if field not in wiki_search:
+              missing_search_fields.append(field)
+              
+          if missing_search_fields:
+            fail(f"Wikipedia search API structure changed: missing fields {missing_search_fields}")
+            
+          # Check for expected fields in page response
+          expected_page_fields = ['key', 'title', 'source']
+          missing_page_fields = []
+          for field in expected_page_fields:
+            if field not in wiki_page:
+              missing_page_fields.append(field)
+              
+          if missing_page_fields:
+            fail(f"Wikipedia page API structure changed: missing fields {missing_page_fields}")
+            
+          print("Wikipedia API structure validation passed")
+          
+          print("All WebSearchService source checks passed.")
+          PY
