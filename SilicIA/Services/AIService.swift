@@ -70,7 +70,8 @@ class AIService: ObservableObject {
         query: String,
         language: ModelLanguage = .french,
         temperature: Double = 0.3,
-        maxTokens: Int = 150
+        maxTokens: Int = 150,
+        onPartialUpdate: ((String) -> Void)? = nil
     ) async -> String {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return "" }
@@ -88,6 +89,22 @@ class AIService: ObservableObject {
                 temperature: temperature,
                 maximumResponseTokens: maxTokens
             )
+
+            if let onPartialUpdate {
+                var latestPartial = ""
+                let responseStream = session.streamResponse(to: prompt, options: options)
+                for try await snapshot in responseStream {
+                    let partial = sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !partial.isEmpty, partial != latestPartial else { continue }
+                    latestPartial = partial
+                    onPartialUpdate(partial)
+                }
+
+                if !latestPartial.isEmpty {
+                    return latestPartial
+                }
+            }
 
             let response = try await session.respond(to: prompt, options: options)
             let content = String(describing: response.content)
@@ -169,7 +186,7 @@ class AIService: ObservableObject {
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
     /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -295,7 +312,12 @@ class AIService: ObservableObject {
             temperature: temperature,
             maxTokens: maxTokens,
             language: language,
-            profile: profile
+            profile: profile,
+            onPartialUpdate: { [weak self] partial in
+                guard let self else { return }
+                self.summary = partial
+                onSummaryPartialUpdate?(partial)
+            }
         )
 
         #if DEBUG
@@ -662,7 +684,7 @@ class AIService: ObservableObject {
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
-    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast) async -> String {
+    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, onPartialUpdate: ((String) -> Void)? = nil) async -> String {
         do {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
@@ -739,6 +761,22 @@ class AIService: ObservableObject {
                 temperature: temperature,
                 maximumResponseTokens: effectiveMaxTokens
             )
+
+            if let onPartialUpdate {
+                var latestPartial = ""
+                let responseStream = session.streamResponse(to: prompt, options: options)
+                for try await snapshot in responseStream {
+                    let partial = sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !partial.isEmpty, partial != latestPartial else { continue }
+                    latestPartial = partial
+                    onPartialUpdate(partial)
+                }
+
+                if !latestPartial.isEmpty {
+                    return latestPartial
+                }
+            }
 
             // Generate the summary
             let response = try await session.respond(to: prompt, options: options)

@@ -355,10 +355,7 @@ struct SearchView: View {
                             .foregroundColor(.secondary)
                             .italic()
                     } else if !firstGuessText.isEmpty {
-                        LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
-                            .font(.body)
-                            .foregroundColor(colorScheme == .dark ? .white : .black)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        progressiveLaTeXText(firstGuessText, isStreaming: isGeneratingFirstGuess)
                     } else {
                         Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
                             .foregroundColor(.secondary)
@@ -378,11 +375,10 @@ struct SearchView: View {
                     Text(settings.language == .french ? "Analyse des pages web complètes..." : "Analyzing full web pages...")
                         .foregroundColor(.secondary)
                         .italic()
-                } else if !aiService.summary.isEmpty {
-                    LaTeX(ModelOutputLaTeXSanitizer.sanitize(aiService.summary))
-                        .font(.body)
-                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if !aiService.summary.isEmpty {
+                    progressiveLaTeXText(aiService.summary, isStreaming: aiService.isSummarizing)
 
                     if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Divider()
@@ -408,7 +404,7 @@ struct SearchView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                } else {
+                } else if !aiService.isSummarizing {
                     Text(settings.language == .french ? "Réponse avec contexte web en attente..." : "Waiting for web-context answer...")
                         .foregroundColor(.secondary)
                         .italic()
@@ -468,10 +464,7 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
-                                .font(.body)
-                                .foregroundColor(colorScheme == .dark ? .white : .black)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            progressiveLaTeXText(firstGuessText, isStreaming: isGeneratingFirstGuess)
                         }
                     }
                     .padding()
@@ -670,6 +663,45 @@ struct SearchView: View {
         #endif
     }
 
+    @ViewBuilder
+    private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
+        let sanitized = ModelOutputLaTeXSanitizer.sanitize(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isStreaming {
+            let lines = sanitized.components(separatedBy: .newlines)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { lineNB, line in
+                    if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Color.clear.frame(height: 8)
+                    } ; if lineNB <= 3 {
+                        LaTeX(line)
+                            .font(.body)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        } else {
+            let reconstructed = sanitized.components(separatedBy: .newlines).joined(separator: "\n")
+            let finalText = normalizedLaTeXComparisonText(reconstructed) == normalizedLaTeXComparisonText(sanitized)
+                ? sanitized
+                : reconstructed
+
+            LaTeX(finalText)
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func normalizedLaTeXComparisonText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Empty State View
     private var emptyStateView: some View {
         VStack(spacing: 16) {
@@ -727,7 +759,11 @@ struct SearchView: View {
                 let firstGuess = await aiService.generateFirstGuess(
                     query: trimmedQuery,
                     language: settings.language,
-                    maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap)
+                    maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap),
+                    onPartialUpdate: { partial in
+                        guard activeSearchRequestID == requestID else { return }
+                        firstGuessText = partial
+                    }
                 )
                 guard activeSearchRequestID == requestID else { return }
                 guard settings.isFirstGuessEnabled else {
