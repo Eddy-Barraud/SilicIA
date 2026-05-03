@@ -644,6 +644,30 @@ struct SearchView: View {
                     .font(.subheadline)
             }
 
+            // Search Sources
+            VStack(alignment: .leading, spacing: 8) {
+                Text(settings.language == .french ? "Sources de recherche" : "Search sources")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Toggle(isOn: $settings.useDuckDuckGo) {
+                    Text("DuckDuckGo")
+                        .font(.subheadline)
+                }
+                Toggle(isOn: $settings.useWikipedia) {
+                    Text("Wikipedia")
+                        .font(.subheadline)
+                }
+                if !settings.useDuckDuckGo && !settings.useWikipedia {
+                    Text(
+                        settings.language == .french
+                        ? "Sélectionnez au moins une source."
+                        : "Select at least one source."
+                    )
+                    .font(.caption)
+                    .foregroundColor(.red)
+                }
+            }
+
             // Max Response Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -1110,13 +1134,17 @@ struct SearchView: View {
                         queries: [trimmedQuery] + derivedQueries,
                         maxResultsPerQuery: searchLimit,
                         mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount,
-                        language: settings.language
+                        language: settings.language,
+                        useDuckDuckGo: settings.useDuckDuckGo,
+                        useWikipedia: settings.useWikipedia
                     )
                 } else {
                     fetchedResults = try await searchService.search(
                         query: trimmedQuery,
                         maxResults: searchLimit,
-                        language: settings.language
+                        language: settings.language,
+                        useDuckDuckGo: settings.useDuckDuckGo,
+                        useWikipedia: settings.useWikipedia
                     )
                 }
 

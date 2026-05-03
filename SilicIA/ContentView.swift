@@ -73,7 +73,9 @@ struct ContentView: View {
                                     language: settings.language,
                                     temperature: settings.temperature,
                                     maxResponseTokens: settings.maxResponseTokens,
-                                    maxContextTokens: settings.maxContextTokens
+                                    maxContextTokens: settings.maxContextTokens,
+                                    useDuckDuckGo: settings.useDuckDuckGo,
+                                    useWikipedia: settings.useWikipedia
                                 )
                             }
                         },

@@ -149,15 +149,27 @@ class WebSearchService: ObservableObject {
     }
 
     /// Search DuckDuckGo and Wikipedia, then merge deduplicated results.
-    func search(query: String, maxResults: Int = 10, language: ModelLanguage = .english) async throws -> [SearchResult] {
+    func search(
+        query: String,
+        maxResults: Int = 10,
+        language: ModelLanguage = .english,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
-        debugLog("single-query search start: query=\(query), limit=\(maxResults), language=\(language.rawValue)")
+        debugLog("single-query search start: query=\(query), limit=\(maxResults), language=\(language.rawValue), ddg=\(useDuckDuckGo), wiki=\(useWikipedia)")
 
         isSearching = true
         defer { isSearching = false }
 
-        let results = try await executeSearch(query: query, maxResults: maxResults, language: language)
+        let results = try await executeSearch(
+            query: query,
+            maxResults: maxResults,
+            language: language,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        )
 
         debugLog("single-query search done: count=\(results.count)")
 
@@ -169,7 +181,9 @@ class WebSearchService: ObservableObject {
         queries: [String],
         maxResultsPerQuery: Int = 10,
         mergedLimit: Int = 10,
-        language: ModelLanguage = .english
+        language: ModelLanguage = .english,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) async throws -> [SearchResult] {
         let normalizedQueries = queries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -202,7 +216,13 @@ class WebSearchService: ObservableObject {
 
         for query in uniqueQueries {
             do {
-                let results = try await executeSearch(query: query, maxResults: maxResultsPerQuery, language: language)
+                let results = try await executeSearch(
+                    query: query,
+                    maxResults: maxResultsPerQuery,
+                    language: language,
+                    useDuckDuckGo: useDuckDuckGo,
+                    useWikipedia: useWikipedia
+                )
                 perQueryResults.append(results)
                 debugLog("query ok: \(query) => \(results.count) results")
             } catch {
@@ -225,11 +245,19 @@ class WebSearchService: ObservableObject {
         return merged
     }
 
-    /// Runs both providers for one query and merges deduplicated results.
-    private func executeSearch(query: String, maxResults: Int, language: ModelLanguage) async throws -> [SearchResult] {
+    /// Runs the enabled providers for one query and merges deduplicated results.
+    private func executeSearch(
+        query: String,
+        maxResults: Int,
+        language: ModelLanguage,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
+        guard useDuckDuckGo || useWikipedia else { return [] }
 
         async let duckDuckGoOutcome: ([SearchResult], Error?) = {
+            guard useDuckDuckGo else { return ([], nil) }
             do {
                 let results = try await executeDuckDuckGoSearch(query: query, maxResults: maxResults)
                 return (results, nil)
@@ -239,6 +267,7 @@ class WebSearchService: ObservableObject {
         }()
 
         async let wikipediaOutcome: ([SearchResult], Error?) = {
+            guard useWikipedia else { return ([], nil) }
             do {
                 let results = try await executeWikipediaSearch(
                     query: query,

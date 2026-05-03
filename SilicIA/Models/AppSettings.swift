@@ -21,6 +21,8 @@ struct AppSettings: Codable, Equatable {
     var maxContextTokens: Int = 2400
     var isFirstGuessEnabled: Bool = true
     var isWebSummariesEnabled: Bool = false
+    var useDuckDuckGo: Bool = true
+    var useWikipedia: Bool = true
     var language: ModelLanguage = .english
 
     private static let storageKey = "SilicIA.AppSettings"
@@ -33,6 +35,8 @@ struct AppSettings: Codable, Equatable {
         case maxContextTokens
         case isFirstGuessEnabled
         case isWebSummariesEnabled
+        case useDuckDuckGo
+        case useWikipedia
         case language
     }
 
@@ -69,6 +73,10 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.isFirstGuessEnabled
         isWebSummariesEnabled = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled)
             ?? Self.defaultSettings.isWebSummariesEnabled
+        useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
+            ?? Self.defaultSettings.useDuckDuckGo
+        useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
+            ?? Self.defaultSettings.useWikipedia
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
 
@@ -92,6 +100,8 @@ struct AppSettings: Codable, Equatable {
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
         try container.encode(isFirstGuessEnabled, forKey: .isFirstGuessEnabled)
         try container.encode(isWebSummariesEnabled, forKey: .isWebSummariesEnabled)
+        try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
+        try container.encode(useWikipedia, forKey: .useWikipedia)
         try container.encode(language, forKey: .language)
     }
 
