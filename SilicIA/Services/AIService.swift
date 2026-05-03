@@ -237,7 +237,10 @@ class AIService: ObservableObject {
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
     /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
+    /// - Parameter queries: Full query set (user + derived). When more than one query is provided
+    ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
+    ///   combined query vector.
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -342,7 +345,8 @@ class AIService: ObservableObject {
             chunks: chunks,
             query: query,
             maxOutputTokens: effectiveMaxTokens,
-            contextUtilizationFactor: contextUtilizationFactor
+            contextUtilizationFactor: contextUtilizationFactor,
+            queries: queries
         )
 
         #if DEBUG

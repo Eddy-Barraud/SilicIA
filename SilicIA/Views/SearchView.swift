@@ -1114,6 +1114,7 @@ struct SearchView: View {
                     ? resultsCount
                     : resultsCount + Self.aiSummaryOverfetchResults
                 let fetchedResults: [SearchResult]
+                var allQueries: [String] = [trimmedQuery]
 
                 if generationProfile == .deep && !noAIOnly {
                     let derivedQueries = await aiService.expandSearchQueries(
@@ -1121,17 +1122,17 @@ struct SearchView: View {
                         language: settings.language,
                         maxDerivedQueries: Self.deepSearchDerivedQueryCount
                     )
+                    allQueries = [trimmedQuery] + derivedQueries
 
                     #if DEBUG
                     debugLog(
                         "deep query expansion count: expectedDerived=\(Self.deepSearchDerivedQueryCount), obtainedDerived=\(derivedQueries.count), inputTotal=\(1 + derivedQueries.count)"
                     )
-                    let allQueries = [trimmedQuery] + derivedQueries
                     debugLog("deep query expansion: \(allQueries.joined(separator: " | "))")
                     #endif
 
                     fetchedResults = try await searchService.search(
-                        queries: [trimmedQuery] + derivedQueries,
+                        queries: allQueries,
                         maxResultsPerQuery: searchLimit,
                         mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount,
                         language: settings.language,
@@ -1159,7 +1160,8 @@ struct SearchView: View {
                         maxScrapingResults: resultsCount,
                         maxScrapingChars: scrapingChars,
                         summaryResults: fetchedResults,
-                        generationProfile: generationProfile
+                        generationProfile: generationProfile,
+                        queries: generationProfile == .deep ? allQueries : nil
                     )
                 }
             } catch {
@@ -1190,7 +1192,7 @@ struct SearchView: View {
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil, queries: [String]? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         _ = await aiService.summarize(
@@ -1201,7 +1203,8 @@ struct SearchView: View {
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
-            profile: generationProfile ?? activeGenerationProfile
+            profile: generationProfile ?? activeGenerationProfile,
+            queries: queries
         )
 
         #if DEBUG

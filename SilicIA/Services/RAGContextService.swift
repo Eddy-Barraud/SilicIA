@@ -104,11 +104,14 @@ actor RAGContextService {
     /// - Parameter maxOutputTokens: Requested response-token budget used to compute remaining context space.
     /// - Parameter contextUtilizationFactor: Optional context budget multiplier.
     ///   When nil, `options.contextUtilizationFactor` is used.
+    /// - Parameter queries: When provided (Deep search), chunks are ranked by cosine similarity
+    ///   against a combined TF vector built from every query (user + derived queries).
     func selectContext(
         chunks: [RAGChunk],
         query: String,
         maxOutputTokens: Int,
         contextUtilizationFactor: Double? = nil,
+        queries: [String]? = nil,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
@@ -125,10 +128,26 @@ actor RAGContextService {
             options: options
         )
 
+        let combinedQueryVector: [String: Double]?
+        if let queries, queries.count > 1 {
+            combinedQueryVector = combinedTermVector(from: queries)
+        } else {
+            combinedQueryVector = nil
+        }
+
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(chunks.count)
         for chunk in chunks {
-            let score = relevanceScore(text: chunk.text, query: query, options: options)
+            let score: Double
+            if let combinedQueryVector {
+                score = cosineRelevanceScore(
+                    text: chunk.text,
+                    queryVector: combinedQueryVector,
+                    options: options
+                )
+            } else {
+                score = relevanceScore(text: chunk.text, query: query, options: options)
+            }
             ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
         }
 
@@ -192,6 +211,50 @@ actor RAGContextService {
         for word in queryWords where textWords.contains(word) {
             score += 1.0
         }
+        if text.count > options.longChunkCharacterThreshold {
+            score += options.longChunkBonusScore
+        }
+        return score
+    }
+
+    /// Builds a term-frequency vector from the union of query tokens.
+    private func combinedTermVector(from queries: [String]) -> [String: Double] {
+        var vector: [String: Double] = [:]
+        for query in queries {
+            for term in tokenize(query) where term.count > 2 {
+                vector[term, default: 0] += 1
+            }
+        }
+        return vector
+    }
+
+    /// Cosine similarity between a chunk and a precomputed query term vector,
+    /// with the legacy long-chunk bonus preserved for tie-breaking.
+    private func cosineRelevanceScore(
+        text: String,
+        queryVector: [String: Double],
+        options: RAGSelectionOptions
+    ) -> Double {
+        guard !queryVector.isEmpty else { return 0 }
+
+        var textVector: [String: Double] = [:]
+        for term in tokenize(text) where term.count > 2 {
+            textVector[term, default: 0] += 1
+        }
+        guard !textVector.isEmpty else { return 0 }
+
+        var dot = 0.0
+        for (term, weight) in queryVector {
+            if let textWeight = textVector[term] {
+                dot += weight * textWeight
+            }
+        }
+
+        let queryNorm = sqrt(queryVector.values.reduce(0) { $0 + $1 * $1 })
+        let textNorm = sqrt(textVector.values.reduce(0) { $0 + $1 * $1 })
+        guard queryNorm > 0, textNorm > 0 else { return 0 }
+
+        var score = dot / (queryNorm * textNorm)
         if text.count > options.longChunkCharacterThreshold {
             score += options.longChunkBonusScore
         }
