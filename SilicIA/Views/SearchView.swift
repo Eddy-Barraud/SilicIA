@@ -27,6 +27,7 @@ struct SearchView: View {
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
+    let onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)?
 
     @StateObject private var searchService = WebSearchService()
     @StateObject private var aiService = AIService()
@@ -64,12 +65,14 @@ struct SearchView: View {
         initialQuery: String? = nil,
         onInitialQueryHandled: (() -> Void)? = nil,
         chatService: ChatService,
-        onOfflineQuery: ((String) -> Void)? = nil
+        onOfflineQuery: ((String) -> Void)? = nil,
+        onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil
     ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
         self.chatService = chatService
         self.onOfflineQuery = onOfflineQuery
+        self.onChatMore = onChatMore
     }
     
     private var windowBackgroundColor: Color {
@@ -118,6 +121,40 @@ struct SearchView: View {
 
     private var defaultScrapingCharactersFromContextTokens: Int {
         max(TokenBudgeting.estimatedContextCharacters(forTokens: effectiveContextTokens) * 2, 1500)
+    }
+
+    private var hasChatMoreContext: Bool {
+        !searchResults.isEmpty &&
+        !aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+        !aiService.isSummarizing
+    }
+
+    private var chatButtonTitle: String {
+        if hasChatMoreContext {
+            return settings.language == .french ? "Chat more" : "Chat more"
+        }
+        return "Chat"
+    }
+
+    private var isChatButtonDisabled: Bool {
+        if hasChatMoreContext {
+            return false
+        }
+        return searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching
+    }
+
+    private func handleChatButtonTap() {
+        if hasChatMoreContext {
+            let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            let answer = aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            let citationsTrimmed = aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines)
+            let citations = citationsTrimmed.isEmpty ? nil : citationsTrimmed
+            onChatMore?(query, answer, citations)
+            return
+        }
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+        onOfflineQuery?(trimmedQuery)
     }
 
     /// Lays out header, search controls, and context-sensitive body content.
@@ -269,21 +306,16 @@ struct SearchView: View {
             }
 
             HStack(spacing: 8) {
-                Button(action: {
-                    let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !trimmedQuery.isEmpty else { return }
-                    onOfflineQuery?(trimmedQuery)
-                }) {
+                Button(action: handleChatButtonTap) {
                     Label(
-                        "Chat",
-                        // chat bubbles
+                        chatButtonTitle,
                         systemImage: "bubble.left.and.bubble.right"
                     )
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
                 .frame(maxWidth: .infinity)
-                .disabled(searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching)
+                .disabled(isChatButtonDisabled)
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
                     Text(settings.language == .french ? "Go" : "Search")

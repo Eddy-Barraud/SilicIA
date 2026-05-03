@@ -76,6 +76,15 @@ struct ContentView: View {
                                     maxContextTokens: settings.maxContextTokens
                                 )
                             }
+                        },
+                        onChatMore: { query, answer, citations in
+                            chatService.modelContext = modelContext
+                            chatService.startConversationFromSearch(
+                                query: query,
+                                answer: answer,
+                                citations: citations
+                            )
+                            selectedTab = .chat
                         }
                     )
                 case .chat:

@@ -877,6 +877,52 @@ final class ChatService: ObservableObject {
         }
     }
 
+    /// Seeds a new conversation from a Search Assist exchange and persists it to history.
+    func startConversationFromSearch(query: String, answer: String, citations: String?) {
+        pendingSaveTask?.cancel()
+        finalizeCurrentConversation()
+        errorMessage = nil
+        isResponding = false
+        isAnalyzingContext = false
+        contextAnalysisProgress = 0
+        preAnalyzedContextKey = nil
+        preAnalyzedChunks = []
+        preAnalyzedMaxContextTokens = nil
+        preAnalyzedMaxOutputTokens = nil
+        preAnalyzedMaxWebResults = nil
+
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCitations = citations?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCitations = (trimmedCitations?.isEmpty ?? true) ? nil : trimmedCitations
+
+        messages = []
+        if !trimmedQuery.isEmpty {
+            messages.append(ChatMessage(role: .user, content: trimmedQuery))
+        }
+        if !trimmedAnswer.isEmpty {
+            messages.append(ChatMessage(role: .assistant, content: trimmedAnswer, citations: normalizedCitations))
+        }
+
+        guard let modelContext else { return }
+
+        let conversation = Conversation(
+            messages: [],
+            title: trimmedQuery.isEmpty ? nil : generateTitle(from: trimmedQuery)
+        )
+        modelContext.insert(conversation)
+        currentConversation = conversation
+
+        if !trimmedQuery.isEmpty {
+            conversation.messages.append(Message(role: "user", content: trimmedQuery))
+        }
+        if !trimmedAnswer.isEmpty {
+            conversation.messages.append(Message(role: "assistant", content: trimmedAnswer, citations: normalizedCitations))
+        }
+        conversation.updatedAt = Date()
+        _ = saveContext(modelContext)
+    }
+
     /// Loads a previous conversation by ID and syncs it to the UI.
     func loadConversation(id: UUID) {
         guard let modelContext else { return }
