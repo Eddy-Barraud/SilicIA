@@ -182,6 +182,57 @@ class AIService: ObservableObject {
         }
     }
 
+    /// Summarizes a single web page using Foundation Models. Returns an empty string when unavailable.
+    func summarizeWebPage(
+        title: String,
+        url: String,
+        language: ModelLanguage = .french,
+        maxCharacters: Int = 4500,
+        temperature: Double = 0.3,
+        maxTokens: Int = 320
+    ) async -> String {
+        let scraped = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters) ?? ""
+        let trimmedContent = scraped.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else { return "" }
+
+        let instructions = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "webpage",
+            variant: "instructions",
+            language: language
+        ) ?? fallbackWebPageInstructions(for: language)
+
+        let prompt = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "webpage",
+            language: language,
+            replacements: [
+                "title": title,
+                "url": url,
+                "content": trimmedContent
+            ]
+        ) ?? fallbackWebPagePrompt(
+            title: title,
+            url: url,
+            content: trimmedContent,
+            language: language
+        )
+
+        do {
+            let session = LanguageModelSession(instructions: instructions)
+            let options = GenerationOptions(
+                temperature: temperature,
+                maximumResponseTokens: maxTokens
+            )
+            let response = try await session.respond(to: prompt, options: options)
+            let text = String(describing: response.content)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return sanitizeLaTeXDocumentWrappers(text)
+        } catch {
+            return ""
+        }
+    }
+
     /// Summarize search results using Foundation Models or fallback to NLP.
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
@@ -943,6 +994,59 @@ class AIService: ObservableObject {
         When relevant, include mathematical formulas in simple LaTeX.
         Required math format: use $...$ inline and \\[...\\].
         Never use environments with \\begin{.
+        """
+    }
+
+    private func fallbackWebPageInstructions(for language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Tu produis des résumés de pages web précis et concis.
+            Réponds en français.
+            Résume la page en 5 phrases maximum.
+            Sois factuel et évite la spéculation.
+            """
+        }
+
+        return """
+        You produce concise, accurate web page summaries.
+        Respond in English.
+        Summarize the page in 5 sentences maximum.
+        Be factual and avoid speculation.
+        """
+    }
+
+    private func fallbackWebPagePrompt(
+        title: String,
+        url: String,
+        content: String,
+        language: ModelLanguage
+    ) -> String {
+        if language == .french {
+            return """
+            Titre : \(title)
+            URL : \(url)
+
+            Contenu de la page :
+            \(content)
+
+            Rédige un résumé concis de la page ci-dessus.
+            Limite : 5 phrases maximum.
+            Reste factuel ; n'invente pas d'informations absentes de la page.
+            Réponds en français.
+            """
+        }
+
+        return """
+        Title: \(title)
+        URL: \(url)
+
+        Page content:
+        \(content)
+
+        Write a concise summary of the page above.
+        Limit: 5 sentences maximum.
+        Stay factual; do not invent information that is not in the page.
+        Respond in English.
         """
     }
 

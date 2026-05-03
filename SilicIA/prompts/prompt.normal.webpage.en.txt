@@ -1,0 +1,10 @@
+Title: {{title}}
+URL: {{url}}
+
+Page content:
+{{content}}
+
+Write a concise summary of the page above.
+Limit: 5 sentences maximum.
+Stay factual; do not invent information that is not in the page.
+Respond in English.

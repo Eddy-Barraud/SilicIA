@@ -1,0 +1,10 @@
+Titre : {{title}}
+URL : {{url}}
+
+Contenu de la page :
+{{content}}
+
+Rédige un résumé concis de la page ci-dessus.
+Limite : 5 phrases maximum.
+Reste factuel ; n'invente pas d'informations absentes de la page.
+Réponds en français.

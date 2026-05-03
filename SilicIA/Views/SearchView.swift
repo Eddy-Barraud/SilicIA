@@ -52,6 +52,14 @@ struct SearchView: View {
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
+    // Per-result web page summaries
+    @State private var isShowingWebPageSummaryOverlay = false
+    @State private var selectedWebPageSummaryResult: SearchResult?
+    @State private var webPageSummaryText: String = ""
+    @State private var webPageSummaryError: String?
+    @State private var isGeneratingWebPageSummary = false
+    @State private var activeWebPageSummaryRequestID = UUID()
+
     init(
         initialQuery: String? = nil,
         onInitialQueryHandled: (() -> Void)? = nil,
@@ -114,26 +122,32 @@ struct SearchView: View {
 
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            headerView
+        ZStack {
+            VStack(spacing: 0) {
+                // Header
+                headerView
 
-            if showSettings {
-                settingsPage
-            } else {
-                // Content
-                if searchService.isSearching {
-                    loadingView
-                } else if !searchResults.isEmpty {
-                    resultsView
-                } else if searchQuery.isEmpty {
-                    welcomeView
+                if showSettings {
+                    settingsPage
                 } else {
-                    emptyStateView
-                }
+                    // Content
+                    if searchService.isSearching {
+                        loadingView
+                    } else if !searchResults.isEmpty {
+                        resultsView
+                    } else if searchQuery.isEmpty {
+                        welcomeView
+                    } else {
+                        emptyStateView
+                    }
 
-                // Search Bar
-                searchBarView
+                    // Search Bar
+                    searchBarView
+                }
+            }
+
+            if isShowingWebPageSummaryOverlay {
+                webPageSummaryOverlay
             }
         }
         .background(windowBackgroundColor)
@@ -329,7 +343,13 @@ struct SearchView: View {
 
                 // Search results
                 ForEach(searchResults) { result in
-                    SearchResultCard(result: result)
+                    SearchResultCard(
+                        result: result,
+                        isWebSummariesEnabled: settings.isWebSummariesEnabled,
+                        onRequestSummary: { tapped in
+                            presentWebPageSummary(for: tapped)
+                        }
+                    )
                 }
             }
             .padding()
@@ -586,6 +606,12 @@ struct SearchView: View {
                     .font(.subheadline)
             }
 
+            // Web Summaries Toggle
+            Toggle(isOn: $settings.isWebSummariesEnabled) {
+                Text(settings.language == .french ? "Activer les résumés web" : "Activate web summaries")
+                    .font(.subheadline)
+            }
+
             // Max Response Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -671,6 +697,131 @@ struct SearchView: View {
         .padding()
         .background(controlBackgroundColor)
         .cornerRadius(12)
+    }
+
+    // MARK: - Web Page Summary Overlay
+    private var webPageSummaryOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25)
+                .ignoresSafeArea()
+                .onTapGesture {
+                    dismissWebPageSummaryOverlay()
+                }
+
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    Button {
+                        guard let urlString = selectedWebPageSummaryResult?.url else { return }
+                        openWebPage(urlString)
+                    } label: {
+                        Label(
+                            settings.language == .french ? "Ouvrir la page" : "Open page",
+                            systemImage: "safari"
+                        )
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    }
+                    .buttonStyle(.borderedProminent)
+
+                    Spacer()
+
+                    Button {
+                        dismissWebPageSummaryOverlay()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title3)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if let result = selectedWebPageSummaryResult {
+                    Text(result.title)
+                        .font(.headline)
+                        .lineLimit(2)
+                }
+
+                Divider()
+
+                if isGeneratingWebPageSummary {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(settings.language == .french ? "Résumé en cours..." : "Generating summary...")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                } else if let webPageSummaryError,
+                          !webPageSummaryError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(webPageSummaryError)
+                        .font(.body)
+                        .foregroundColor(.red)
+                } else {
+                    ScrollView {
+                        Text(webPageSummaryText)
+                            .font(.body)
+                            .foregroundColor(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .padding()
+            .frame(maxWidth: 650, maxHeight: 460)
+            .background(controlBackgroundColor)
+            .cornerRadius(12)
+            .shadow(radius: 12)
+            .padding()
+        }
+    }
+
+    private func presentWebPageSummary(for result: SearchResult) {
+        guard settings.isWebSummariesEnabled else { return }
+
+        selectedWebPageSummaryResult = result
+        webPageSummaryText = ""
+        webPageSummaryError = nil
+        isGeneratingWebPageSummary = true
+        isShowingWebPageSummaryOverlay = true
+
+        let requestID = UUID()
+        activeWebPageSummaryRequestID = requestID
+
+        Task {
+            let summary = await aiService.summarizeWebPage(
+                title: result.title,
+                url: result.url,
+                language: settings.language
+            )
+            guard activeWebPageSummaryRequestID == requestID else { return }
+            isGeneratingWebPageSummary = false
+
+            let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                webPageSummaryError = settings.language == .french
+                    ? "Résumé indisponible."
+                    : "Summary unavailable."
+            } else {
+                webPageSummaryText = trimmed
+            }
+        }
+    }
+
+    private func dismissWebPageSummaryOverlay() {
+        isShowingWebPageSummaryOverlay = false
+        isGeneratingWebPageSummary = false
+        selectedWebPageSummaryResult = nil
+        webPageSummaryText = ""
+        webPageSummaryError = nil
+        activeWebPageSummaryRequestID = UUID()
+    }
+
+    private func openWebPage(_ urlString: String) {
+        guard let url = URL(string: urlString) else { return }
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif canImport(UIKit)
+        openURLInSafari(url)
+        #endif
     }
 
     #if canImport(UIKit)
@@ -1052,12 +1203,15 @@ struct SearchView: View {
 /// Displays one search result row with link, source host, and snippet preview.
 struct SearchResultCard: View {
     let result: SearchResult
+    var isWebSummariesEnabled: Bool = false
+    var onRequestSummary: ((SearchResult) -> Void)? = nil
+
     #if canImport(UIKit)
     private func openURLInSafari(_ url: URL) {
         DispatchQueue.main.async {
             let safariViewController = SFSafariViewController(url: url)
             safariViewController.modalPresentationStyle = .fullScreen
-            
+
             if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
@@ -1071,31 +1225,29 @@ struct SearchResultCard: View {
     }
     #endif
 
+    private func handleTitleTap() {
+        if isWebSummariesEnabled, let onRequestSummary {
+            onRequestSummary(result)
+            return
+        }
+        guard let url = URL(string: result.url) else { return }
+        #if os(macOS)
+        NSWorkspace.shared.open(url)
+        #elseif canImport(UIKit)
+        openURLInSafari(url)
+        #endif
+    }
+
     /// Renders one result card with title link, host, and snippet.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Title
-            #if canImport(UIKit)
-            Button(action: {
-                if let url = URL(string: result.url) {
-                    openURLInSafari(url)
-                }
-            }) {
+            Button(action: handleTitleTap) {
                 Text(result.title)
                     .font(.headline)
                     .foregroundColor(.accentColor)
                     .multilineTextAlignment(.leading)
             }
             .buttonStyle(.plain)
-            #else
-            Link(destination: URL(string: result.url)!) {
-                Text(result.title)
-                    .font(.headline)
-                    .foregroundColor(.accentColor)
-                    .multilineTextAlignment(.leading)
-            }
-            .buttonStyle(.plain)
-            #endif
 
             // URL
             Text(formatURL(result.url))
@@ -1112,6 +1264,10 @@ struct SearchResultCard: View {
         .padding()
         .background(platformControlBackgroundColor)
         .cornerRadius(8)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            handleTitleTap()
+        }
     }
 
     private var platformControlBackgroundColor: Color {
