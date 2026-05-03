@@ -85,13 +85,11 @@ struct ChatView: View {
                     showHistory = false
                 }
             )
+        } else if showSettings {
+            chatSettingsPage
         } else {
             VStack(spacing: 12) {
                 chatHeaderView
-
-                if showSettings {
-                    chatSettingsPanel
-                }
 
                 messagesView
 
@@ -168,7 +166,7 @@ struct ChatView: View {
                 #if canImport(UIKit)
                 dismissKeyboard()
                 #endif
-                showSettings.toggle()
+                showSettings = true
             }) {
                 Image(systemName: "gear")
                     .font(.title2)
@@ -178,6 +176,39 @@ struct ChatView: View {
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
+    }
+
+    private var chatSettingsPage: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: { showSettings = false }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text(settings.language == .french ? "Retour" : "Back")
+                            .fontWeight(.medium)
+                    }
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+            }
+            .padding()
+            .background(controlBackgroundColor)
+
+            ScrollView {
+                chatSettingsPanel
+                    .padding()
+            }
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(textBackgroundColor)
+        }
+        .onAppear {
+            settings = AppSettings.load()
+        }
+        .onChange(of: settings) {
+            settings.save()
+        }
     }
 
     /// Renders chat-specific tuning controls.

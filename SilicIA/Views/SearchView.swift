@@ -7,6 +7,9 @@
 
 import SwiftUI
 import LaTeXSwiftUI
+#if canImport(SwiftData)
+import SwiftData
+#endif
 #if os(macOS)
 import AppKit
 #elseif canImport(UIKit)
@@ -115,29 +118,25 @@ struct SearchView: View {
             // Header
             headerView
 
-            // Settings panel available in every search state
             if showSettings {
-                settingsPanel
-                    .padding(.horizontal)
-                    .padding(.bottom, 8)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            // Content
-            if searchService.isSearching {
-                loadingView
-            } else if !searchResults.isEmpty {
-                resultsView
-            } else if searchQuery.isEmpty {
-                welcomeView
+                settingsPage
             } else {
-                emptyStateView
+                // Content
+                if searchService.isSearching {
+                    loadingView
+                } else if !searchResults.isEmpty {
+                    resultsView
+                } else if searchQuery.isEmpty {
+                    welcomeView
+                } else {
+                    emptyStateView
+                }
+
+                // Search Bar
+                searchBarView
             }
-            // Search Bar
-            searchBarView
         }
         .background(windowBackgroundColor)
-        .animation(.easeInOut, value: showSettings)
         .onAppear {
             settings = AppSettings.load()
             consumeInitialQueryIfNeeded()
@@ -165,26 +164,53 @@ struct SearchView: View {
     // MARK: - Header View
     private var headerView: some View {
         HStack {
-            Button(action: { goHome() }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "arrow.2.circlepath")
-                    Text(settings.language == .french ? "Nettoyer" : "Start Over")
-                        .fontWeight(.medium)
+            if showSettings {
+                Button(action: { showSettings = false }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text(settings.language == .french ? "Retour" : "Back")
+                            .fontWeight(.medium)
+                    }
                 }
-            }
-            .buttonStyle(.bordered)
+                .buttonStyle(.bordered)
 
-            Spacer()
+                Text(settings.language == .french ? "Paramètres" : "Settings")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
 
-            Button(action: { showSettings.toggle() }) {
-                Image(systemName: "gear")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
+                Spacer(minLength: 0)
+            } else {
+                Button(action: { goHome() }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "arrow.2.circlepath")
+                        Text(settings.language == .french ? "Nettoyer" : "Start Over")
+                            .fontWeight(.medium)
+                    }
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(action: { showSettings = true }) {
+                    Image(systemName: "gear")
+                        .font(.title2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding()
         .background(controlBackgroundColor)
+    }
+
+    private var settingsPage: some View {
+        ScrollView {
+            settingsPanel
+                .padding()
+        }
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     // MARK: - Search Bar View
