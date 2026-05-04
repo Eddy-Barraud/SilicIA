@@ -15,7 +15,8 @@ enum ModelLanguage: String, CaseIterable, Codable {
 
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
-    var maxSearchResults: Int = 5
+    var maxDuckDuckGoResults: Int = 6
+    var maxWikipediaResults: Int = 2
     var maxResponseTokens: Int = 1500
     var temperature: Double = 0.7
     var maxContextTokens: Int = 2400
@@ -25,11 +26,16 @@ struct AppSettings: Codable, Equatable {
     var useWikipedia: Bool = true
     var language: ModelLanguage = .english
 
+    /// Combined per-search result cap exposed for callers that still need a single number
+    /// (e.g. results display limit, scraping cap).
+    var maxSearchResults: Int { maxDuckDuckGoResults + maxWikipediaResults }
+
     private static let storageKey = "SilicIA.AppSettings"
     private static let defaultSettings = AppSettings()
 
     private enum CodingKeys: String, CodingKey {
-        case maxSearchResults
+        case maxDuckDuckGoResults
+        case maxWikipediaResults
         case maxResponseTokens
         case temperature
         case maxContextTokens
@@ -43,6 +49,7 @@ struct AppSettings: Codable, Equatable {
     private enum LegacyCodingKeys: String, CodingKey {
         case maxContextWords
         case maxScrapingCharacters
+        case maxSearchResults
     }
 
     init() {}
@@ -63,8 +70,18 @@ struct AppSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let legacyContainer = try decoder.container(keyedBy: LegacyCodingKeys.self)
-        maxSearchResults = try container.decodeIfPresent(Int.self, forKey: .maxSearchResults)
-            ?? Self.defaultSettings.maxSearchResults
+
+        if let storedDDG = try container.decodeIfPresent(Int.self, forKey: .maxDuckDuckGoResults) {
+            maxDuckDuckGoResults = storedDDG
+        } else if let legacyTotal = try legacyContainer.decodeIfPresent(Int.self, forKey: .maxSearchResults) {
+            // Pre-Task-6 builds had a single combined cap; keep it for DDG.
+            maxDuckDuckGoResults = legacyTotal
+        } else {
+            maxDuckDuckGoResults = Self.defaultSettings.maxDuckDuckGoResults
+        }
+        maxWikipediaResults = try container.decodeIfPresent(Int.self, forKey: .maxWikipediaResults)
+            ?? Self.defaultSettings.maxWikipediaResults
+
         maxResponseTokens = try container.decodeIfPresent(Int.self, forKey: .maxResponseTokens)
             ?? Self.defaultSettings.maxResponseTokens
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
@@ -94,7 +111,8 @@ struct AppSettings: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(maxSearchResults, forKey: .maxSearchResults)
+        try container.encode(maxDuckDuckGoResults, forKey: .maxDuckDuckGoResults)
+        try container.encode(maxWikipediaResults, forKey: .maxWikipediaResults)
         try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
@@ -118,7 +136,11 @@ struct AppSettings: Codable, Equatable {
     }
 
     // Value ranges for validation
-    static let maxSearchResultsRange = 1...30
+    static let maxDuckDuckGoResultsRange = 1...20
+    static let maxWikipediaResultsRange = 1...20
+    /// Combined per-search cap derived from per-source ranges; used by callers that need a
+    /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
+    static let maxSearchResultsRange = 2...40
     static let maxResponseTokensRange = 500...3500
     static let temperatureRange = 0.3...1.0
     static let maxContextTokensRange = 300...3500
@@ -136,7 +158,8 @@ struct AppSettings: Codable, Equatable {
 
     private func normalized() -> AppSettings {
         var copy = self
-        copy.maxSearchResults = min(max(copy.maxSearchResults, Self.maxSearchResultsRange.lowerBound), Self.maxSearchResultsRange.upperBound)
+        copy.maxDuckDuckGoResults = min(max(copy.maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
+        copy.maxWikipediaResults = min(max(copy.maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)
         copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
         copy.maxContextTokens = TokenBudgeting.clampedContextTokens(
             requestedContextTokens: copy.maxContextTokens,

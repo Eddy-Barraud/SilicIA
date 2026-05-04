@@ -55,7 +55,8 @@ final class ChatService: ObservableObject {
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
     private var preAnalyzedMaxOutputTokens: Int?
-    private var preAnalyzedMaxWebResults: Int?
+    private var preAnalyzedMaxDuckDuckGoResults: Int?
+    private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
 
@@ -65,7 +66,8 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
-        maxWebResults: Int,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
         language: ModelLanguage,
         temperature: Double,
         maxResponseTokens: Int,
@@ -85,9 +87,11 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             searchQuerySeed: includeWebSearch ? message : "",
-            maxWebResults: maxWebResults
+            maxDuckDuckGoResults: maxDuckDuckGoResults,
+            maxWikipediaResults: maxWikipediaResults
         )
-        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
+        let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
+        let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
@@ -97,7 +101,8 @@ final class ChatService: ObservableObject {
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
             && effectiveMaxContextTokens == preAnalyzedMaxContextTokens
             && effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens
-            && effectiveMaxWebResults == preAnalyzedMaxWebResults
+            && effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults
+            && effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
@@ -112,7 +117,8 @@ final class ChatService: ObservableObject {
                 includeWebSearch: includeWebSearch,
                 currentMessage: message,
                 language: language,
-                maxWebResults: effectiveMaxWebResults,
+                maxDuckDuckGoResults: effectiveMaxDDGResults,
+                maxWikipediaResults: effectiveMaxWikiResults,
                 maxContextTokens: effectiveMaxContextTokens,
                 useDuckDuckGo: useDuckDuckGo,
                 useWikipedia: useWikipedia
@@ -121,7 +127,8 @@ final class ChatService: ObservableObject {
             preAnalyzedChunks = chunks
             preAnalyzedMaxContextTokens = effectiveMaxContextTokens
             preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
-            preAnalyzedMaxWebResults = effectiveMaxWebResults
+            preAnalyzedMaxDuckDuckGoResults = effectiveMaxDDGResults
+            preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
             preAnalyzedUseDuckDuckGo = useDuckDuckGo
             preAnalyzedUseWikipedia = useWikipedia
         }
@@ -214,7 +221,8 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
-        maxWebResults: Int,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
         maxContextTokens: Int,
         maxResponseTokens: Int,
         useDuckDuckGo: Bool = true,
@@ -225,9 +233,11 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             searchQuerySeed: "",
-            maxWebResults: maxWebResults
+            maxDuckDuckGoResults: maxDuckDuckGoResults,
+            maxWikipediaResults: maxWikipediaResults
         )
-        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
+        let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
+        let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
@@ -238,7 +248,8 @@ final class ChatService: ObservableObject {
             preAnalyzedChunks = []
             preAnalyzedMaxContextTokens = nil
             preAnalyzedMaxOutputTokens = nil
-            preAnalyzedMaxWebResults = nil
+            preAnalyzedMaxDuckDuckGoResults = nil
+            preAnalyzedMaxWikipediaResults = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             return
@@ -246,7 +257,8 @@ final class ChatService: ObservableObject {
         if contextKey == preAnalyzedContextKey,
            effectiveMaxContextTokens == preAnalyzedMaxContextTokens,
            effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens,
-           effectiveMaxWebResults == preAnalyzedMaxWebResults,
+           effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults,
+           effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults,
            useDuckDuckGo == preAnalyzedUseDuckDuckGo,
            useWikipedia == preAnalyzedUseWikipedia {
             return
@@ -260,7 +272,8 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             currentMessage: "",
-            maxWebResults: effectiveMaxWebResults,
+            maxDuckDuckGoResults: effectiveMaxDDGResults,
+            maxWikipediaResults: effectiveMaxWikiResults,
             maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true,
             useDuckDuckGo: useDuckDuckGo,
@@ -270,7 +283,8 @@ final class ChatService: ObservableObject {
         preAnalyzedChunks = chunks
         preAnalyzedMaxContextTokens = effectiveMaxContextTokens
         preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
-        preAnalyzedMaxWebResults = effectiveMaxWebResults
+        preAnalyzedMaxDuckDuckGoResults = effectiveMaxDDGResults
+        preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
         preAnalyzedUseDuckDuckGo = useDuckDuckGo
         preAnalyzedUseWikipedia = useWikipedia
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
@@ -289,7 +303,8 @@ final class ChatService: ObservableObject {
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
         preAnalyzedMaxOutputTokens = nil
-        preAnalyzedMaxWebResults = nil
+        preAnalyzedMaxDuckDuckGoResults = nil
+        preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
         currentConversation = nil
@@ -302,7 +317,8 @@ final class ChatService: ObservableObject {
         includeWebSearch: Bool,
         currentMessage: String = "",
         language: ModelLanguage = .english,
-        maxWebResults: Int,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
         maxContextTokens: Int,
         reportProgress: Bool = false,
         useDuckDuckGo: Bool = true,
@@ -321,7 +337,8 @@ final class ChatService: ObservableObject {
         }
 
         let contextURLs = extractURLs(from: contextInput)
-        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
+        let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
+        let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         var discoveredResults: [SearchResult] = []
         // Web discovery is send-time only because it needs the current user query.
         if includeWebSearch && !currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -332,7 +349,8 @@ final class ChatService: ObservableObject {
             discoveredResults = await discoverWebResults(
                 for: searchQuery,
                 language: language,
-                maxResults: effectiveMaxWebResults,
+                maxDuckDuckGoResults: effectiveMaxDDGResults,
+                maxWikipediaResults: effectiveMaxWikiResults,
                 useDuckDuckGo: useDuckDuckGo,
                 useWikipedia: useWikipedia
             )
@@ -358,6 +376,7 @@ final class ChatService: ObservableObject {
         let totalWorkItems = max(urls.count + uniquePDFs.count + retrievedWebResults.count, 1)
         var completedWorkItems = 0
         let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
+        let totalMaxWebResults = effectiveMaxDDGResults + effectiveMaxWikiResults
 
         for result in retrievedWebResults {
             guard let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -381,7 +400,7 @@ final class ChatService: ObservableObject {
         if !urls.isEmpty {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
-                limit: min(urls.count, effectiveMaxWebResults),
+                limit: min(urls.count, totalMaxWebResults),
                 maxCharacters: webScrapingCharacters
             )
             for url in urls {
@@ -444,19 +463,20 @@ final class ChatService: ObservableObject {
     private func discoverWebResults(
         for query: String,
         language: ModelLanguage,
-        maxResults: Int,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) async -> [SearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
         guard useDuckDuckGo || useWikipedia else { return [] }
-        let clampedMaxResults = clampedMaxWebResults(maxResults)
 
         do {
             let results = try await webSearchService.search(
                 query: trimmedQuery,
-                maxResults: clampedMaxResults,
+                maxDuckDuckGoResults: clampedMaxDuckDuckGoResults(maxDuckDuckGoResults),
+                maxWikipediaResults: clampedMaxWikipediaResults(maxWikipediaResults),
                 language: language,
                 useDuckDuckGo: useDuckDuckGo,
                 useWikipedia: useWikipedia
@@ -486,7 +506,8 @@ final class ChatService: ObservableObject {
         pdfURLs: [URL],
         includeWebSearch: Bool,
         searchQuerySeed: String,
-        maxWebResults: Int
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int
     ) -> String {
         let normalizedContext = contextInput
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -498,11 +519,15 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||maxWeb:\(clampedMaxWebResults(maxWebResults))"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedMaxDuckDuckGoResults(maxDuckDuckGoResults))||wiki:\(clampedMaxWikipediaResults(maxWikipediaResults))"
     }
 
-    private func clampedMaxWebResults(_ value: Int) -> Int {
-        min(max(value, AppSettings.maxSearchResultsRange.lowerBound), Self.maxWebContextURLCap)
+    private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {
+        min(max(value, AppSettings.maxDuckDuckGoResultsRange.lowerBound), Self.maxWebContextURLCap)
+    }
+
+    private func clampedMaxWikipediaResults(_ value: Int) -> Int {
+        min(max(value, AppSettings.maxWikipediaResultsRange.lowerBound), Self.maxWebContextURLCap)
     }
 
     private func deduplicatedURLs(_ urls: [String]) -> [String] {
@@ -922,7 +947,8 @@ final class ChatService: ObservableObject {
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
         preAnalyzedMaxOutputTokens = nil
-        preAnalyzedMaxWebResults = nil
+        preAnalyzedMaxDuckDuckGoResults = nil
+        preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
 

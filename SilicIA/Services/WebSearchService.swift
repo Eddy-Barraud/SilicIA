@@ -82,7 +82,10 @@ class WebSearchService: ObservableObject {
     @Published var isSearching = false
     @Published var error: Error?
 
-    private static let wikipediaSearchLimit = 2
+    /// Default DuckDuckGo per-query cap when callers do not override.
+    private static let defaultDuckDuckGoLimit = 6
+    /// Default Wikipedia per-query cap when callers do not override.
+    private static let defaultWikipediaLimit = 2
 
     private static let userAgent: String = {
         let appName = "SilicIA"
@@ -151,21 +154,23 @@ class WebSearchService: ObservableObject {
     /// Search DuckDuckGo and Wikipedia, then merge deduplicated results.
     func search(
         query: String,
-        maxResults: Int = 10,
+        maxDuckDuckGoResults: Int = 6,
+        maxWikipediaResults: Int = 2,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
-        debugLog("single-query search start: query=\(query), limit=\(maxResults), language=\(language.rawValue), ddg=\(useDuckDuckGo), wiki=\(useWikipedia)")
+        debugLog("single-query search start: query=\(query), ddgLimit=\(maxDuckDuckGoResults), wikiLimit=\(maxWikipediaResults), language=\(language.rawValue), ddg=\(useDuckDuckGo), wiki=\(useWikipedia)")
 
         isSearching = true
         defer { isSearching = false }
 
         let results = try await executeSearch(
             query: query,
-            maxResults: maxResults,
+            maxDuckDuckGoResults: maxDuckDuckGoResults,
+            maxWikipediaResults: maxWikipediaResults,
             language: language,
             useDuckDuckGo: useDuckDuckGo,
             useWikipedia: useWikipedia
@@ -179,7 +184,8 @@ class WebSearchService: ObservableObject {
     /// Executes multiple searches and interleaves deduplicated results across queries.
     func search(
         queries: [String],
-        maxResultsPerQuery: Int = 10,
+        maxDuckDuckGoResultsPerQuery: Int = 6,
+        maxWikipediaResultsPerQuery: Int = 2,
         mergedLimit: Int = 10,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
@@ -189,7 +195,9 @@ class WebSearchService: ObservableObject {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        guard !normalizedQueries.isEmpty, maxResultsPerQuery > 0, mergedLimit > 0 else {
+        guard !normalizedQueries.isEmpty,
+              (maxDuckDuckGoResultsPerQuery > 0 || maxWikipediaResultsPerQuery > 0),
+              mergedLimit > 0 else {
             debugLog("multi-query search skipped: invalid input")
             return []
         }
@@ -207,7 +215,7 @@ class WebSearchService: ObservableObject {
         }
 
         debugLog(
-            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), perQueryLimit=\(maxResultsPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
+            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), ddgPerQuery=\(maxDuckDuckGoResultsPerQuery), wikiPerQuery=\(maxWikipediaResultsPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
         )
 
         var perQueryResults: [[SearchResult]] = []
@@ -218,7 +226,8 @@ class WebSearchService: ObservableObject {
             do {
                 let results = try await executeSearch(
                     query: query,
-                    maxResults: maxResultsPerQuery,
+                    maxDuckDuckGoResults: maxDuckDuckGoResultsPerQuery,
+                    maxWikipediaResults: maxWikipediaResultsPerQuery,
                     language: language,
                     useDuckDuckGo: useDuckDuckGo,
                     useWikipedia: useWikipedia
@@ -248,7 +257,8 @@ class WebSearchService: ObservableObject {
     /// Runs the enabled providers for one query and merges deduplicated results.
     private func executeSearch(
         query: String,
-        maxResults: Int,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
         language: ModelLanguage,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
@@ -259,7 +269,7 @@ class WebSearchService: ObservableObject {
         async let duckDuckGoOutcome: ([SearchResult], Error?) = {
             guard useDuckDuckGo else { return ([], nil) }
             do {
-                let results = try await executeDuckDuckGoSearch(query: query, maxResults: maxResults)
+                let results = try await executeDuckDuckGoSearch(query: query, maxResults: maxDuckDuckGoResults)
                 return (results, nil)
             } catch {
                 return ([], error)
@@ -272,7 +282,7 @@ class WebSearchService: ObservableObject {
                 let results = try await executeWikipediaSearch(
                     query: query,
                     language: language,
-                    limit: Self.wikipediaSearchLimit
+                    limit: maxWikipediaResults
                 )
                 return (results, nil)
             } catch {
@@ -292,7 +302,7 @@ class WebSearchService: ObservableObject {
 
         let mergedProviders = mergeInterleavedDeduplicatedResults(
             [duckDuckGoResults, wikipediaResults],
-            mergedLimit: maxResults+Self.wikipediaSearchLimit
+            mergedLimit: maxDuckDuckGoResults + maxWikipediaResults
         )
 
         if mergedProviders.isEmpty {

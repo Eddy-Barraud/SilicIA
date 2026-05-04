@@ -325,7 +325,7 @@ struct SearchView: View {
                 .frame(maxWidth: .infinity)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
-                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 7000, generationProfile: .deep) }) {
+                Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
                     Label(
                         settings.language == .french ? "Deep" : "Deep",
                         systemImage: "sparkle.magnifyingglass"
@@ -603,22 +603,6 @@ struct SearchView: View {
 
             Divider()
 
-            // Max Search Results
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(settings.language == .french ? "Nombre maximal de résultats" : "Max Search Results")
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(settings.maxSearchResults)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { Double(settings.maxSearchResults) },
-                    set: { settings.maxSearchResults = Int($0) }
-                ), in: Double(AppSettings.maxSearchResultsRange.lowerBound)...Double(AppSettings.maxSearchResultsRange.upperBound), step: 1)
-            }
-
             // Temperature
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -649,14 +633,47 @@ struct SearchView: View {
                 Text(settings.language == .french ? "Sources de recherche" : "Search sources")
                     .font(.subheadline)
                     .fontWeight(.semibold)
+
                 Toggle(isOn: $settings.useDuckDuckGo) {
                     Text("DuckDuckGo")
                         .font(.subheadline)
                 }
+                if settings.useDuckDuckGo {
+                    HStack {
+                        Text(settings.language == .french ? "Résultats max (DDG)" : "Max results (DDG)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(settings.maxDuckDuckGoResults)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { Double(settings.maxDuckDuckGoResults) },
+                        set: { settings.maxDuckDuckGoResults = Int($0) }
+                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
+                }
+
                 Toggle(isOn: $settings.useWikipedia) {
                     Text("Wikipedia")
                         .font(.subheadline)
                 }
+                if settings.useWikipedia {
+                    HStack {
+                        Text(settings.language == .french ? "Résultats max (Wikipedia)" : "Max results (Wikipedia)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(settings.maxWikipediaResults)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { Double(settings.maxWikipediaResults) },
+                        set: { settings.maxWikipediaResults = Int($0) }
+                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
+                }
+
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
                     Text(
                         settings.language == .french
@@ -1046,7 +1063,7 @@ struct SearchView: View {
 
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
-    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
+    private func performSearch(maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
         #if canImport(UIKit)
         dismissKeyboard()
         #endif
@@ -1058,7 +1075,7 @@ struct SearchView: View {
         let requestID = UUID()
         activeSearchRequestID = requestID
 
-        let resultsCount = maxResults ?? settings.maxSearchResults
+        let resultsCount = settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? defaultScrapingCharactersFromContextTokens
 
         // Clear previous results and state before starting new search
@@ -1110,9 +1127,6 @@ struct SearchView: View {
         
         Task {
             do {
-                let searchLimit = noAIOnly
-                    ? resultsCount
-                    : resultsCount + Self.aiSummaryOverfetchResults
                 let fetchedResults: [SearchResult]
                 var allQueries: [String] = [trimmedQuery]
 
@@ -1133,8 +1147,9 @@ struct SearchView: View {
 
                     fetchedResults = try await searchService.search(
                         queries: allQueries,
-                        maxResultsPerQuery: searchLimit,
-                        mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount,
+                        maxDuckDuckGoResultsPerQuery: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                        maxWikipediaResultsPerQuery: settings.maxWikipediaResults,
+                        mergedLimit: (settings.maxDuckDuckGoResults + settings.maxWikipediaResults + Self.aiSummaryOverfetchResults) * Self.deepSearchDerivedQueryCount,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia
@@ -1142,7 +1157,8 @@ struct SearchView: View {
                 } else {
                     fetchedResults = try await searchService.search(
                         query: trimmedQuery,
-                        maxResults: searchLimit,
+                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                        maxWikipediaResults: settings.maxWikipediaResults,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia

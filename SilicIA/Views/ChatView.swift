@@ -225,21 +225,6 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Nombre maximal de résultats web" : "Max Web Results")
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(settings.maxSearchResults)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { Double(settings.maxSearchResults) },
-                    set: { settings.maxSearchResults = Int($0) }
-                ), in: Double(AppSettings.maxSearchResultsRange.lowerBound)...Double(AppSettings.maxSearchResultsRange.upperBound), step: 1)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
                     Text(settings.language == .french ? "Température de l'IA" : "AI Temperature")
                         .font(.subheadline)
                     Spacer()
@@ -316,14 +301,47 @@ struct ChatView: View {
                 Text(settings.language == .french ? "Sources de recherche" : "Search sources")
                     .font(.subheadline)
                     .fontWeight(.semibold)
+
                 Toggle(isOn: $settings.useDuckDuckGo) {
                     Text("DuckDuckGo")
                         .font(.subheadline)
                 }
+                if settings.useDuckDuckGo {
+                    HStack {
+                        Text(settings.language == .french ? "Résultats max (DDG)" : "Max results (DDG)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(settings.maxDuckDuckGoResults)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { Double(settings.maxDuckDuckGoResults) },
+                        set: { settings.maxDuckDuckGoResults = Int($0) }
+                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
+                }
+
                 Toggle(isOn: $settings.useWikipedia) {
                     Text("Wikipedia")
                         .font(.subheadline)
                 }
+                if settings.useWikipedia {
+                    HStack {
+                        Text(settings.language == .french ? "Résultats max (Wikipedia)" : "Max results (Wikipedia)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(settings.maxWikipediaResults)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Slider(value: Binding(
+                        get: { Double(settings.maxWikipediaResults) },
+                        set: { settings.maxWikipediaResults = Int($0) }
+                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
+                }
+
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
                     Text(
                         settings.language == .french
@@ -638,7 +656,8 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 includeWebSearch: isWebSearchEnabled,
-                maxWebResults: settings.maxSearchResults,
+                maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+                maxWikipediaResults: settings.maxWikipediaResults,
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
@@ -957,7 +976,8 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 includeWebSearch: isWebSearchEnabled,
-                maxWebResults: settings.maxSearchResults,
+                maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+                maxWikipediaResults: settings.maxWikipediaResults,
                 maxContextTokens: settings.maxContextTokens,
                 maxResponseTokens: settings.maxResponseTokens,
                 useDuckDuckGo: settings.useDuckDuckGo,
