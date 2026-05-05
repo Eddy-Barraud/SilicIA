@@ -19,8 +19,13 @@ struct RAGChunk: Identifiable {
 /// Splits long context text into overlapping retrieval chunks.
 struct RAGChunker {
     private static let avgCharsPerToken = 3
-    private static let whitespacePattern = "\\s+"
     private static let minimumChunkCharacters = 200
+
+    /// Cached whitespace-collapsing regex; compiled once and reused for every chunk call.
+    private static let whitespaceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "\\s+",
+        options: []
+    )
 
     /// Chunks text with overlap while preserving non-empty slices.
     func chunk(
@@ -31,8 +36,7 @@ struct RAGChunker {
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        let cleanText = text
-            .replacingOccurrences(of: Self.whitespacePattern, with: " ", options: .regularExpression)
+        let cleanText = Self.collapseWhitespace(text)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !cleanText.isEmpty else { return [] }
@@ -46,9 +50,15 @@ struct RAGChunker {
 
         while start < cleanText.endIndex {
             let end = cleanText.index(start, offsetBy: maxChunkChars, limitedBy: cleanText.endIndex) ?? cleanText.endIndex
-            let piece = String(cleanText[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            // Input is already collapsed-whitespace + pre-trimmed, so a slice
+            // boundary can introduce at most one leading or trailing space.
+            // Trim those cheaply via Substring drop instead of allocating a
+            // new String for full whitespace+newline trimming on every slice.
+            var piece = cleanText[start..<end]
+            if piece.first == " " { piece = piece.dropFirst() }
+            if piece.last == " " { piece = piece.dropLast() }
             if !piece.isEmpty {
-                chunks.append(RAGChunk(source: source, text: piece, url: url, pdfPage: pdfPage))
+                chunks.append(RAGChunk(source: source, text: String(piece), url: url, pdfPage: pdfPage))
             }
 
             if end == cleanText.endIndex { break }
@@ -56,6 +66,13 @@ struct RAGChunker {
         }
 
         return chunks
+    }
+
+    /// Collapses any whitespace run into a single space using the cached regex.
+    private static func collapseWhitespace(_ text: String) -> String {
+        guard let regex = whitespaceRegex else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: " ")
     }
 }
 
@@ -93,8 +110,19 @@ struct RAGSelectionResult {
     let selectedContext: String
     let rankedChunks: [RankedRAGChunk]
 
+    /// Default number of top-ranked chunks surfaced for citation rendering.
+    /// Centralized so callers (and the convenience accessor below) share one source of truth.
+    static let defaultTopChunkCount = 3
+
+    /// Returns the top `limit` ranked chunks (by relevance score, then length).
+    func topChunks(limit: Int) -> [RankedRAGChunk] {
+        Array(rankedChunks.prefix(max(0, limit)))
+    }
+
+    /// Compatibility accessor preserved for existing callers in other files.
+    /// Delegates to `topChunks(limit:)` so the magic "3" lives in one place.
     var topChunks: [RankedRAGChunk] {
-        Array(rankedChunks.prefix(3))
+        topChunks(limit: Self.defaultTopChunkCount)
     }
 }
 
