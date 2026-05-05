@@ -43,3 +43,26 @@ xcodebuild -project SilicIA.xcodeproj \
   -destination "generic/platform=macOS" \
   build
 ```
+
+## Tests
+
+The project ships with a `SilicIATests` target covering the localization
+manifest (every English key exists in French and Spanish), token-budget
+boundary cases, and the RAG chunker.
+
+Run all tests from the command line — the code-signing flags below skip the
+provisioning checks that would otherwise fail on a clean machine:
+
+```bash
+xcodebuild -project SilicIA.xcodeproj \
+  -scheme SilicIA \
+  -configuration Debug \
+  -sdk macosx \
+  CODE_SIGN_IDENTITY="" \
+  CODE_SIGNING_REQUIRED=NO \
+  CODE_SIGNING_ALLOWED=NO \
+  test
+```
+
+Pass criterion: `** TEST SUCCEEDED **`. The localization smoke test reports
+zero missing keys for FR and ES.
