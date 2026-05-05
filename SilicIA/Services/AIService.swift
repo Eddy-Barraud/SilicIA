@@ -48,6 +48,21 @@ class AIService: ObservableObject {
     private static let fastSummaryScrapingResultCap = 6
     private static let fastSummaryScrapingCharacterCap = 4500
 
+    // MARK: - Cached LaTeX-sanitizer regexes
+    //
+    // The summary post-processor strips full-document LaTeX wrappers that the
+    // renderer doesn't expect. The two patterns below are run on every summary
+    // and were previously recompiled per call; cache them here.
+
+    private static let documentClassRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+        options: []
+    )
+    private static let usePackageRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
+        options: []
+    )
+
     private func debugLog(_ message: String) {
         #if DEBUG
         print("[AIService] \(message)")
@@ -236,11 +251,10 @@ class AIService: ObservableObject {
     /// Summarize search results using Foundation Models or fallback to NLP.
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
-    /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
     /// - Parameter queries: Full query set (user + derived). When more than one query is provided
     ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
     ///   combined query vector.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, skipPerPageSummary: Bool = false, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -295,7 +309,6 @@ class AIService: ObservableObject {
         )
         #endif
 
-        _ = skipPerPageSummary
         var chunks: [RAGChunk] = []
         #if DEBUG
         let contextPrepStart = Date()
@@ -722,20 +735,22 @@ class AIService: ObservableObject {
                 .trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-            with: "",
-            options: .regularExpression
-        )
-        cleaned = cleaned.replacingOccurrences(
-            of: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-            with: "",
-            options: .regularExpression
-        )
+        // Use the cached regexes instead of recompiling on every call.
+        cleaned = Self.applyRegex(Self.documentClassRegex, to: cleaned)
+        cleaned = Self.applyRegex(Self.usePackageRegex, to: cleaned)
+        // The remaining two are plain string replaces — no regex needed.
         cleaned = cleaned.replacingOccurrences(of: "\\begin{document}", with: "")
         cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Applies a cached regex over the full string, replacing each match with the empty string.
+    /// No-op when the regex failed to compile.
+    private static func applyRegex(_ regex: NSRegularExpression?, to text: String) -> String {
+        guard let regex else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
