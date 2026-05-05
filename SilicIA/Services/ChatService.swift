@@ -82,22 +82,28 @@ final class ChatService: ObservableObject {
         isResponding = true
         defer { isResponding = false }
 
-        let contextKey = makeContextKey(
-            contextInput: contextInput,
-            pdfURLs: pdfURLs,
-            includeWebSearch: includeWebSearch,
-            searchQuerySeed: includeWebSearch ? message : "",
-            maxDuckDuckGoResults: maxDuckDuckGoResults,
-            maxWikipediaResults: maxWikipediaResults
-        )
+        // Compute every effective/clamped value ONCE up front and reuse for the
+        // cache key, the cache-hit comparison, and downstream calls. Clamping
+        // is idempotent, but doing it twice (once for the key, once after) was
+        // wasteful and made the cache key risk going out of sync with the
+        // values actually used.
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
-        let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
             maxOutputTokens: effectiveMaxOutputTokens
         )
+
+        let contextKey = makeContextKey(
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            includeWebSearch: includeWebSearch,
+            searchQuerySeed: includeWebSearch ? message : "",
+            clampedDuckDuckGoResults: effectiveMaxDDGResults,
+            clampedWikipediaResults: effectiveMaxWikiResults
+        )
+        let hasRequestedContext = !contextKey.isEmpty
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
             && effectiveMaxContextTokens == preAnalyzedMaxContextTokens
             && effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens
@@ -106,7 +112,7 @@ final class ChatService: ObservableObject {
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
-        debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
+        debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preChunks=\(preAnalyzedChunks.count)")
         let chunks: [RAGChunk]
         if canUsePreAnalyzed {
             chunks = preAnalyzedChunks
@@ -132,37 +138,38 @@ final class ChatService: ObservableObject {
             preAnalyzedUseDuckDuckGo = useDuckDuckGo
             preAnalyzedUseWikipedia = useWikipedia
         }
-        debugContext("sendMessage collected chunkCount=\(chunks.count)")
+        debugContext("sendMessage chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
-        let contextTokenCap = effectiveMaxContextTokens
+        // Cap the selected context with a single primary strategy:
+        //   1. Word-aware truncation (semantic boundaries — preferred).
+        //   2. Hard character safety-net only when (1) still exceeds the
+        //      prompt-character budget that the model can ingest.
+        // This replaces the prior double-cap which built two intermediate
+        // Strings and picked the shorter — wasteful and harder to reason
+        // about, since the two budgets are derived from the same token cap.
         let maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: 1.0
         )
         let effectiveContextTokenCap = min(
-            contextTokenCap,
+            effectiveMaxContextTokens,
             TokenBudgeting.estimatedTokens(forApproxCharacters: maxPromptContextCharacters)
         )
         let contextWordEstimate = TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokenCap)
-        let contextCharacterCap = min(
-            TokenBudgeting.estimatedContextCharacters(forTokens: effectiveContextTokenCap),
-            maxPromptContextCharacters
-        )
-        let cappedSelectedContext = String(selected.selectedContext.prefix(max(contextCharacterCap, 0)))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let wordLimitedSelectedContext = TokenBudgeting.truncateToApproxWordCount(
+        var finalSelectedContext = TokenBudgeting.truncateToApproxWordCount(
             selected.selectedContext,
             maxWords: contextWordEstimate
         )
-        let finalSelectedContext = wordLimitedSelectedContext.count < cappedSelectedContext.count
-            ? wordLimitedSelectedContext
-            : cappedSelectedContext
-        debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) cappedContextChars=\(finalSelectedContext.count) contextTokenCap=\(contextTokenCap) topChunkCount=\(selected.topChunks.count)")
+        if finalSelectedContext.count > maxPromptContextCharacters {
+            finalSelectedContext = String(finalSelectedContext.prefix(maxPromptContextCharacters))
+        }
+        finalSelectedContext = finalSelectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        debugContext("sendMessage contextChars raw=\(selected.selectedContext.count) capped=\(finalSelectedContext.count) tokenCap=\(effectiveMaxContextTokens) topChunks=\(selected.topChunks.count)")
 
         var streamingAssistantID: UUID?
         do {
@@ -228,20 +235,23 @@ final class ChatService: ObservableObject {
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) async {
-        let contextKey = makeContextKey(
-            contextInput: contextInput,
-            pdfURLs: pdfURLs,
-            includeWebSearch: includeWebSearch,
-            searchQuerySeed: "",
-            maxDuckDuckGoResults: maxDuckDuckGoResults,
-            maxWikipediaResults: maxWikipediaResults
-        )
+        // Compute clamped/effective values ONCE; reused below for both the
+        // cache key and the cache-hit comparison.
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
             maxOutputTokens: effectiveMaxOutputTokens
+        )
+
+        let contextKey = makeContextKey(
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            includeWebSearch: includeWebSearch,
+            searchQuerySeed: "",
+            clampedDuckDuckGoResults: effectiveMaxDDGResults,
+            clampedWikipediaResults: effectiveMaxWikiResults
         )
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
@@ -501,13 +511,18 @@ final class ChatService: ObservableObject {
     }
 
     /// Returns a stable key used to reuse pre-analyzed context.
+    /// Callers pass values they have ALREADY clamped (via
+    /// `clampedMaxDuckDuckGoResults` / `clampedMaxWikipediaResults`) so this
+    /// helper never re-clamps. Clamping is idempotent, but doing it twice was
+    /// wasteful and confusing — the cache key now reflects exactly the
+    /// effective values used everywhere else in the request.
     private func makeContextKey(
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
         searchQuerySeed: String,
-        maxDuckDuckGoResults: Int,
-        maxWikipediaResults: Int
+        clampedDuckDuckGoResults: Int,
+        clampedWikipediaResults: Int
     ) -> String {
         let normalizedContext = contextInput
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -519,7 +534,7 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedMaxDuckDuckGoResults(maxDuckDuckGoResults))||wiki:\(clampedMaxWikipediaResults(maxWikipediaResults))"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
     }
 
     private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {
