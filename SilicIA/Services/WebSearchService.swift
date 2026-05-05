@@ -11,18 +11,31 @@ import Combine
 import UIKit
 #endif
 
-/// Strip HTML tags and decode common HTML entities from a raw HTML string.
-private func htmlToPlainText(_ html: String) -> String {
-    var result = html
-    if let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) {
-        result = regex.stringByReplacingMatches(
-            in: result,
-            range: NSRange(result.startIndex..., in: result),
-            withTemplate: ""
-        )
-    }
+@MainActor
+/// Performs multi-provider web search and merges DuckDuckGo with Wikipedia REST results.
+class WebSearchService: ObservableObject {
+    @Published var isSearching = false
+    @Published var error: Error?
 
-    let entities: [(String, String)] = [
+    /// Default DuckDuckGo per-query cap when callers do not override.
+    nonisolated static let defaultDuckDuckGoLimit = 6
+    /// Default Wikipedia per-query cap when callers do not override.
+    nonisolated static let defaultWikipediaLimit = 2
+
+    // MARK: - Cached HTML regexes
+
+    /// Matches any HTML tag — used by `htmlToPlainText` to strip markup.
+    nonisolated private static let htmlTagRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "<[^>]+>", options: [])
+    }()
+
+    /// Matches numeric HTML entities (`&#nnn;`) — used by `htmlToPlainText`.
+    nonisolated private static let numericEntityRegex: NSRegularExpression? = {
+        try? NSRegularExpression(pattern: "&#(\\d+);", options: [])
+    }()
+
+    /// Named HTML entities replaced as plain ASCII before numeric ones are decoded.
+    nonisolated private static let namedHTMLEntities: [(String, String)] = [
         ("&amp;", "&"),
         ("&lt;", "<"),
         ("&gt;", ">"),
@@ -37,55 +50,57 @@ private func htmlToPlainText(_ html: String) -> String {
         ("&laquo;", "\""),
         ("&raquo;", "\"")
     ]
-    for (entity, char) in entities {
-        result = result.replacingOccurrences(of: entity, with: char)
-    }
 
-    if let numericRegex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
-        let matches = numericRegex.matches(
-            in: result,
-            range: NSRange(result.startIndex..., in: result)
-        ).reversed()
-        for match in matches {
-            if let range = Range(match.range(at: 1), in: result),
-               let codePoint = Int(result[range]),
-               let scalar = Unicode.Scalar(codePoint),
-               let fullRange = Range(match.range, in: result) {
-                result = result.replacingCharacters(in: fullRange, with: String(scalar))
+    /// Strip HTML tags and decode common HTML entities from a raw HTML string.
+    nonisolated private static func htmlToPlainText(_ html: String) -> String {
+        var result = html
+        if let regex = htmlTagRegex {
+            result = regex.stringByReplacingMatches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result),
+                withTemplate: ""
+            )
+        }
+
+        for (entity, char) in namedHTMLEntities {
+            result = result.replacingOccurrences(of: entity, with: char)
+        }
+
+        if let numericRegex = numericEntityRegex {
+            let matches = numericRegex.matches(
+                in: result,
+                range: NSRange(result.startIndex..., in: result)
+            ).reversed()
+            for match in matches {
+                if let range = Range(match.range(at: 1), in: result),
+                   let codePoint = Int(result[range]),
+                   let scalar = Unicode.Scalar(codePoint),
+                   let fullRange = Range(match.range, in: result) {
+                    result = result.replacingCharacters(in: fullRange, with: String(scalar))
+                }
             }
         }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    return result.trimmingCharacters(in: .whitespacesAndNewlines)
-}
+    /// Extract the inner HTML for the first element matching a class name and tag.
+    /// The pattern is built from arguments, so it is not cached.
+    nonisolated private static func extractInnerHTML(in html: String, className: String, tagName: String) -> String? {
+        let escapedClassName = NSRegularExpression.escapedPattern(for: className)
+        let escapedTagName = NSRegularExpression.escapedPattern(for: tagName)
+        let pattern = "<\(escapedTagName)[^>]*class=\"[^\"]*\\b\(escapedClassName)\\b[^\"]*\"[^>]*>([\\s\\S]*?)</\(escapedTagName)>"
 
-/// Extract the inner HTML for the first element matching a class name and tag.
-private func extractInnerHTML(in html: String, className: String, tagName: String) -> String? {
-    let escapedClassName = NSRegularExpression.escapedPattern(for: className)
-    let escapedTagName = NSRegularExpression.escapedPattern(for: tagName)
-    let pattern = "<\(escapedTagName)[^>]*class=\"[^\"]*\\b\(escapedClassName)\\b[^\"]*\"[^>]*>([\\s\\S]*?)</\(escapedTagName)>"
-
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-        return nil
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return nil
+        }
+        let range = NSRange(html.startIndex..., in: html)
+        guard let match = regex.firstMatch(in: html, options: [], range: range),
+              let contentRange = Range(match.range(at: 1), in: html) else {
+            return nil
+        }
+        return String(html[contentRange])
     }
-    let range = NSRange(html.startIndex..., in: html)
-    guard let match = regex.firstMatch(in: html, options: [], range: range),
-          let contentRange = Range(match.range(at: 1), in: html) else {
-        return nil
-    }
-    return String(html[contentRange])
-}
-
-@MainActor
-/// Performs multi-provider web search and merges DuckDuckGo with Wikipedia REST results.
-class WebSearchService: ObservableObject {
-    @Published var isSearching = false
-    @Published var error: Error?
-
-    /// Default DuckDuckGo per-query cap when callers do not override.
-    private static let defaultDuckDuckGoLimit = 6
-    /// Default Wikipedia per-query cap when callers do not override.
-    private static let defaultWikipediaLimit = 2
 
     private static let userAgent: String = {
         let appName = "SilicIA"
@@ -154,8 +169,8 @@ class WebSearchService: ObservableObject {
     /// Search DuckDuckGo and Wikipedia, then merge deduplicated results.
     func search(
         query: String,
-        maxDuckDuckGoResults: Int = 6,
-        maxWikipediaResults: Int = 2,
+        maxDuckDuckGoResults: Int = defaultDuckDuckGoLimit,
+        maxWikipediaResults: Int = defaultWikipediaLimit,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
@@ -184,8 +199,8 @@ class WebSearchService: ObservableObject {
     /// Executes multiple searches and interleaves deduplicated results across queries.
     func search(
         queries: [String],
-        maxDuckDuckGoResultsPerQuery: Int = 6,
-        maxWikipediaResultsPerQuery: Int = 2,
+        maxDuckDuckGoResultsPerQuery: Int = defaultDuckDuckGoLimit,
+        maxWikipediaResultsPerQuery: Int = defaultWikipediaLimit,
         mergedLimit: Int = 10,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
@@ -363,7 +378,7 @@ class WebSearchService: ObservableObject {
         return pages.compactMap { page in
             let details = detailsByKey[page.key]
             let title = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let snippetCandidate = htmlToPlainText(page.excerpt ?? page.description ?? "")
+            let snippetCandidate = Self.htmlToPlainText(page.excerpt ?? page.description ?? "")
             let snippet = snippetCandidate.isEmpty ? "Wikipedia page" : snippetCandidate
             let pageURL = details?.contentUrls?.desktop?.page?.trimmingCharacters(in: .whitespacesAndNewlines)
                 ?? details?.htmlUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -461,9 +476,13 @@ class WebSearchService: ObservableObject {
                 }
             }
 
-            if perQueryResults.allSatisfy({ index >= $0.count - 1 }) {
+            // All providers exhausted: index now points at or past the last
+            // element of every list, so further rounds cannot add anything.
+            if perQueryResults.allSatisfy({ index >= $0.count }) {
                 break
             }
+            // Defensive fallback: nothing added this round and there is
+            // nothing left to consider — also exhausted.
             if !addedInRound && perQueryResults.allSatisfy({ index >= $0.count }) {
                 break
             }
@@ -520,12 +539,12 @@ class WebSearchService: ObservableObject {
                   let titleEnd = component.range(of: "</a>", range: titleStart.upperBound..<component.endIndex) else {
                 continue
             }
-            let title = htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
+            let title = Self.htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
 
-            let snippetHTML = extractInnerHTML(in: component, className: "result__snippet", tagName: "a")
-                ?? extractInnerHTML(in: component, className: "result__snippet", tagName: "div")
+            let snippetHTML = Self.extractInnerHTML(in: component, className: "result__snippet", tagName: "a")
+                ?? Self.extractInnerHTML(in: component, className: "result__snippet", tagName: "div")
                 ?? ""
-            let snippet = htmlToPlainText(snippetHTML)
+            let snippet = Self.htmlToPlainText(snippetHTML)
 
             let cleanURL = url.hasPrefix("//duckduckgo.com/l/?") ? extractActualURL(from: url) : url
 
