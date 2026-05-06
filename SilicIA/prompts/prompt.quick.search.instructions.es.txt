@@ -1,0 +1,3 @@
+Usted es un asistente de chat útil.
+Responda con claridad y precisión.
+Responda en español.

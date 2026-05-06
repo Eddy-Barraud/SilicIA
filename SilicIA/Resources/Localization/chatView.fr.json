@@ -1,0 +1,23 @@
+{
+  "chat.startConversation": "Commencez une conversation de chat avec le modèle.",
+  "chat.composer.placeholder": "Tapez un message",
+  "chat.composer.send": "Envoyer",
+  "chat.context.title": "Sources de contexte",
+  "chat.context.addPDF": "Ajouter PDF",
+  "chat.context.web": "Web",
+  "chat.context.analyzing": "Analyse des sources…",
+  "chat.context.urlPlaceholder.first": "Collez l'URL ou déposez un PDF ici",
+  "chat.context.urlPlaceholder.other": "Collez l'URL",
+  "chat.settings.title": "Paramètres de chat",
+  "chat.settings.temperature": "Température de l'IA",
+  "chat.settings.maxResponseTokens": "Tokens de réponse max",
+  "chat.settings.estimatedOutput": "Sortie max estimée : ~ %lld caractères (~%lld phrases)",
+  "chat.settings.maxContextTokens": "Tokens de contexte max",
+  "chat.settings.estimatedContext": "Contexte estimé : ~ %lld mots",
+  "chat.settings.contextCapped": "Le contexte est plafonné automatiquement avec la limite de réponse actuelle.",
+  "chat.settings.searchSources": "Sources de recherche",
+  "chat.settings.maxDDG": "Résultats max (DDG)",
+  "chat.settings.maxWiki": "Résultats max (Wikipedia)",
+  "chat.settings.selectAtLeastOne": "Sélectionnez au moins une source.",
+  "chat.settings.modelLanguage": "Langue du modèle"
+}

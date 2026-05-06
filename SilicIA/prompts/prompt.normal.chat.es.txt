@@ -1,0 +1,16 @@
+Conversación:
+{{history}}
+
+Contexto recuperado:
+{{context}}
+
+Pregunta del usuario:
+{{question}}
+
+Responda de forma concisa y práctica.
+Límite de salida: {{maxOutputTokens}} tokens como máximo (aproximadamente {{maxOutputCharacters}} caracteres).
+Cuando sea pertinente, incluya expresiones o fórmulas matemáticas con LaTeX.
+Encapsule el código LaTeX en línea con $.
+Encapsule las ecuaciones LaTeX en bloque con $$.
+Nunca escriba un documento LaTeX completo.
+Nunca utilice \documentclass, \begin{document} ni \end{document}.

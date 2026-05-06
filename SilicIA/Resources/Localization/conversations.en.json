@@ -1,0 +1,16 @@
+{
+  "conversations.title": "Chat History",
+  "conversations.empty.title": "No conversations yet",
+  "conversations.empty.subtitle": "Start a new chat to begin",
+  "conversations.clearAll": "Clear all",
+  "conversations.deleteAll.confirmTitle": "Clear All Conversations",
+  "conversations.deleteAll.confirmMessage": "Are you sure you want to delete all conversations? This cannot be undone.",
+  "conversations.untitled": "Untitled Conversation",
+  "conversations.messageCount": "%lld messages",
+  "conversations.timestamp.justNow": "Just now",
+  "conversations.timestamp.minutesAgo": "%lld m ago",
+  "conversations.timestamp.hoursAgo": "%lldh ago",
+  "conversations.timestamp.daysAgo": "%lldd ago",
+  "conversations.deleteHelp": "Delete conversation",
+  "conversations.backHelp": "Back to chat"
+}

@@ -9,12 +9,7 @@ import Foundation
 
 struct PromptLoader {
     static func languageCode(for language: ModelLanguage) -> String {
-        switch language {
-        case .french:
-            return "fr"
-        case .english:
-            return "en"
-        }
+        language.code
     }
 
     static func loadPrompt(

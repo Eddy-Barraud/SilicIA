@@ -14,6 +14,7 @@ struct ConversationsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Conversation.updatedAt, order: .reverse) private var conversations: [Conversation]
     @State private var showClearAllConfirmation = false
+    @State private var language = AppSettings.load().language
 
     var onLoadConversation: (Conversation) -> Void
     var onDismiss: () -> Void
@@ -24,14 +25,14 @@ struct ConversationsListView: View {
                 Button(action: onDismiss) {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                        Text("Back")
+                        Text(L.t("common.back", language: language))
                             .fontWeight(.medium)
                     }
                 }
                 .buttonStyle(.bordered)
-                .help("Back to chat")
+                .help(L.t("conversations.backHelp", language: language))
 
-                Text("Chat History")
+                Text(L.t("conversations.title", language: language))
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -40,7 +41,7 @@ struct ConversationsListView: View {
                     Button(action: { showClearAllConfirmation = true }) {
                         HStack(spacing: 6) {
                             Image(systemName: "trash")
-                            Text("Clear all")
+                            Text(L.t("conversations.clearAll", language: language))
                                 .fontWeight(.medium)
                         }
                     }
@@ -62,10 +63,10 @@ struct ConversationsListView: View {
                     Image(systemName: "text.bubble")
                         .font(.system(size: 40))
                         .foregroundColor(.secondary)
-                    Text("No conversations yet")
+                    Text(L.t("conversations.empty.title", language: language))
                         .font(.body)
                         .foregroundColor(.secondary)
-                    Text("Start a new chat to begin")
+                    Text(L.t("conversations.empty.subtitle", language: language))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -84,17 +85,17 @@ struct ConversationsListView: View {
                 .listStyle(.plain)
             }
         }
-        .alert("Clear All Conversations", isPresented: $showClearAllConfirmation) {
-            Button("Clear All", role: .destructive) {
+        .alert(L.t("conversations.deleteAll.confirmTitle", language: language), isPresented: $showClearAllConfirmation) {
+            Button(L.t("conversations.clearAll", language: language), role: .destructive) {
                 for conversation in conversations {
                     modelContext.delete(conversation)
                 }
                 _ = saveContext()
                 _ = DroppedPDFStore.clearAll()
             }
-            Button("Cancel", role: .cancel) {}
+            Button(L.t("common.cancel", language: language), role: .cancel) {}
         } message: {
-            Text("Are you sure you want to delete all conversations? This cannot be undone.")
+            Text(L.t("conversations.deleteAll.confirmMessage", language: language))
         }
     }
 
@@ -106,7 +107,7 @@ struct ConversationsListView: View {
             }) {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 8) {
-                        Text(conversation.title ?? "Untitled Conversation")
+                        Text(conversation.title ?? L.t("conversations.untitled", language: language))
                             .font(.body)
                             .fontWeight(.medium)
                             .lineLimit(1)
@@ -128,7 +129,7 @@ struct ConversationsListView: View {
                         Image(systemName: "message.fill")
                             .font(.caption2)
                             .foregroundColor(.secondary)
-                        Text("\(conversation.messages.count) messages")
+                        Text(L.t("conversations.messageCount", language: language, Int64(conversation.messages.count)))
                             .font(.caption2)
                             .foregroundColor(.secondary)
                     }
@@ -148,7 +149,7 @@ struct ConversationsListView: View {
             }
             .buttonStyle(.bordered)
             .tint(.red)
-            .help("Delete conversation")
+            .help(L.t("conversations.deleteHelp", language: language))
             .padding(.leading, 8)
         }
     }
@@ -159,13 +160,13 @@ struct ConversationsListView: View {
         let components = calendar.dateComponents([.day, .hour, .minute], from: date, to: now)
 
         if let day = components.day, day >= 1 {
-            return "\(day)d ago"
+            return L.t("conversations.timestamp.daysAgo", language: language, Int64(day))
         } else if let hour = components.hour, hour >= 1 {
-            return "\(hour)h ago"
+            return L.t("conversations.timestamp.hoursAgo", language: language, Int64(hour))
         } else if let minute = components.minute, minute >= 1 {
-            return "\(minute)m ago"
+            return L.t("conversations.timestamp.minutesAgo", language: language, Int64(minute))
         } else {
-            return "Just now"
+            return L.t("conversations.timestamp.justNow", language: language)
         }
     }
 

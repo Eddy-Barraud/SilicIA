@@ -16,5 +16,3 @@ build/
 # Local signing override (do not commit your personal team/profile)
 Configs/LocalSigning.xcconfig
 
-# Local build scheme (do not commit your personal scheme)
-SilicIA.xcodeproj/xcshareddata/xcschemes/SilicIA.xcscheme
