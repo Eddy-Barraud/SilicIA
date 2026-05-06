@@ -28,6 +28,7 @@
 /* Begin PBXFileReference section */
 		36D5D0B42F7190B80090D706 /* SilicIA.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SilicIA.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B2C3D4E22F7A000100ABCDEF /* SilicIAShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SilicIAShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		C3D4E5F12F7B000100ABCDEF /* SilicIATests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SilicIATests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -64,7 +65,22 @@
 			path = SilicIAShareExtension;
 			sourceTree = "<group>";
 		};
+		C3D4E5F22F7B000100ABCDEF /* SilicIATests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SilicIATests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXContainerItemProxy section */
+		C3D4E5FB2F7B000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 36D5D0AC2F7190B80090D706 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 36D5D0B32F7190B80090D706;
+			remoteInfo = SilicIA;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		36D5D0B12F7190B80090D706 /* Frameworks */ = {
@@ -82,6 +98,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C3D4E5F42F7B000100ABCDEF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -90,6 +113,7 @@
 			children = (
 				36D5D0B62F7190B80090D706 /* SilicIA */,
 				B2C3D4E72F7A000100ABCDEF /* SilicIAShareExtension */,
+				C3D4E5F22F7B000100ABCDEF /* SilicIATests */,
 				36D5D0B52F7190B80090D706 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -99,6 +123,7 @@
 			children = (
 				36D5D0B42F7190B80090D706 /* SilicIA.app */,
 				B2C3D4E22F7A000100ABCDEF /* SilicIAShareExtension.appex */,
+				C3D4E5F12F7B000100ABCDEF /* SilicIATests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -152,6 +177,29 @@
 			productReference = B2C3D4E22F7A000100ABCDEF /* SilicIAShareExtension.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		C3D4E5F62F7B000100ABCDEF /* SilicIATests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C3D4E5F92F7B000100ABCDEF /* Build configuration list for PBXNativeTarget "SilicIATests" */;
+			buildPhases = (
+				C3D4E5F32F7B000100ABCDEF /* Sources */,
+				C3D4E5F42F7B000100ABCDEF /* Frameworks */,
+				C3D4E5F52F7B000100ABCDEF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C3D4E5FA2F7B000100ABCDEF /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C3D4E5F22F7B000100ABCDEF /* SilicIATests */,
+			);
+			name = SilicIATests;
+			packageProductDependencies = (
+			);
+			productName = SilicIATests;
+			productReference = C3D4E5F12F7B000100ABCDEF /* SilicIATests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -167,6 +215,10 @@
 					};
 					B2C3D4E12F7A000100ABCDEF = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					C3D4E5F62F7B000100ABCDEF = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = 36D5D0B32F7190B80090D706;
 					};
 				};
 			};
@@ -189,6 +241,7 @@
 			targets = (
 				36D5D0B32F7190B80090D706 /* SilicIA */,
 				B2C3D4E12F7A000100ABCDEF /* SilicIAShareExtension */,
+				C3D4E5F62F7B000100ABCDEF /* SilicIATests */,
 			);
 		};
 /* End PBXProject section */
@@ -202,6 +255,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		B2C3D4EE2F7A000100ABCDEF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C3D4E5F52F7B000100ABCDEF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -225,7 +285,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		C3D4E5F32F7B000100ABCDEF /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		C3D4E5FA2F7B000100ABCDEF /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 36D5D0B32F7190B80090D706 /* SilicIA */;
+			targetProxy = C3D4E5FB2F7B000100ABCDEF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		36D5D0BD2F7190B90090D706 /* Debug */ = {
@@ -522,6 +597,76 @@
 			};
 			name = Release;
 		};
+		C3D4E5F72F7B000100ABCDEF /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WPBZAUF723;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.silicia.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
+				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
+				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Debug;
+		};
+		C3D4E5F82F7B000100ABCDEF /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = WPBZAUF723;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = fr.trevalim.silicia.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = auto;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_VERSION = 5.0;
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
+				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
+				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
+				XROS_DEPLOYMENT_TARGET = 26.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -548,6 +693,15 @@
 			buildConfigurations = (
 				B2C3D4F02F7A000100ABCDEF /* Debug */,
 				B2C3D4F12F7A000100ABCDEF /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C3D4E5F92F7B000100ABCDEF /* Build configuration list for PBXNativeTarget "SilicIATests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3D4E5F72F7B000100ABCDEF /* Debug */,
+				C3D4E5F82F7B000100ABCDEF /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

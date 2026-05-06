@@ -14,6 +14,9 @@ import AppKit
 @main
 /// Application entry point that launches the main content window.
 struct SilicIAApp: App {
+    init() {
+        _ = LocalizationService.shared
+    }
     private static let sharedAppGroupIdentifier = "group.fr.trevalim.silicia.shared"
     private static let sharedInboxDirectoryName = "IncomingSharedFiles"
 

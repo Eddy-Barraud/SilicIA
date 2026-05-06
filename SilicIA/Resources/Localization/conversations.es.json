@@ -1,0 +1,16 @@
+{
+  "conversations.title": "Historial de chats",
+  "conversations.empty.title": "Aún no hay conversaciones",
+  "conversations.empty.subtitle": "Inicie un nuevo chat para comenzar",
+  "conversations.clearAll": "Borrar todo",
+  "conversations.deleteAll.confirmTitle": "Borrar todas las conversaciones",
+  "conversations.deleteAll.confirmMessage": "¿Está seguro de que desea eliminar todas las conversaciones? Esta acción no se puede deshacer.",
+  "conversations.untitled": "Conversación sin título",
+  "conversations.messageCount": "%lld mensajes",
+  "conversations.timestamp.justNow": "Ahora mismo",
+  "conversations.timestamp.minutesAgo": "hace %lld m",
+  "conversations.timestamp.hoursAgo": "hace %lldh",
+  "conversations.timestamp.daysAgo": "hace %lldd",
+  "conversations.deleteHelp": "Eliminar conversación",
+  "conversations.backHelp": "Volver al chat"
+}

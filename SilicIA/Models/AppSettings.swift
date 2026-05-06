@@ -11,6 +11,15 @@ import Foundation
 enum ModelLanguage: String, CaseIterable, Codable {
     case french = "French"
     case english = "English"
+    case spanish = "Spanish"
+
+    var code: String {
+        switch self {
+        case .english: return "en"
+        case .french: return "fr"
+        case .spanish: return "es"
+        }
+    }
 }
 
 /// User-configurable settings controlling search and summary behavior.

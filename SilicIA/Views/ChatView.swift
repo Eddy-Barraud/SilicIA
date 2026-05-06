@@ -145,7 +145,7 @@ struct ChatView: View {
             Button(action: { startOver() }) {
                 HStack(spacing: 6) {
                     Image(systemName: "plus.circle")
-                    Text(settings.language == .french ? "Nouveau" : "New")
+                    Text(L.t("common.new", language: settings.language))
                         .fontWeight(.medium)
                 }
             }
@@ -156,7 +156,7 @@ struct ChatView: View {
             Button(action: { showHistory = true }) {
                 HStack(spacing: 6) {
                     Image(systemName: "clock")
-                    Text(settings.language == .french ? "Historique" : "History")
+                    Text(L.t("common.history", language: settings.language))
                         .fontWeight(.medium)
                 }
             }
@@ -184,7 +184,7 @@ struct ChatView: View {
                 Button(action: { showSettings = false }) {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                        Text(settings.language == .french ? "Retour" : "Back")
+                        Text(L.t("common.back", language: settings.language))
                             .fontWeight(.medium)
                     }
                 }
@@ -215,7 +215,7 @@ struct ChatView: View {
     private var chatSettingsPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(settings.language == .french ? "Paramètres de chat" : "Chat Settings")
+                Text(L.t("chat.settings.title", language: settings.language))
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -225,7 +225,7 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Température de l'IA" : "AI Temperature")
+                    Text(L.t("chat.settings.temperature", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text(String(format: "%.2f", settings.temperature))
@@ -237,7 +237,7 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Tokens de réponse max" : "Max Response Tokens")
+                    Text(L.t("chat.settings.maxResponseTokens", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text("\(settings.maxResponseTokens)")
@@ -255,18 +255,14 @@ struct ChatView: View {
                     }
                 ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
 
-                Text(
-                    settings.language == .french
-                    ? "Sortie max estimée : ~ \(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
-                    : "Estimated max output: ~ \(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
-                )
+                Text(L.t("chat.settings.estimatedOutput", language: settings.language, Int64(estimatedMaxOutputCharacters), Int64(estimatedMaxOutputSentences)))
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
+                    Text(L.t("chat.settings.maxContextTokens", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text("\(effectiveContextTokens)")
@@ -278,27 +274,19 @@ struct ChatView: View {
                     set: { settings.maxContextTokens = Int($0) }
                 ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(maxAllowedContextTokensForCurrentResponse), step: 50)
 
-                Text(
-                    settings.language == .french
-                    ? "Contexte estimé : ~ \(estimatedMaxContextWords) mots"
-                    : "Estimated context: ~ \(estimatedMaxContextWords) words"
-                )
+                Text(L.t("chat.settings.estimatedContext", language: settings.language, Int64(estimatedMaxContextWords)))
                 .font(.caption)
                 .foregroundColor(.secondary)
 
                 if effectiveContextTokens < settings.maxContextTokens {
-                    Text(
-                        settings.language == .french
-                        ? "Le contexte est plafonné automatiquement avec la limite de réponse actuelle."
-                        : "Context is automatically capped by the current response-token limit."
-                    )
+                    Text(L.t("chat.settings.contextCapped", language: settings.language))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text(settings.language == .french ? "Sources de recherche" : "Search sources")
+                Text(L.t("chat.settings.searchSources", language: settings.language))
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
@@ -308,7 +296,7 @@ struct ChatView: View {
                 }
                 if settings.useDuckDuckGo {
                     HStack {
-                        Text(settings.language == .french ? "Résultats max (DDG)" : "Max results (DDG)")
+                        Text(L.t("chat.settings.maxDDG", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -328,7 +316,7 @@ struct ChatView: View {
                 }
                 if settings.useWikipedia {
                     HStack {
-                        Text(settings.language == .french ? "Résultats max (Wikipedia)" : "Max results (Wikipedia)")
+                        Text(L.t("chat.settings.maxWiki", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -343,11 +331,7 @@ struct ChatView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(
-                        settings.language == .french
-                        ? "Sélectionnez au moins une source."
-                        : "Select at least one source."
-                    )
+                    Text(L.t("chat.settings.selectAtLeastOne", language: settings.language))
                     .font(.caption)
                     .foregroundColor(.red)
                 }
@@ -355,7 +339,7 @@ struct ChatView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Langue du modèle" : "Model Language")
+                    Text(L.t("chat.settings.modelLanguage", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text(settings.language.rawValue)
@@ -380,7 +364,7 @@ struct ChatView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 if chatService.messages.isEmpty {
-                    Text(settings.language == .french ? "Commencez une conversation de chat avec le modèle." : "Start a chat conversation with the foundation model.")
+                    Text(L.t("chat.startConversation", language: settings.language))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -388,7 +372,7 @@ struct ChatView: View {
                 ForEach(chatService.messages) { message in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            Text(message.role == .user ? settings.language == .french ? "Vous" : "You" : settings.language == .french ? "Assistant" : "Assistant")
+                            Text(message.role == .user ? L.t("common.you", language: settings.language) : L.t("common.assistant", language: settings.language))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
 
@@ -409,7 +393,7 @@ struct ChatView: View {
                                         .foregroundColor(copiedMessageID == message.id ? .green : .secondary)
                                 }
                                 .buttonStyle(.plain)
-                                .help(settings.language == .french ? "Copier" : "Copy")
+                                .help(L.t("common.copy", language: settings.language))
                             }
                         }
                         renderedMessageContent(message)
@@ -432,7 +416,7 @@ struct ChatView: View {
                     HStack(spacing: 8) {
                         ProgressView()
                             .controlSize(.small)
-                        Text("Thinking…")
+                        Text(L.t("common.thinking", language: settings.language))
                             .foregroundColor(.secondary)
                         Spacer()
                     }
@@ -506,7 +490,7 @@ struct ChatView: View {
     private var composerView: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .bottom, spacing: 10) {
-                TextField("Type a message", text: $messageInput, axis: .vertical)
+                TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
                     .focused($isInputFieldFocused)
@@ -518,7 +502,7 @@ struct ChatView: View {
                         submitMessage()
                     }
 
-                Button("Send") {
+                Button(L.t("chat.composer.send", language: settings.language)) {
                     submitMessage()
                 }
                 .buttonStyle(.borderedProminent)
@@ -534,7 +518,7 @@ struct ChatView: View {
                 Image(systemName: chatService.isAnalyzingContext ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath.circle")
                     .foregroundColor(chatService.isAnalyzingContext ? .accentColor : .secondary)
                     .symbolEffect(.rotate.byLayer, isActive: chatService.isAnalyzingContext)
-                Text("Context Sources")
+                Text(L.t("chat.context.title", language: settings.language))
                     .font(.subheadline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -544,14 +528,14 @@ struct ChatView: View {
                     Image(systemName: "plus.circle.fill")
                 }
                 .buttonStyle(.plain)
-                Button("Add PDF") {
+                Button(L.t("chat.context.addPDF", language: settings.language)) {
                     showFileImporter = true
                 }
                 .buttonStyle(.bordered)
                 Button {
                     isWebSearchEnabled.toggle()
                 } label: {
-                    Label("Web", systemImage: "globe")
+                    Label(L.t("chat.context.web", language: settings.language), systemImage: "globe")
                 }
                 .buttonStyle(.bordered)
                 .tint(isWebSearchEnabled ? .accentColor : .secondary)
@@ -565,7 +549,7 @@ struct ChatView: View {
                 HStack(spacing: 8) {
                     ProgressView(value: chatService.contextAnalysisProgress)
                         .controlSize(.small)
-                    Text("Analyzing sources…")
+                    Text(L.t("chat.context.analyzing", language: settings.language))
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
@@ -581,7 +565,7 @@ struct ChatView: View {
             switch source.kind {
             case .url:
                 TextField(
-                    index == 0 ? "Paste URL or drop PDF here" : "Paste URL",
+                    index == 0 ? L.t("chat.context.urlPlaceholder.first", language: settings.language) : L.t("chat.context.urlPlaceholder.other", language: settings.language),
                     text: Binding(
                         get: {
                             guard case .url(let text) = contextSources[index].kind else { return "" }

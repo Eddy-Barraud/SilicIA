@@ -77,6 +77,46 @@ class WebScrapingService: ObservableObject {
     private static let scrapeConcurrency = 8
     private static let overfetchCount = 3
 
+    // MARK: - Cached HTML regexes (compiled once, reused per scrape)
+
+    /// Strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` blocks (and content) in one pass.
+    private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
+        options: [.caseInsensitive]
+    )
+    /// Strips HTML comments.
+    private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<!--[\\s\\S]*?-->",
+        options: []
+    )
+    /// Strips remaining HTML tags.
+    private static let htmlTagRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<[^>]+>",
+        options: []
+    )
+    /// Collapses any whitespace run into a single space.
+    private static let whitespaceRunRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "\\s+",
+        options: []
+    )
+    /// Captures any HTML entity reference: named, decimal numeric, or hex numeric.
+    private static let htmlEntityRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "&(#[0-9]+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]+);",
+        options: []
+    )
+    /// Lookup table for the small set of named HTML entities the scraper supports.
+    private static let namedHTMLEntities: [String: String] = [
+        "nbsp": " ",
+        "amp": "&",
+        "lt": "<",
+        "gt": ">",
+        "quot": "\"",
+        "apos": "'",
+        "mdash": "\u{2014}",
+        "ndash": "\u{2013}",
+        "hellip": "\u{2026}"
+    ]
+
     /// Creates a scraping session configured for resilient low-overhead requests.
     init() {
         // Configure URLSession for efficient scraping
@@ -191,27 +231,26 @@ class WebScrapingService: ObservableObject {
         return results
     }
 
-    /// Extract readable text content from HTML
+    /// Extract readable text content from HTML using cached regexes.
     private func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
-        // Remove script and style tags with their content
-        text = removeTagsWithContent(text, tags: ["script", "style", "nav", "header", "footer"])
-
-        // Remove HTML comments
-        text = text.replacingOccurrences(of: "<!--[\\s\\S]*?-->", with: "", options: .regularExpression)
-
-        // Remove all HTML tags
-        text = text.replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-
-        // Decode common HTML entities
-        text = decodeHTMLEntities(text)
-
-        // Clean up whitespace
-        text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        // 1. Strip script/style/nav/header/footer blocks (and their content) in one alternation pass.
+        text = Self.applyRegex(Self.nonContentBlockRegex, to: text, replacement: "")
+        // 2. Strip HTML comments.
+        text = Self.applyRegex(Self.htmlCommentRegex, to: text, replacement: "")
+        // 3. Strip any remaining tags, replacing them with a space so adjacent words don't merge.
+        text = Self.applyRegex(Self.htmlTagRegex, to: text, replacement: " ")
+        // 4. Decode common HTML entities (named + numeric + hex) in a single pass.
+        text = Self.decodeHTMLEntities(text)
+        // 5. Collapse whitespace runs.
+        text = Self.applyRegex(Self.whitespaceRunRegex, to: text, replacement: " ")
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Limit to reasonable size (user-configured max characters to avoid token limits)
+        // 6. Cap length. `String.prefix(_:)` operates on extended grapheme
+        // clusters in Swift's `String`, so this slice is grapheme-safe and
+        // never splits a Unicode cluster — do not downgrade this to UTF-16
+        // or UnicodeScalar slicing.
         if text.count > maxCharacters {
             text = String(text.prefix(maxCharacters))
         }
@@ -219,37 +258,68 @@ class WebScrapingService: ObservableObject {
         return text
     }
 
-    /// Remove specific HTML tags along with their content
-    private func removeTagsWithContent(_ html: String, tags: [String]) -> String {
-        var result = html
-        for tag in tags {
-            let pattern = "<\(tag)[^>]*>[\\s\\S]*?</\(tag)>"
-            result = result.replacingOccurrences(of: pattern, with: "", options: [.regularExpression, .caseInsensitive])
+    /// Applies a cached regex with `replacement` over the full string. No-op when the regex is nil.
+    private static func applyRegex(_ regex: NSRegularExpression?, to text: String, replacement: String) -> String {
+        guard let regex else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
+    }
+
+    /// Single-pass entity decoder: walks `&...;` references in order and
+    /// substitutes named, decimal-numeric (`&#nnn;`), and hex-numeric
+    /// (`&#xNN;`) entities. Unknown references pass through unchanged.
+    private static func decodeHTMLEntities(_ text: String) -> String {
+        guard let regex = htmlEntityRegex else { return text }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, options: [], range: nsRange)
+        guard !matches.isEmpty else { return text }
+
+        var result = ""
+        result.reserveCapacity(text.count)
+        var cursor = text.startIndex
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: text),
+                  let groupRange = Range(match.range(at: 1), in: text) else {
+                continue
+            }
+            // Append the slice between the previous cursor and this match.
+            if cursor < fullRange.lowerBound {
+                result.append(contentsOf: text[cursor..<fullRange.lowerBound])
+            }
+
+            let token = String(text[groupRange])
+            let decoded = decodeEntityToken(token) ?? String(text[fullRange])
+            result.append(decoded)
+            cursor = fullRange.upperBound
+        }
+
+        if cursor < text.endIndex {
+            result.append(contentsOf: text[cursor...])
         }
         return result
     }
 
-    /// Decode common HTML entities
-    private func decodeHTMLEntities(_ text: String) -> String {
-        var result = text
-        let entities = [
-            "&nbsp;": " ",
-            "&amp;": "&",
-            "&lt;": "<",
-            "&gt;": ">",
-            "&quot;": "\"",
-            "&#39;": "'",
-            "&apos;": "'",
-            "&mdash;": "—",
-            "&ndash;": "–",
-            "&hellip;": "…"
-        ]
-
-        for (entity, replacement) in entities {
-            result = result.replacingOccurrences(of: entity, with: replacement)
+    /// Decodes a single entity body (the part between `&` and `;`).
+    /// Returns nil when the entity is unrecognized so the caller can preserve the original text.
+    private static func decodeEntityToken(_ token: String) -> String? {
+        if token.hasPrefix("#x") || token.hasPrefix("#X") {
+            let hex = token.dropFirst(2)
+            guard let codePoint = UInt32(hex, radix: 16),
+                  let scalar = Unicode.Scalar(codePoint) else {
+                return nil
+            }
+            return String(scalar)
         }
-
-        return result
+        if token.hasPrefix("#") {
+            let digits = token.dropFirst()
+            guard let codePoint = UInt32(digits, radix: 10),
+                  let scalar = Unicode.Scalar(codePoint) else {
+                return nil
+            }
+            return String(scalar)
+        }
+        return namedHTMLEntities[token]
     }
 }
 

@@ -1,0 +1,6 @@
+Pregunta: {{query}}
+
+Si no está seguro de la respuesta, no diga nada.
+Responda de forma breve, precisa y factual.
+Responda en español.
+Responda en dos frases como máximo.

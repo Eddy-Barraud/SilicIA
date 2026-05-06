@@ -1,0 +1,23 @@
+{
+  "chat.startConversation": "Start a chat conversation with the foundation model.",
+  "chat.composer.placeholder": "Type a message",
+  "chat.composer.send": "Send",
+  "chat.context.title": "Context Sources",
+  "chat.context.addPDF": "Add PDF",
+  "chat.context.web": "Web",
+  "chat.context.analyzing": "Analyzing sources…",
+  "chat.context.urlPlaceholder.first": "Paste URL or drop PDF here",
+  "chat.context.urlPlaceholder.other": "Paste URL",
+  "chat.settings.title": "Chat Settings",
+  "chat.settings.temperature": "AI Temperature",
+  "chat.settings.maxResponseTokens": "Max Response Tokens",
+  "chat.settings.estimatedOutput": "Estimated max output: ~ %lld characters (~%lld sentences)",
+  "chat.settings.maxContextTokens": "Max Context Tokens",
+  "chat.settings.estimatedContext": "Estimated context: ~ %lld words",
+  "chat.settings.contextCapped": "Context is automatically capped by the current response-token limit.",
+  "chat.settings.searchSources": "Search sources",
+  "chat.settings.maxDDG": "Max results (DDG)",
+  "chat.settings.maxWiki": "Max results (Wikipedia)",
+  "chat.settings.selectAtLeastOne": "Select at least one source.",
+  "chat.settings.modelLanguage": "Model Language"
+}
