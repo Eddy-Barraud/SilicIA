@@ -3,24 +3,27 @@
 [![Build SilicIA](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml/badge.svg)](https://github.com/Eddy-Barraud/privducuai/actions/workflows/build.yml)
 [![Check Web Search Sources](https://github.com/Eddy-Barraud/SilicIA/actions/workflows/checkwebscrap.yml/badge.svg)](https://github.com/Eddy-Barraud/SilicIA/actions/workflows/checkwebscrap.yml)
 
-A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
-The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.
+A fast, efficient, and privacy-focused web search assistant for macOS and iOS, powered by DuckDuckGo, Wikipedia, and Apple's on-device AI frameworks (Apple Intelligence).
+The app bundles a context-aware chat experience, web scraping, PDF document analysis, and relevance-ranked retrieval — all processed on-device.
 
 ## Features
 
-- 🔍 **DuckDuckGo Integration**: Privacy-respecting web search
-- ⚡ **Optimized for Apple Silicon**: Efficient power management and fast performance
-- 🧠 **On-Device AI**: Uses Apple's Foundation Models
+- 🔍 **Dual Search Sources**: DuckDuckGo (privacy-respecting) + Wikipedia, individually toggleable per query
+- 💬 **Offline Chat Mode**: Chat with the on-device model without any web search when no sources are needed
+- ⚡ **Optimized for Apple Silicon**: Runs on macOS and iOS devices with Apple Intelligence (iPhone 15 Pro or later, iPad with M-series chip, and all Apple Silicon Macs)
+- 🧠 **Apple Intelligence**: Uses Apple's Foundation Models framework — processing happens entirely on-device
 - 📝 **Concise Summaries**: Get quick insights without reading through multiple pages
 - 🔗 **Direct Links**: Easy access to sources for detailed information
 - 💬 **Tabbed Chat Experience**: Switch between Search Assist and Chat
 - 📎 **Context-Aware Chat**: Add URL and PDF context (including drag-and-drop PDFs) for retrieval-augmented answers
 - 💾 **Chat History**: Persistent conversation storage with SwiftData (inspired by [FoundationChat](https://github.com/Dimillian/FoundationChat))
-- 🔒 **Privacy-First**: No tracking, no data collection
+- 🔒 **Privacy-First**: No tracking, no data collection, no external AI API calls
 
 ## Overview
 
-SilicIA (Privacy + AI LLM) is a native macOS application that provides a DuckDuckGo assistant experience similar to Perplexica, but optimized for Apple Silicon Macs. It combines efficient web search with on-device LLM summarization to help you find and understand information quickly without draining your battery.
+SilicIA (Privacy + AI LLM) is a native macOS and iOS application that provides a privacy-focused AI search assistant experience similar to Perplexica, optimized for Apple Silicon devices with Apple Intelligence. It combines efficient web search (DuckDuckGo and/or Wikipedia — your choice) with on-device LLM summarization to help you find and understand information quickly without draining your battery.
+
+You can also use the app in **offline chat mode**: when both search sources are disabled, the app talks directly to the on-device model without making any network requests.
 
 ![Example usage asking the Factorial function](Screenshots/Factorial.png)
 
@@ -79,11 +82,11 @@ Results Display
 - **Message**: SwiftData model for individual messages in conversations
 
 #### **Services**
-- **DuckDuckGoService**: Handles privacy-respecting web search queries via DuckDuckGo's instant answer API
+- **WebSearchService**: Orchestrates DuckDuckGo and Wikipedia searches; each source can be enabled/disabled independently with its own result-count slider
 - **WebScrapingService**: Extracts and parses content from web pages for context
-- **AIService**: Performs on-device summarization using Apple's NaturalLanguage framework
+- **AIService**: Performs on-device summarization using Apple's Foundation Models framework
 - **RAGContextService**: Manages retrieval-augmented generation context from URLs and PDFs
-- **ChatService**: Orchestrates multi-step queries combining search, scraping, and AI processing
+- **ChatService**: Orchestrates multi-step queries combining search, scraping, and AI processing; falls back to pure offline chat when all sources are off
 
 #### **Views**
 - **ContentView**: Root view managing tab navigation between Search and Chat modes
@@ -95,9 +98,10 @@ Results Display
 
 ### Frameworks & Technologies
 
-- **SwiftUI**: Modern declarative UI framework for macOS
+- **SwiftUI**: Modern declarative UI framework for macOS and iOS
+- **FoundationModels**: Apple Intelligence on-device LLM (requires Apple Silicon)
 - **Foundation**: Core networking with URLSession
-- **NaturalLanguage**: On-device NLP for tokenization and tagging
+- **NaturalLanguage**: On-device NLP for tokenization and relevance scoring
 - **PDFKit**: PDF document parsing and handling
 
 ### Power Efficiency
@@ -120,7 +124,9 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
 
 ### Search Integration
 
-- **DuckDuckGo API**: Queries instant answer endpoint for privacy-respecting results
+- **DuckDuckGo**: Queries the instant answer endpoint for privacy-respecting results (toggleable, 1–20 results)
+- **Wikipedia**: Queries the Wikipedia API for encyclopedic context (toggleable, 1–20 results)
+- **Offline mode**: When all sources are disabled, the app routes queries directly to the on-device model with no network traffic
 - **Web Scraping**: Extracts full article content for deeper context
 - **RAG Pipeline**: Combines retrieved documents with user queries for context-aware responses
 
@@ -178,9 +184,10 @@ well.
 
 ## Requirements
 
-- macOS 26 or later
-- Apple Silicon
-- Internet connection for web searches
+- **macOS 26** or later on any Apple Silicon Mac
+- **iOS 26** or later on iPhone 15 Pro / iPhone 15 Pro Max or newer, or any iPad with an M-series chip
+- Apple Intelligence must be enabled in System Settings / Settings
+- Internet connection for web searches (not required in offline chat mode)
 
 ## Building
 
@@ -213,7 +220,6 @@ well.
 ## Future Enhancements
 
 Potential improvements for future versions:
-- Integration with Apple Intelligence (when available)
 - Search history and favorites
 - Custom search filters
 - Keyboard shortcuts
