@@ -10,6 +10,9 @@ build/
 .swiftpm/
 .build/
 
+# Claude's local configuration files
+.claude/
+
 # macOS
 .DS_Store
 
