@@ -321,7 +321,15 @@ class WebSearchService: ObservableObject {
         )
 
         if mergedProviders.isEmpty {
-            throw SearchError.networkError
+            // Only surface an error when an enabled provider actually failed.
+            // If providers succeeded but returned zero results, return [] so the
+            // caller can show "No results found" rather than "Network error".
+            let providerError = (useDuckDuckGo ? duckDuckGoError : nil)
+                ?? (useWikipedia ? wikipediaError : nil)
+            if let providerError {
+                throw providerError
+            }
+            return []
         }
 
         return mergedProviders
