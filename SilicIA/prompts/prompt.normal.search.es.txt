@@ -1,0 +1,11 @@
+Pregunta: {{query}}
+
+Contexto web:
+{{context}}
+
+Responda con:
+1. Una respuesta directa.
+2. {{keyPointsRange}} puntos clave.
+Límite: {{maxOutputTokens}} tokens como máximo.
+Cuando sea pertinente, incluya fórmulas matemáticas.
+Formato de salida requerido: LaTeX.

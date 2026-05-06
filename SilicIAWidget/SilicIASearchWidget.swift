@@ -8,6 +8,29 @@
 import SwiftUI
 import WidgetKit
 
+private func loadWidgetStrings(_ key: String) -> String {
+    let locale = Locale.current
+    let langCode: String
+    if #available(iOS 16, macOS 13, *) {
+        langCode = locale.language.languageCode?.identifier ?? "en"
+    } else {
+        langCode = locale.languageCode ?? "en"
+    }
+    let subdirs: [String?] = [nil, "Resources/Localization"]
+    for code in [langCode, "en"] {
+        let name = "widget.\(code)"
+        for subdir in subdirs {
+            if let url = Bundle.main.url(forResource: name, withExtension: "json", subdirectory: subdir),
+               let data = try? Data(contentsOf: url),
+               let dict = try? JSONDecoder().decode([String: String].self, from: data),
+               let value = dict[key] {
+                return value
+            }
+        }
+    }
+    return key
+}
+
 private struct SearchWidgetEntry: TimelineEntry {
     let date: Date
 }
@@ -45,8 +68,8 @@ struct SilicIASearchWidget: Widget {
         StaticConfiguration(kind: "SilicIASearchWidget", provider: SearchWidgetProvider()) { _ in
             SilicIASearchWidgetView()
         }
-        .configurationDisplayName("SilicIA Search")
-        .description("Quick access to SilicIA search.")
+        .configurationDisplayName(loadWidgetStrings("widget.displayName"))
+        .description(loadWidgetStrings("widget.description"))
         .supportedFamilies([.systemSmall, .systemMedium])
     }
 }

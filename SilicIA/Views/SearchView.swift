@@ -130,10 +130,9 @@ struct SearchView: View {
     }
 
     private var chatButtonTitle: String {
-        if hasChatMoreContext {
-            return settings.language == .french ? "Chat more" : "Chat more"
-        }
-        return "Chat"
+        return hasChatMoreContext
+            ? L.t("search.button.chatMore", language: settings.language)
+            : L.t("search.button.chat", language: settings.language)
     }
 
     private var isChatButtonDisabled: Bool {
@@ -219,13 +218,13 @@ struct SearchView: View {
                 Button(action: { showSettings = false }) {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
-                        Text(settings.language == .french ? "Retour" : "Back")
+                        Text(L.t("common.back", language: settings.language))
                             .fontWeight(.medium)
                     }
                 }
                 .buttonStyle(.bordered)
 
-                Text(settings.language == .french ? "Paramètres" : "Settings")
+                Text(L.t("search.settings.title", language: settings.language))
                     .font(.headline)
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
@@ -235,7 +234,7 @@ struct SearchView: View {
                 Button(action: { goHome() }) {
                     HStack(spacing: 6) {
                         Image(systemName: "arrow.2.circlepath")
-                        Text(settings.language == .french ? "Nettoyer" : "Start Over")
+                        Text(L.t("common.startOver", language: settings.language))
                             .fontWeight(.medium)
                     }
                 }
@@ -271,7 +270,7 @@ struct SearchView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
 
-                TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery,  axis: .vertical)
+                TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .font(.body)
@@ -318,7 +317,7 @@ struct SearchView: View {
                 .disabled(isChatButtonDisabled)
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
-                    Text(settings.language == .french ? "Go" : "Search")
+                    Text(L.t("search.button.go", language: settings.language))
                         .fontWeight(.medium)
                 }
                 .buttonStyle(.borderedProminent)
@@ -327,7 +326,7 @@ struct SearchView: View {
 
                 Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
                     Label(
-                        settings.language == .french ? "Deep" : "Deep",
+                        L.t("search.button.deep", language: settings.language),
                         systemImage: "sparkle.magnifyingglass"
                     )
                     .font(.subheadline)
@@ -359,11 +358,7 @@ struct SearchView: View {
                     Button(action: { toggleSummary() }) {
                         HStack {
                             Image(systemName: showingSummary ? "eye.slash" : "sparkles")
-                            if settings.language == .french {
-                                Text(showingSummary ? "Masquer le résumé" : "Afficher le résumé IA")
-                            } else {
-                                Text(showingSummary ? "Hide Summary" : "Show AI Summary")
-                            }
+                            Text(showingSummary ? L.t("search.summary.hide", language: settings.language) : L.t("search.summary.show", language: settings.language))
                         }
                         .font(.subheadline)
                         .fontWeight(.medium)
@@ -395,7 +390,7 @@ struct SearchView: View {
             HStack {
                 Image(systemName: "sparkles")
                     .foregroundColor(.accentColor)
-                Text(settings.language == .french ? "Résumé IA" : "AI Summary")
+                Text(L.t("search.summary.aiSummary", language: settings.language))
                     .font(.headline)
                     .fontWeight(.semibold)
 
@@ -415,7 +410,7 @@ struct SearchView: View {
                         .foregroundColor(didCopySummary ? .green : .secondary)
                 }
                 .buttonStyle(.plain)
-                .help(settings.language == .french ? "Copier" : "Copy")
+                .help(L.t("common.copy", language: settings.language))
                 .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if aiService.isSummarizing || (settings.isFirstGuessEnabled && isGeneratingFirstGuess) {
@@ -426,18 +421,18 @@ struct SearchView: View {
 
             if settings.isFirstGuessEnabled {
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("First guess")
+                    Text(L.t("search.summary.firstGuess", language: settings.language))
                         .font(.subheadline)
                         .fontWeight(.semibold)
 
                     if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                        Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
+                        Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
                             .foregroundColor(.secondary)
                             .italic()
                     } else if !firstGuessText.isEmpty {
                         progressiveLaTeXText(firstGuessText, isStreaming: isGeneratingFirstGuess)
                     } else {
-                        Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
+                        Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
                             .foregroundColor(.secondary)
                             .italic()
                     }
@@ -447,12 +442,12 @@ struct SearchView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Web context answer")
+                Text(L.t("search.summary.webContextAnswer", language: settings.language))
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
                 if aiService.isSummarizing {
-                    Text(settings.language == .french ? "Analyse des pages web complètes..." : "Analyzing full web pages...")
+                    Text(L.t("search.summary.analyzingPages", language: settings.language))
                         .foregroundColor(.secondary)
                         .italic()
                 }
@@ -462,7 +457,7 @@ struct SearchView: View {
 
                     if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Divider()
-                        Text("Top sources")
+                        Text(L.t("search.summary.topSources", language: settings.language))
                             .font(.subheadline)
                             .fontWeight(.semibold)
 
@@ -489,7 +484,7 @@ struct SearchView: View {
                         }
                     }
                 } else if !aiService.isSummarizing {
-                    Text(settings.language == .french ? "Réponse avec contexte web en attente..." : "Waiting for web-context answer...")
+                    Text(L.t("search.summary.waitingAnswer", language: settings.language))
                         .foregroundColor(.secondary)
                         .italic()
                 }
@@ -502,19 +497,13 @@ struct SearchView: View {
 
                     VStack(alignment: .trailing, spacing: 3) {
                         if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
-                            let label = settings.language == .french
-                                ? String(format: "Première réponse en: %.1f s", elapsed)
-                                : String(format: "Time to first answer: %.1f s", elapsed)
-                            Text(label)
+                            Text(L.t("search.summary.timeToFirst", language: settings.language, elapsed))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
 
                         if let elapsed = summaryElapsedSeconds {
-                            let label = settings.language == .french
-                                ? String(format: "Généré en %.1f s", elapsed)
-                                : String(format: "Generated in %.1f s", elapsed)
-                            Text(label)
+                            Text(L.t("search.summary.generatedIn", language: settings.language, elapsed))
                                 .font(.caption2)
                                 .foregroundColor(.secondary)
                         }
@@ -534,17 +523,17 @@ struct SearchView: View {
             VStack(spacing: 16) {
                 ProgressView()
                     .scaleEffect(1.5)
-                Text(settings.language == .french ? "Recherche web (DuckDuckGo + Wikipedia)..." : "Searching the web (DuckDuckGo + Wikipedia)...")
+                Text(L.t("search.loading.searching", language: settings.language))
                     .foregroundColor(.secondary)
 
                 if settings.isFirstGuessEnabled && !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("First guess")
+                        Text(L.t("search.summary.firstGuess", language: settings.language))
                             .font(.subheadline)
                             .fontWeight(.semibold)
 
                         if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                            Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
+                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
@@ -572,11 +561,11 @@ struct SearchView: View {
                     .foregroundColor(.accentColor)
 
                 VStack(spacing: 8) {
-                    Text(settings.language == .french ? "Recherchez le Web efficacement" : "Search the Web Efficiently")
+                    Text(L.t("search.welcome.title", language: settings.language))
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    Text(settings.language == .french ? "Obtenez des résumés concis alimentés par l'IA des résultats de recherche\nsans épuiser la batterie" : "Get concise AI-powered summaries of web results\nwithout draining your battery")
+                    Text(L.t("search.welcome.subtitle", language: settings.language))
                         .font(.body)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
@@ -595,7 +584,7 @@ struct SearchView: View {
     private var settingsPanel: some View {
         VStack(alignment: .leading, spacing: 20) {
             HStack {
-                Text(settings.language == .french ? "Paramétrages" : "Settings")
+                Text(L.t("search.settings.title", language: settings.language))
                     .font(.headline)
                     .fontWeight(.semibold)
                 Spacer()
@@ -606,7 +595,7 @@ struct SearchView: View {
             // Temperature
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Température de l'IA" : "AI Temperature")
+                    Text(L.t("search.settings.temperature", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text(String(format: "%.2f", settings.temperature))
@@ -618,19 +607,19 @@ struct SearchView: View {
 
             // First Guess Toggle
             Toggle(isOn: $settings.isFirstGuessEnabled) {
-                Text(settings.language == .french ? "Activer la première réponse" : "Enable First Guess")
+                Text(L.t("search.settings.firstGuessToggle", language: settings.language))
                     .font(.subheadline)
             }
 
             // Web Summaries Toggle
             Toggle(isOn: $settings.isWebSummariesEnabled) {
-                Text(settings.language == .french ? "Activer les résumés web" : "Activate web summaries")
+                Text(L.t("search.settings.webSummariesToggle", language: settings.language))
                     .font(.subheadline)
             }
 
             // Search Sources
             VStack(alignment: .leading, spacing: 8) {
-                Text(settings.language == .french ? "Sources de recherche" : "Search sources")
+                Text(L.t("search.settings.searchSources", language: settings.language))
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
@@ -640,7 +629,7 @@ struct SearchView: View {
                 }
                 if settings.useDuckDuckGo {
                     HStack {
-                        Text(settings.language == .french ? "Résultats max (DDG)" : "Max results (DDG)")
+                        Text(L.t("search.settings.maxDDG", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -660,7 +649,7 @@ struct SearchView: View {
                 }
                 if settings.useWikipedia {
                     HStack {
-                        Text(settings.language == .french ? "Résultats max (Wikipedia)" : "Max results (Wikipedia)")
+                        Text(L.t("search.settings.maxWiki", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
                         Spacer()
@@ -675,11 +664,7 @@ struct SearchView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(
-                        settings.language == .french
-                        ? "Sélectionnez au moins une source."
-                        : "Select at least one source."
-                    )
+                    Text(L.t("search.settings.selectAtLeastOne", language: settings.language))
                     .font(.caption)
                     .foregroundColor(.red)
                 }
@@ -688,7 +673,7 @@ struct SearchView: View {
             // Max Response Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Tokens de réponse max" : "Max Response Tokens")
+                    Text(L.t("search.settings.maxResponseTokens", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text("\(settings.maxResponseTokens)")
@@ -706,11 +691,7 @@ struct SearchView: View {
                     }
                 ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
 
-                Text(
-                    settings.language == .french
-                    ? "Sortie max estimée : \(estimatedMaxOutputCharacters) caractères (\(estimatedMaxOutputSentences) phrases)"
-                    : "Estimated max output: \(estimatedMaxOutputCharacters) characters (\(estimatedMaxOutputSentences) sentences)"
-                )
+                Text(L.t("search.settings.estimatedOutput", language: settings.language, Int64(estimatedMaxOutputCharacters), Int64(estimatedMaxOutputSentences)))
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
@@ -718,7 +699,7 @@ struct SearchView: View {
             // Max Context Tokens
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Tokens de contexte max" : "Max Context Tokens")
+                    Text(L.t("search.settings.maxContextTokens", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text("\(effectiveContextTokens)")
@@ -730,20 +711,12 @@ struct SearchView: View {
                     set: { settings.maxContextTokens = Int($0) }
                 ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(maxAllowedContextTokensForCurrentResponse), step: 50)
 
-                Text(
-                    settings.language == .french
-                    ? "Contexte estimé : ~\(estimatedMaxContextWords) mots"
-                    : "Estimated context: ~\(estimatedMaxContextWords) words"
-                )
+                Text(L.t("search.settings.estimatedContext", language: settings.language, Int64(estimatedMaxContextWords)))
                 .font(.caption)
                 .foregroundColor(.secondary)
 
                 if effectiveContextTokens < settings.maxContextTokens {
-                    Text(
-                        settings.language == .french
-                        ? "Le contexte est plafonné automatiquement avec la limite de réponse actuelle."
-                        : "Context is automatically capped by the current response-token limit."
-                    )
+                    Text(L.t("search.settings.contextCapped", language: settings.language))
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 }
@@ -752,7 +725,7 @@ struct SearchView: View {
             // Model Language
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text(settings.language == .french ? "Langue du modèle" : "Model Language")
+                    Text(L.t("search.settings.modelLanguage", language: settings.language))
                         .font(.subheadline)
                     Spacer()
                     Text(settings.language.rawValue)
@@ -788,7 +761,7 @@ struct SearchView: View {
                         openWebPage(urlString)
                     } label: {
                         Label(
-                            settings.language == .french ? "Ouvrir la page" : "Open page",
+                            L.t("search.webPage.openPage", language: settings.language),
                             systemImage: "safari"
                         )
                         .font(.subheadline)
@@ -819,7 +792,7 @@ struct SearchView: View {
                 if isGeneratingWebPageSummary {
                     HStack(spacing: 10) {
                         ProgressView()
-                        Text(settings.language == .french ? "Résumé en cours..." : "Generating summary...")
+                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
                             .foregroundColor(.secondary)
                         Spacer()
                     }
@@ -870,9 +843,7 @@ struct SearchView: View {
 
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty {
-                webPageSummaryError = settings.language == .french
-                    ? "Résumé indisponible."
-                    : "Summary unavailable."
+                webPageSummaryError = L.t("search.webPage.unavailable", language: settings.language)
             } else {
                 webPageSummaryText = trimmed
             }
@@ -1052,9 +1023,9 @@ struct SearchView: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 48))
                 .foregroundColor(.secondary)
-            Text(settings.language == .french ? "Aucun résultat trouvé" : "No results found")
+            Text(L.t("search.results.empty.title", language: settings.language))
                 .font(.headline)
-            Text(settings.language == .french ? "Essayez une requête de recherche différente" : "Try a different search query")
+            Text(L.t("search.results.empty.subtitle", language: settings.language))
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }

@@ -1,0 +1,10 @@
+Título: {{title}}
+URL: {{url}}
+
+Contenido de la página:
+{{content}}
+
+Redacte un resumen conciso de la página anterior.
+Límite: 5 frases como máximo.
+Sea factual; no invente información ausente de la página.
+Responda en español.

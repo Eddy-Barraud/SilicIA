@@ -16,6 +16,13 @@ struct ContentView: View {
         case chat = "Chat"
 
         var id: String { rawValue }
+
+        func displayName(language: ModelLanguage) -> String {
+            switch self {
+            case .searchAssist: return L.t("contentView.tab.searchAssist", language: language)
+            case .chat: return L.t("contentView.tab.chat", language: language)
+            }
+        }
     }
 
     @AppStorage("contentView.selectedTab") private var selectedTabRawValue: String = AppTab.searchAssist.rawValue
@@ -24,6 +31,7 @@ struct ContentView: View {
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
+    @State private var language = AppSettings.load().language
 
     private var selectedTab: AppTab {
         get { AppTab(rawValue: selectedTabRawValue) ?? .searchAssist }
@@ -41,8 +49,8 @@ struct ContentView: View {
     var body: some View {
         VStack(spacing: 0) {
             Picker("Application", selection: selectedTabBinding) {
-                Text(AppTab.searchAssist.rawValue).tag(AppTab.searchAssist)
-                Text(AppTab.chat.rawValue).tag(AppTab.chat)
+                Text(AppTab.searchAssist.displayName(language: language)).tag(AppTab.searchAssist)
+                Text(AppTab.chat.displayName(language: language)).tag(AppTab.chat)
             }
             .pickerStyle(.segmented)
             .padding([.horizontal, .top])
