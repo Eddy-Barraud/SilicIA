@@ -142,6 +142,40 @@ Chat conversations are persistently stored using **SwiftData**, inspired by [Fou
 - No external API calls for language processing
 - Chat history stored locally with no cloud transmission
 
+## Multi-language support
+
+SilicIA's UI is available in **English**, **French**, and **Spanish**. The
+language selected in **Settings** drives both the user interface text and the
+language used for AI prompts (system prompts, instructions, generated answers).
+
+The translations are not tied to the operating system locale; the
+`ModelLanguage` setting in the app is the single source of truth.
+
+### Adding a new language
+
+The localization pipeline is JSON-based and modular, so adding a new language
+is a three-step change:
+
+1. **Add an enum case.** In `SilicIA/Models/AppSettings.swift`, add the new
+   case to `ModelLanguage` (e.g. `case german = "German"`) along with a code
+   mapping in the `code` computed property (e.g. `.german` → `"de"`).
+2. **Drop in JSON resource files.** Under `SilicIA/Resources/Localization/`,
+   add one file per existing namespace using the new language code:
+   `common.de.json`, `searchView.de.json`, `chatView.de.json`,
+   `conversations.de.json`, `widget.de.json`. Each new file mirrors the keys
+   of the matching `*.en.json` file.
+3. **Translate the prompt files.** Under `SilicIA/prompts/`, add the
+   `prompt.<mode>.<feature>.de.txt` files (and their `*.instructions.de.txt`
+   companions) modeled on the existing `*.fr.txt` set. Keep the
+   `{{variable}}` placeholders intact — they are substituted at runtime by
+   `PromptLoader`.
+
+The `LocalizationTests` smoke test in the `SilicIATests` target asserts that
+every key present in the English JSON files is also present in the French and
+Spanish files, so any missing key is caught at build/test time. When you add a
+new language, extend the smoke test to require parity for the new code as
+well.
+
 ## Requirements
 
 - macOS 26 or later
