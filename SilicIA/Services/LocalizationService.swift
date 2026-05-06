@@ -16,7 +16,7 @@ final class LocalizationService {
     }
 
     func keys(for language: ModelLanguage) -> Set<String> {
-        Set(strings[language.code]?.keys ?? [])
+        Set((strings[language.code] ?? [:]).keys)
     }
 
     func load() {
