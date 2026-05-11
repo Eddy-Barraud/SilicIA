@@ -11,6 +11,16 @@
 		B2C3D4E52F7A000100ABCDEF /* SilicIAShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B2C3D4E22F7A000100ABCDEF /* SilicIAShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		C3D4E5FB2F7B000100ABCDEF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 36D5D0AC2F7190B80090D706 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 36D5D0B32F7190B80090D706;
+			remoteInfo = SilicIA;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXCopyFilesBuildPhase section */
 		A1B2C3D32F79000100ABCDEF /* Embed Foundation Extensions */ = {
 			isa = PBXCopyFilesBuildPhase;
@@ -71,16 +81,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXContainerItemProxy section */
-		C3D4E5FB2F7B000100ABCDEF /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 36D5D0AC2F7190B80090D706 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 36D5D0B32F7190B80090D706;
-			remoteInfo = SilicIA;
-		};
-/* End PBXContainerItemProxy section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		36D5D0B12F7190B80090D706 /* Frameworks */ = {
@@ -430,6 +430,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = SilicIA/SilicIA.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = SilicIA/SilicIA.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "SilicIA/SilicIA-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = SilicIA/SilicIA.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -494,6 +497,9 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = SilicIA/SilicIA.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=*]" = SilicIA/SilicIA.entitlements;
+				"CODE_SIGN_ENTITLEMENTS[sdk=iphoneos*]" = "SilicIA/SilicIA-iOS.entitlements";
+				"CODE_SIGN_ENTITLEMENTS[sdk=macosx*]" = SilicIA/SilicIA.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
@@ -624,10 +630,10 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_VERSION = 5.0;
-				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
 				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
 				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
 				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Debug;
@@ -659,10 +665,10 @@
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator macosx";
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_VERSION = 5.0;
-				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
+				TARGETED_DEVICE_FAMILY = "1,2,7";
 				"TEST_HOST[sdk=iphoneos*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
 				"TEST_HOST[sdk=iphonesimulator*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SilicIA";
-				TARGETED_DEVICE_FAMILY = "1,2,7";
+				"TEST_HOST[sdk=macosx*]" = "$(BUILT_PRODUCTS_DIR)/SilicIA.app/Contents/MacOS/SilicIA";
 				XROS_DEPLOYMENT_TARGET = 26.0;
 			};
 			name = Release;
