@@ -18,6 +18,10 @@ typealias PlatformShareViewController = UIViewController
 final class ShareViewController: PlatformShareViewController {
     private static let appGroupIdentifier = "group.fr.trevalim.silicia.shared"
     private static let inboxDirectoryName = "IncomingSharedFiles"
+    private static let imageFileExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
+    ]
+    private static let defaultImageExtension = "jpg"
     private var didProcessInput = false
 
 #if os(macOS)
@@ -50,6 +54,7 @@ final class ShareViewController: PlatformShareViewController {
 
         var sharedWebURLs: [String] = []
         var sharedPDFFileNames: [String] = []
+        var sharedImageFileNames: [String] = []
 
         for item in extensionItems {
             let providers = item.attachments ?? []
@@ -60,17 +65,29 @@ final class ShareViewController: PlatformShareViewController {
 
                 if let storedPDFName = await persistSharedPDF(from: provider) {
                     sharedPDFFileNames.append(storedPDFName)
+                    continue
+                }
+
+                if let storedImageName = await persistSharedImage(from: provider) {
+                    sharedImageFileNames.append(storedImageName)
                 }
             }
         }
 
         let deduplicatedWebURLs = deduplicated(sharedWebURLs)
         let deduplicatedPDFNames = deduplicated(sharedPDFFileNames)
-        guard !deduplicatedWebURLs.isEmpty || !deduplicatedPDFNames.isEmpty else {
+        let deduplicatedImageNames = deduplicated(sharedImageFileNames)
+        guard !deduplicatedWebURLs.isEmpty
+            || !deduplicatedPDFNames.isEmpty
+            || !deduplicatedImageNames.isEmpty else {
             return
         }
 
-        guard let appURL = buildAppURL(sharedWebURLs: deduplicatedWebURLs, sharedPDFFileNames: deduplicatedPDFNames) else {
+        guard let appURL = buildAppURL(
+            sharedWebURLs: deduplicatedWebURLs,
+            sharedPDFFileNames: deduplicatedPDFNames,
+            sharedImageFileNames: deduplicatedImageNames
+        ) else {
             return
         }
 
@@ -115,7 +132,52 @@ final class ShareViewController: PlatformShareViewController {
         return nil
     }
 
+    private func persistSharedImage(from provider: NSItemProvider) async -> String? {
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier),
+           let tempURL = await loadFileRepresentation(from: provider, typeIdentifier: UTType.image.identifier) {
+            return persistImage(at: tempURL, preferredFileName: provider.suggestedName ?? tempURL.lastPathComponent)
+        }
+
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
+           let item = await loadItem(from: provider, typeIdentifier: UTType.fileURL.identifier),
+           let sourceURL = extractURL(from: item),
+           Self.imageFileExtensions.contains(sourceURL.pathExtension.lowercased()) {
+            return persistImage(at: sourceURL, preferredFileName: provider.suggestedName ?? sourceURL.lastPathComponent)
+        }
+
+        return nil
+    }
+
     private func persistPDF(at sourceURL: URL, preferredFileName: String?) -> String? {
+        persistFile(
+            at: sourceURL,
+            preferredFileName: preferredFileName,
+            allowedExtensions: ["pdf"],
+            defaultExtension: "pdf",
+            fallbackName: "shared.pdf"
+        )
+    }
+
+    private func persistImage(at sourceURL: URL, preferredFileName: String?) -> String? {
+        persistFile(
+            at: sourceURL,
+            preferredFileName: preferredFileName,
+            allowedExtensions: Self.imageFileExtensions,
+            defaultExtension: Self.defaultImageExtension,
+            fallbackName: "shared.\(Self.defaultImageExtension)"
+        )
+    }
+
+    /// Copies a single file into the app-group inbox, generating a unique
+    /// destination filename. Returns the destination's `lastPathComponent` so
+    /// the host app can locate it again. Shared between PDF and image flows.
+    private func persistFile(
+        at sourceURL: URL,
+        preferredFileName: String?,
+        allowedExtensions: Set<String>,
+        defaultExtension: String,
+        fallbackName: String
+    ) -> String? {
         let fileManager = FileManager.default
         guard let inboxDirectory = sharedInboxDirectoryURL() else {
             return nil
@@ -126,7 +188,10 @@ final class ShareViewController: PlatformShareViewController {
             let destinationURL = uniqueInboxDestinationURL(
                 in: inboxDirectory,
                 sourceURL: sourceURL,
-                preferredFileName: preferredFileName
+                preferredFileName: preferredFileName,
+                allowedExtensions: allowedExtensions,
+                defaultExtension: defaultExtension,
+                fallbackName: fallbackName
             )
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try fileManager.removeItem(at: destinationURL)
@@ -148,11 +213,25 @@ final class ShareViewController: PlatformShareViewController {
         return containerURL.appendingPathComponent(Self.inboxDirectoryName, isDirectory: true)
     }
 
-    private func uniqueInboxDestinationURL(in directory: URL, sourceURL: URL, preferredFileName: String?) -> URL {
+    private func uniqueInboxDestinationURL(
+        in directory: URL,
+        sourceURL: URL,
+        preferredFileName: String?,
+        allowedExtensions: Set<String>,
+        defaultExtension: String,
+        fallbackName: String
+    ) -> URL {
         let fileManager = FileManager.default
-        let safeName = sanitizedPDFFileName(preferredFileName: preferredFileName, sourceURL: sourceURL)
+        let safeName = sanitizedFileName(
+            preferredFileName: preferredFileName,
+            sourceURL: sourceURL,
+            allowedExtensions: allowedExtensions,
+            defaultExtension: defaultExtension,
+            fallbackName: fallbackName
+        )
         let baseName = (safeName as NSString).deletingPathExtension
-        let ext = ((safeName as NSString).pathExtension.isEmpty ? "pdf" : (safeName as NSString).pathExtension)
+        let rawExt = (safeName as NSString).pathExtension.lowercased()
+        let ext = allowedExtensions.contains(rawExt) ? rawExt : defaultExtension
 
         var index = 0
         while true {
@@ -165,18 +244,25 @@ final class ShareViewController: PlatformShareViewController {
         }
     }
 
-    private func sanitizedPDFFileName(preferredFileName: String?, sourceURL: URL) -> String {
+    private func sanitizedFileName(
+        preferredFileName: String?,
+        sourceURL: URL,
+        allowedExtensions: Set<String>,
+        defaultExtension: String,
+        fallbackName: String
+    ) -> String {
         let rawName = preferredFileName?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedRaw = (rawName?.isEmpty == false ? rawName! : sourceURL.lastPathComponent)
         let safeRaw = normalizedRaw
             .replacingOccurrences(of: "/", with: "-")
             .replacingOccurrences(of: ":", with: "-")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = safeRaw.isEmpty ? "shared.pdf" : safeRaw
-        if fallback.lowercased().hasSuffix(".pdf") {
+        let fallback = safeRaw.isEmpty ? fallbackName : safeRaw
+        let fallbackExt = (fallback as NSString).pathExtension.lowercased()
+        if allowedExtensions.contains(fallbackExt) {
             return fallback
         }
-        return "\(fallback).pdf"
+        return "\(fallback).\(defaultExtension)"
     }
 
     private func loadItem(from provider: NSItemProvider, typeIdentifier: String) async -> Any? {
@@ -215,7 +301,11 @@ final class ShareViewController: PlatformShareViewController {
         return nil
     }
 
-    private func buildAppURL(sharedWebURLs: [String], sharedPDFFileNames: [String]) -> URL? {
+    private func buildAppURL(
+        sharedWebURLs: [String],
+        sharedPDFFileNames: [String],
+        sharedImageFileNames: [String]
+    ) -> URL? {
         var components = URLComponents()
         components.scheme = "SilicIA"
         components.host = "share"
@@ -227,6 +317,10 @@ final class ShareViewController: PlatformShareViewController {
 
         for fileName in sharedPDFFileNames {
             queryItems.append(URLQueryItem(name: "sharedPDF", value: fileName))
+        }
+
+        for fileName in sharedImageFileNames {
+            queryItems.append(URLQueryItem(name: "sharedImage", value: fileName))
         }
 
         components.queryItems = queryItems.isEmpty ? nil : queryItems
