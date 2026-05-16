@@ -22,7 +22,12 @@ struct SilicIAApp: App {
 
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
+    @State private var sharedImages: [URL] = []
     @State private var pendingSearchQuery: String?
+
+    private static let imageFileExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
+    ]
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
@@ -33,6 +38,7 @@ struct SilicIAApp: App {
             ContentView(
                 sharedURLs: $sharedURLs,
                 sharedPDFs: $sharedPDFs,
+                sharedImages: $sharedImages,
                 pendingSearchQuery: $pendingSearchQuery
             )
                 .onOpenURL { url in
@@ -62,9 +68,16 @@ struct SilicIAApp: App {
 
     /// Routes incoming shared URLs and files to chat context.
     private func handleIncomingURL(_ url: URL) {
-        if url.isFileURL, url.pathExtension.lowercased() == "pdf" {
-            sharedPDFs = [url]
-            return
+        if url.isFileURL {
+            let ext = url.pathExtension.lowercased()
+            if ext == "pdf" {
+                sharedPDFs = [url]
+                return
+            }
+            if Self.imageFileExtensions.contains(ext) {
+                sharedImages = [url]
+                return
+            }
         }
 
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
@@ -81,6 +94,11 @@ struct SilicIAApp: App {
                     .compactMap(\.value)
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                     .filter { !$0.isEmpty }
+                let incomingSharedImageNames = queryItems
+                    .filter { $0.name == "sharedImage" }
+                    .compactMap(\.value)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
 
                 if !incomingURLs.isEmpty {
                     sharedURLs = incomingURLs
@@ -91,7 +109,12 @@ struct SilicIAApp: App {
                     sharedPDFs = importedSharedPDFs
                 }
 
-                if !incomingURLs.isEmpty || !importedSharedPDFs.isEmpty {
+                let importedSharedImages = importSharedImages(fileNames: incomingSharedImageNames)
+                if !importedSharedImages.isEmpty {
+                    sharedImages = importedSharedImages
+                }
+
+                if !incomingURLs.isEmpty || !importedSharedPDFs.isEmpty || !importedSharedImages.isEmpty {
                     return
                 }
             }
@@ -135,6 +158,31 @@ struct SilicIAApp: App {
             let sourceURL = inboxDirectory.appendingPathComponent(fileName)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
             if let persistedURL = DroppedPDFStore.persist(sourceURL, preferredFileName: fileName) {
+                imported.append(persistedURL)
+                try? FileManager.default.removeItem(at: sourceURL)
+            }
+        }
+
+        return imported
+    }
+
+    private func importSharedImages(fileNames: [String]) -> [URL] {
+        guard !fileNames.isEmpty,
+              let groupContainer = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: Self.sharedAppGroupIdentifier
+              ) else {
+            return []
+        }
+
+        let inboxDirectory = groupContainer.appendingPathComponent(Self.sharedInboxDirectoryName, isDirectory: true)
+        var imported: [URL] = []
+
+        for fileName in fileNames {
+            let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
+            guard Self.imageFileExtensions.contains(ext) else { continue }
+            let sourceURL = inboxDirectory.appendingPathComponent(fileName)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+            if let persistedURL = DroppedImageStore.persist(sourceURL, preferredFileName: fileName) {
                 imported.append(persistedURL)
                 try? FileManager.default.removeItem(at: sourceURL)
             }

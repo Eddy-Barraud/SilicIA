@@ -29,6 +29,7 @@ struct ContentView: View {
     @Environment(\.modelContext) private var modelContext
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
+    @Binding var sharedImages: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
     @State private var language = AppSettings.load().language
@@ -76,6 +77,7 @@ struct ContentView: View {
                                     query,
                                     contextInput: "",
                                     pdfURLs: [],
+                                    imageURLs: [],
                                     includeWebSearch: false,
                                     maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                                     maxWikipediaResults: settings.maxWikipediaResults,
@@ -99,7 +101,12 @@ struct ContentView: View {
                         }
                     )
                 case .chat:
-                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs, chatService: chatService)
+                    ChatView(
+                        sharedURLs: $sharedURLs,
+                        sharedPDFs: $sharedPDFs,
+                        sharedImages: $sharedImages,
+                        chatService: chatService
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -111,6 +118,11 @@ struct ContentView: View {
         }
         .onChange(of: sharedPDFs) {
             if !sharedPDFs.isEmpty {
+                selectedTab = .chat
+            }
+        }
+        .onChange(of: sharedImages) {
+            if !sharedImages.isEmpty {
                 selectedTab = .chat
             }
         }
@@ -126,6 +138,7 @@ struct ContentView: View {
     ContentView(
         sharedURLs: .constant([]),
         sharedPDFs: .constant([]),
+        sharedImages: .constant([]),
         pendingSearchQuery: .constant(nil)
     )
         .frame(width: 900, height: 700)
