@@ -107,6 +107,14 @@ struct ChatView: View {
                 contextBoxView
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            // Whole-surface drop zone — catches anything not landing on a
+            // specific row's onDrop. Row-level handlers run first and route
+            // drops to a specific row when they hit one.
+            .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+                handleAttachmentDrop(providers, rowIndex: nil)
+            }
             #if canImport(UIKit)
             .overlay {
                 KeyboardDismissTapOverlay(onTapOutsideTextInput: {

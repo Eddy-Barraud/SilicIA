@@ -7,6 +7,7 @@
 
 import SwiftUI
 import LaTeXSwiftUI
+import UniformTypeIdentifiers
 #if canImport(SwiftData)
 import SwiftData
 #endif
@@ -28,6 +29,14 @@ struct SearchView: View {
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
     let onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)?
+    /// Dropping a PDF/image on the search surface writes here so that the
+    /// containing view can flip to the Chat tab and ChatView picks the file
+    /// up as context via its existing shared-input merge.
+    let onAttachmentsDropped: (([URL], [URL]) -> Void)?
+
+    private static let imageFileExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
+    ]
 
     @StateObject private var searchService = WebSearchService()
     @StateObject private var aiService = AIService()
@@ -66,13 +75,15 @@ struct SearchView: View {
         onInitialQueryHandled: (() -> Void)? = nil,
         chatService: ChatService,
         onOfflineQuery: ((String) -> Void)? = nil,
-        onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil
+        onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil,
+        onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil
     ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
         self.chatService = chatService
         self.onOfflineQuery = onOfflineQuery
         self.onChatMore = onChatMore
+        self.onAttachmentsDropped = onAttachmentsDropped
     }
     
     private var windowBackgroundColor: Color {
@@ -187,6 +198,10 @@ struct SearchView: View {
             }
         }
         .background(windowBackgroundColor)
+        .contentShape(Rectangle())
+        .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+            handleAttachmentDrop(providers)
+        }
         .onAppear {
             settings = AppSettings.load()
             consumeInitialQueryIfNeeded()
@@ -1246,6 +1261,89 @@ struct SearchView: View {
         searchQuery = trimmed
         onInitialQueryHandled?()
         performSearch()
+    }
+
+    // MARK: - Drag-and-drop
+
+    /// Persists dropped PDFs and images, then hands them to the host view
+    /// (typically `ContentView`) via `onAttachmentsDropped`. That callback is
+    /// responsible for switching to the Chat tab and seeding shared inputs.
+    private func handleAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {
+        let accepted = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !accepted.isEmpty else { return false }
+
+        for provider in accepted {
+            if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+                loadDroppedPDF(from: provider)
+                continue
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                loadDroppedImage(from: provider)
+                continue
+            }
+            loadDroppedFileURL(from: provider)
+        }
+
+        return true
+    }
+
+    private func loadDroppedPDF(from provider: NSItemProvider) {
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
+            guard let url,
+                  let persisted = DroppedPDFStore.persist(url, preferredFileName: provider.suggestedName) else {
+                return
+            }
+            Task { @MainActor in
+                onAttachmentsDropped?([persisted], [])
+            }
+        }
+    }
+
+    private func loadDroppedImage(from provider: NSItemProvider) {
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, _ in
+            guard let url,
+                  let persisted = DroppedImageStore.persist(
+                    url,
+                    preferredFileName: provider.suggestedName ?? url.lastPathComponent
+                  ) else {
+                return
+            }
+            Task { @MainActor in
+                onAttachmentsDropped?([], [persisted])
+            }
+        }
+    }
+
+    private func loadDroppedFileURL(from provider: NSItemProvider) {
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            let fileURL: URL?
+            if let data = item as? Data {
+                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
+            } else if let url = item as? URL {
+                fileURL = url
+            } else if let nsURL = item as? NSURL {
+                fileURL = nsURL as URL
+            } else {
+                fileURL = nil
+            }
+            guard let fileURL else { return }
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "pdf" {
+                guard let persisted = DroppedPDFStore.persist(fileURL) else { return }
+                Task { @MainActor in
+                    onAttachmentsDropped?([persisted], [])
+                }
+            } else if Self.imageFileExtensions.contains(ext) {
+                guard let persisted = DroppedImageStore.persist(fileURL) else { return }
+                Task { @MainActor in
+                    onAttachmentsDropped?([], [persisted])
+                }
+            }
+        }
     }
 }
 

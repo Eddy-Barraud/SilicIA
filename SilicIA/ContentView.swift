@@ -98,6 +98,13 @@ struct ContentView: View {
                                 citations: citations
                             )
                             selectedTab = .chat
+                        },
+                        onAttachmentsDropped: { pdfs, images in
+                            if !pdfs.isEmpty { sharedPDFs.append(contentsOf: pdfs) }
+                            if !images.isEmpty { sharedImages.append(contentsOf: images) }
+                            if !pdfs.isEmpty || !images.isEmpty {
+                                selectedTab = .chat
+                            }
                         }
                     )
                 case .chat:

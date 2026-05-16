@@ -23,6 +23,17 @@ enum DroppedImageStore {
     static func persist(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
         let fileManager = FileManager.default
 
+        // File-picker / drag-drop URLs are security-scoped on the sandboxed
+        // macOS app: we must request access before any read or copy, otherwise
+        // FileManager fails with EPERM and downstream Vision/PDFKit reads
+        // surface a confusing "Operation not permitted".
+        let didStartAccessing = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
         do {
             try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
             let destinationURL = uniqueDestinationURL(preferredFileName: preferredFileName, sourceURL: sourceURL)

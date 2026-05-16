@@ -18,6 +18,16 @@ enum DroppedPDFStore {
     static func persist(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
         let fileManager = FileManager.default
 
+        // File-picker / drag-drop URLs are security-scoped on the sandboxed
+        // macOS app: we must request access before any read or copy, otherwise
+        // FileManager fails with EPERM.
+        let didStartAccessing = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStartAccessing {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
         do {
             try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
             let destinationURL = uniqueDestinationURL(preferredFileName: preferredFileName, sourceURL: sourceURL)
