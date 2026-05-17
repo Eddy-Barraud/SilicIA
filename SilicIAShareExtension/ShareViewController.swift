@@ -117,9 +117,17 @@ final class ShareViewController: PlatformShareViewController {
     }
 
     private func persistSharedPDF(from provider: NSItemProvider) async -> String? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier),
-           let tempURL = await loadFileRepresentation(from: provider, typeIdentifier: UTType.pdf.identifier) {
-            return persistPDF(at: tempURL, preferredFileName: provider.suggestedName)
+        if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+            if let stored = await persistFileRepresentation(
+                from: provider,
+                typeIdentifier: UTType.pdf.identifier,
+                allowedExtensions: ["pdf"],
+                defaultExtension: "pdf",
+                fallbackName: "shared.pdf",
+                preferredFileName: provider.suggestedName
+            ) {
+                return stored
+            }
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
@@ -133,9 +141,17 @@ final class ShareViewController: PlatformShareViewController {
     }
 
     private func persistSharedImage(from provider: NSItemProvider) async -> String? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier),
-           let tempURL = await loadFileRepresentation(from: provider, typeIdentifier: UTType.image.identifier) {
-            return persistImage(at: tempURL, preferredFileName: provider.suggestedName ?? tempURL.lastPathComponent)
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            if let stored = await persistFileRepresentation(
+                from: provider,
+                typeIdentifier: UTType.image.identifier,
+                allowedExtensions: Self.imageFileExtensions,
+                defaultExtension: Self.defaultImageExtension,
+                fallbackName: "shared.\(Self.defaultImageExtension)",
+                preferredFileName: provider.suggestedName
+            ) {
+                return stored
+            }
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
@@ -146,6 +162,38 @@ final class ShareViewController: PlatformShareViewController {
         }
 
         return nil
+    }
+
+    /// Loads a file representation from the provider AND copies it to the
+    /// app-group inbox *inside the completion handler* — required because
+    /// iOS deletes the temp file the moment that closure returns (most
+    /// visible when sharing images from Photos.app, which fails reliably if
+    /// the copy happens later). Returns the persisted file name (in the
+    /// inbox) or nil on failure.
+    private func persistFileRepresentation(
+        from provider: NSItemProvider,
+        typeIdentifier: String,
+        allowedExtensions: Set<String>,
+        defaultExtension: String,
+        fallbackName: String,
+        preferredFileName: String?
+    ) async -> String? {
+        await withCheckedContinuation { continuation in
+            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+                guard let url else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                let stored = self.persistFile(
+                    at: url,
+                    preferredFileName: preferredFileName ?? url.lastPathComponent,
+                    allowedExtensions: allowedExtensions,
+                    defaultExtension: defaultExtension,
+                    fallbackName: fallbackName
+                )
+                continuation.resume(returning: stored)
+            }
+        }
     }
 
     private func persistPDF(at sourceURL: URL, preferredFileName: String?) -> String? {
