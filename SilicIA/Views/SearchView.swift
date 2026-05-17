@@ -34,6 +34,10 @@ struct SearchView: View {
 
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []
+    /// Per-source RAG match-score percentages keyed by `SearchResult.url`.
+    /// Populated by `aiService.summarize` via its `onMatchingScores` callback.
+    /// Missing keys are treated as 0% by the card view.
+    @State private var matchingScoresByURL: [String: Double] = [:]
     @State private var showingSummary = false
     @State private var isNoAIMode = false
     @State private var errorMessage: String?
@@ -372,6 +376,8 @@ struct SearchView: View {
                 ForEach(searchResults) { result in
                     SearchResultCard(
                         result: result,
+                        matchingScore: matchingScoresByURL[result.url] ?? 0,
+                        accessibilityLanguage: settings.language,
                         isWebSummariesEnabled: settings.isWebSummariesEnabled,
                         onRequestSummary: { tapped in
                             presentWebPageSummary(for: tapped)
@@ -1051,6 +1057,7 @@ struct SearchView: View {
 
         // Clear previous results and state before starting new search
         searchResults = []
+        matchingScoresByURL = [:]
         errorMessage = nil
         aiService.summary = ""
         aiService.citations = ""
@@ -1191,7 +1198,12 @@ struct SearchView: View {
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
             profile: generationProfile ?? activeGenerationProfile,
-            queries: queries
+            queries: queries,
+            onMatchingScores: { scores in
+                Task { @MainActor in
+                    matchingScoresByURL = scores
+                }
+            }
         )
 
         #if DEBUG
@@ -1216,6 +1228,7 @@ struct SearchView: View {
         activeSearchRequestID = UUID()
         searchQuery = ""
         searchResults = []
+        matchingScoresByURL = [:]
         showingSummary = false
         isNoAIMode = false
         firstGuessText = ""
@@ -1253,6 +1266,11 @@ struct SearchView: View {
 /// Displays one search result row with link, source host, and snippet preview.
 struct SearchResultCard: View {
     let result: SearchResult
+    /// RAG match-score percentage in `[0, 100]`. Defaults to 0 for cards
+    /// whose source did not contribute to the selected context.
+    var matchingScore: Double = 0
+    /// UI language for accessibility-label localisation. Defaults to English.
+    var accessibilityLanguage: ModelLanguage = .english
     var isWebSummariesEnabled: Bool = false
     var onRequestSummary: ((SearchResult) -> Void)? = nil
 
@@ -1315,6 +1333,10 @@ struct SearchResultCard: View {
         .background(platformControlBackgroundColor)
         .cornerRadius(8)
         .contentShape(Rectangle())
+        .overlay(alignment: .topTrailing) {
+            MatchScoreBadge(percent: matchingScore, language: accessibilityLanguage)
+                .padding(8)
+        }
         .onTapGesture {
             handleTitleTap()
         }

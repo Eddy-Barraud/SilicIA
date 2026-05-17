@@ -17,6 +17,7 @@
   "search.summary.analyzingPages": "Analyse des pages web complètes...",
   "search.summary.waitingAnswer": "Réponse avec contexte web en attente...",
   "search.summary.topSources": "Top sources",
+  "search.result.matchScoreAccessibility": "Pertinence pour la réponse : %d %%",
   "search.summary.hide": "Masquer le résumé",
   "search.summary.show": "Afficher le résumé IA",
   "search.summary.timeToFirst": "Première réponse en: %.1f s",
