@@ -38,6 +38,23 @@ struct SearchView: View {
     /// Populated by `aiService.summarize` via its `onMatchingScores` callback.
     /// Missing keys are treated as 0% by the card view.
     @State private var matchingScoresByURL: [String: Double] = [:]
+
+    /// `searchResults` sorted by descending RAG match score, with stable
+    /// ordering on ties (preserves the original web-search rank).
+    /// Returns the original list unchanged while `matchingScoresByURL` is
+    /// empty (i.e. before the AI summary lands).
+    private var sortedSearchResults: [SearchResult] {
+        guard !matchingScoresByURL.isEmpty else { return searchResults }
+        return searchResults
+            .enumerated()
+            .sorted { lhs, rhs in
+                let lScore = matchingScoresByURL[lhs.element.url] ?? 0
+                let rScore = matchingScoresByURL[rhs.element.url] ?? 0
+                if lScore != rScore { return lScore > rScore }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
     @State private var showingSummary = false
     @State private var isNoAIMode = false
     @State private var errorMessage: String?
@@ -372,8 +389,11 @@ struct SearchView: View {
                     Divider()
                 }
 
-                // Search results
-                ForEach(searchResults) { result in
+                // Search results — once the model answer completes and
+                // `matchingScoresByURL` is populated, reorder so the highest-
+                // scoring sources surface first. Stable on ties (preserves
+                // the original web-search ordering).
+                ForEach(sortedSearchResults) { result in
                     SearchResultCard(
                         result: result,
                         matchingScore: matchingScoresByURL[result.url] ?? 0,
@@ -384,6 +404,7 @@ struct SearchView: View {
                         }
                     )
                 }
+                .animation(.easeInOut(duration: 0.35), value: matchingScoresByURL)
             }
             .padding()
         }
@@ -1309,20 +1330,29 @@ struct SearchResultCard: View {
     /// Renders one result card with title link, host, and snippet.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Title and URL sit in the same horizontal band as the
+            // top-right MatchScoreBadge overlay (34pt + 8pt padding ≈ 44pt),
+            // so they reserve trailing space to keep text from running
+            // under the ring.
             Button(action: handleTitleTap) {
                 Text(result.title)
                     .font(.headline)
                     .foregroundColor(.accentColor)
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .buttonStyle(.plain)
+            .padding(.trailing, 44)
 
             // URL
             Text(formatURL(result.url))
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.trailing, 44)
 
-            // Snippet
+            // Snippet (starts below the badge band; full width OK)
             Text(result.snippet)
                 .font(.body)
                 .foregroundColor(.primary)
