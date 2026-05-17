@@ -456,14 +456,35 @@ final class ShareViewController: PlatformShareViewController {
                 continuation.resume(returning: success)
             })
         }
+        if didOpenViaExtensionContext { return true }
 
         #if os(macOS)
-        if !didOpenViaExtensionContext {
-            return NSWorkspace.shared.open(url)
+        return NSWorkspace.shared.open(url)
+        #else
+        // iOS-specific fallback. `extensionContext.open` from a share
+        // extension is documented to be flaky even when the URL scheme
+        // is properly registered — observed empirically to return false
+        // on otherwise-valid `silicia://share?…` URLs. Walk the responder
+        // chain to find a target that responds to `openURL:` (typically
+        // UIApplication a few frames up), which is a long-standing
+        // share-extension workaround that still works on current iOS.
+        return await MainActor.run {
+            var responder: UIResponder? = self
+            while let current = responder {
+                if let app = current as? UIApplication {
+                    app.open(url, options: [:], completionHandler: nil)
+                    return true
+                }
+                let selector = NSSelectorFromString("openURL:")
+                if current.responds(to: selector) {
+                    _ = current.perform(selector, with: url)
+                    return true
+                }
+                responder = current.next
+            }
+            return false
         }
         #endif
-
-        return didOpenViaExtensionContext
     }
 
     private func deduplicated(_ values: [String]) -> [String] {
