@@ -100,19 +100,70 @@ final class ShareViewController: PlatformShareViewController {
     private static let defaultImageExtension = "jpg"
     private var didProcessInput = false
 
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        NSLog("[SilicIAShareExtension] viewDidLoad — binary build \(Self.buildIdentifier)")
+        shareLog.info("viewDidLoad — build=\(Self.buildIdentifier)")
+        Self.writeBootMarker()
+    }
+
 #if os(macOS)
     override func viewDidAppear() {
         super.viewDidAppear()
+        NSLog("[SilicIAShareExtension] viewDidAppear (macOS)")
         shareLog.info("viewDidAppear (macOS)")
         launchShareProcessingIfNeeded()
     }
 #else
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        NSLog("[SilicIAShareExtension] viewDidAppear (iOS)")
         shareLog.info("viewDidAppear (iOS)")
         launchShareProcessingIfNeeded()
     }
 #endif
+
+    /// Compile-time stamp that bumps with every rebuild so we can tell
+    /// stale-registration issues (system using an old extension binary)
+    /// apart from logic bugs.
+    private static let buildIdentifier: String = {
+        let date = #file + " " + (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?")
+        return date
+    }()
+
+    /// Writes a one-line "I ran" marker to two distinct paths inside the
+    /// app-group container so we can tell whether *any* file write from
+    /// the extension is succeeding — independent of the main log file.
+    /// - Container root: `<container>/share-extension-boot.txt`
+    /// - Inbox subdir:   `<container>/IncomingSharedFiles/share-extension-boot.txt`
+    /// If only the second exists, the container root is read-only from
+    /// the extension (a known macOS quirk in some configurations).
+    private static func writeBootMarker() {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let body = "boot \(stamp) build=\(buildIdentifier)\n".data(using: .utf8) ?? Data()
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupIdentifier) else {
+            NSLog("[SilicIAShareExtension] writeBootMarker: no container URL")
+            return
+        }
+        let rootURL = container.appendingPathComponent("share-extension-boot.txt", isDirectory: false)
+        do {
+            try body.write(to: rootURL, options: .atomic)
+            NSLog("[SilicIAShareExtension] wrote boot marker to container root: \(rootURL.path)")
+        } catch {
+            NSLog("[SilicIAShareExtension] container-root boot marker FAILED: \(error.localizedDescription)")
+        }
+
+        let inbox = container.appendingPathComponent(inboxDirectoryName, isDirectory: true)
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let inboxURL = inbox.appendingPathComponent("share-extension-boot.txt", isDirectory: false)
+        do {
+            try body.write(to: inboxURL, options: .atomic)
+            NSLog("[SilicIAShareExtension] wrote boot marker to inbox: \(inboxURL.path)")
+        } catch {
+            NSLog("[SilicIAShareExtension] inbox boot marker FAILED: \(error.localizedDescription)")
+        }
+    }
 
     private func launchShareProcessingIfNeeded() {
         guard !didProcessInput else {

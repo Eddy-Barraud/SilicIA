@@ -227,6 +227,11 @@ struct SilicIAApp: App {
         var newPDFs: [URL] = []
         var newImages: [URL] = []
         for fileName in contents {
+            // Leave the share-extension diagnostic files in place so the
+            // user can inspect them.
+            if fileName == "share-debug.log" || fileName == "share-extension-boot.txt" {
+                continue
+            }
             let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
             let sourceURL = inbox.appendingPathComponent(fileName)
             guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
