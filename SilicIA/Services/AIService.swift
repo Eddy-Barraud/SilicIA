@@ -254,7 +254,7 @@ class AIService: ObservableObject {
     /// - Parameter queries: Full query set (user + derived). When more than one query is provided
     ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
     ///   combined query vector.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -361,6 +361,15 @@ class AIService: ObservableObject {
             contextUtilizationFactor: contextUtilizationFactor,
             queries: queries
         )
+
+        // Expose per-source match scores derived from the selected chunks so
+        // the UI can render a relevance badge on each result card. Sources
+        // whose chunks didn't survive the budget filter are absent from the
+        // map (callers treat absent keys as 0%).
+        if let onMatchingScores {
+            let scores = RAGContextService.normalizedSourceScores(from: selected)
+            onMatchingScores(scores)
+        }
 
         #if DEBUG
         debugTimings.append(TimingMetric(

@@ -43,6 +43,35 @@ struct SearchView: View {
 
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []
+    /// Per-source RAG match-score percentages keyed by `SearchResult.url`.
+    /// Populated by `aiService.summarize` via its `onMatchingScores` callback.
+    /// Missing keys are treated as 0% by the card view.
+    @State private var matchingScoresByURL: [String: Double] = [:]
+
+    /// Whether the result cards should be rendered. We hide them until
+    /// RAG scoring finishes so users see the cards in their final, sorted
+    /// order — except in no-AI mode, where scoring never runs and the raw
+    /// web-search order is the best we have.
+    private var shouldDisplaySearchCards: Bool {
+        isNoAIMode || !matchingScoresByURL.isEmpty
+    }
+
+    /// `searchResults` sorted by descending RAG match score, with stable
+    /// ordering on ties (preserves the original web-search rank).
+    /// Returns the original list unchanged while `matchingScoresByURL` is
+    /// empty (i.e. before the AI summary lands).
+    private var sortedSearchResults: [SearchResult] {
+        guard !matchingScoresByURL.isEmpty else { return searchResults }
+        return searchResults
+            .enumerated()
+            .sorted { lhs, rhs in
+                let lScore = matchingScoresByURL[lhs.element.url] ?? 0
+                let rScore = matchingScoresByURL[rhs.element.url] ?? 0
+                if lScore != rScore { return lScore > rScore }
+                return lhs.offset < rhs.offset
+            }
+            .map(\.element)
+    }
     @State private var showingSummary = false
     @State private var isNoAIMode = false
     @State private var errorMessage: String?
@@ -383,15 +412,33 @@ struct SearchView: View {
                     Divider()
                 }
 
-                // Search results
-                ForEach(searchResults) { result in
-                    SearchResultCard(
-                        result: result,
-                        isWebSummariesEnabled: settings.isWebSummariesEnabled,
-                        onRequestSummary: { tapped in
-                            presentWebPageSummary(for: tapped)
-                        }
-                    )
+                // Search results — held back until RAG match-scoring is
+                // finished, then shown sorted by descending score (stable
+                // on ties). In no-AI mode, scoring is skipped entirely, so
+                // we surface the raw web-search ordering immediately.
+                if shouldDisplaySearchCards {
+                    ForEach(sortedSearchResults) { result in
+                        SearchResultCard(
+                            result: result,
+                            matchingScore: matchingScoresByURL[result.url] ?? 0,
+                            accessibilityLanguage: settings.language,
+                            isWebSummariesEnabled: settings.isWebSummariesEnabled,
+                            onRequestSummary: { tapped in
+                                presentWebPageSummary(for: tapped)
+                            }
+                        )
+                    }
+                    .animation(.easeInOut(duration: 0.35), value: matchingScoresByURL)
+                } else if !searchResults.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(L.t("search.results.scoring", language: settings.language))
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
                 }
             }
             .padding()
@@ -1066,6 +1113,7 @@ struct SearchView: View {
 
         // Clear previous results and state before starting new search
         searchResults = []
+        matchingScoresByURL = [:]
         errorMessage = nil
         aiService.summary = ""
         aiService.citations = ""
@@ -1206,7 +1254,12 @@ struct SearchView: View {
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
             profile: generationProfile ?? activeGenerationProfile,
-            queries: queries
+            queries: queries,
+            onMatchingScores: { scores in
+                Task { @MainActor in
+                    matchingScoresByURL = scores
+                }
+            }
         )
 
         #if DEBUG
@@ -1231,6 +1284,7 @@ struct SearchView: View {
         activeSearchRequestID = UUID()
         searchQuery = ""
         searchResults = []
+        matchingScoresByURL = [:]
         showingSummary = false
         isNoAIMode = false
         firstGuessText = ""
@@ -1351,6 +1405,11 @@ struct SearchView: View {
 /// Displays one search result row with link, source host, and snippet preview.
 struct SearchResultCard: View {
     let result: SearchResult
+    /// RAG match-score percentage in `[0, 100]`. Defaults to 0 for cards
+    /// whose source did not contribute to the selected context.
+    var matchingScore: Double = 0
+    /// UI language for accessibility-label localisation. Defaults to English.
+    var accessibilityLanguage: ModelLanguage = .english
     var isWebSummariesEnabled: Bool = false
     var onRequestSummary: ((SearchResult) -> Void)? = nil
 
@@ -1389,20 +1448,29 @@ struct SearchResultCard: View {
     /// Renders one result card with title link, host, and snippet.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Title and URL sit in the same horizontal band as the
+            // top-right MatchScoreBadge overlay (34pt + 8pt padding ≈ 44pt),
+            // so they reserve trailing space to keep text from running
+            // under the ring.
             Button(action: handleTitleTap) {
                 Text(result.title)
                     .font(.headline)
                     .foregroundColor(.accentColor)
                     .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .buttonStyle(.plain)
+            .padding(.trailing, 44)
 
             // URL
             Text(formatURL(result.url))
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.trailing, 44)
 
-            // Snippet
+            // Snippet (starts below the badge band; full width OK)
             Text(result.snippet)
                 .font(.body)
                 .foregroundColor(.primary)
@@ -1413,6 +1481,10 @@ struct SearchResultCard: View {
         .background(platformControlBackgroundColor)
         .cornerRadius(8)
         .contentShape(Rectangle())
+        .overlay(alignment: .topTrailing) {
+            MatchScoreBadge(percent: matchingScore, language: accessibilityLanguage)
+                .padding(8)
+        }
         .onTapGesture {
             handleTitleTap()
         }

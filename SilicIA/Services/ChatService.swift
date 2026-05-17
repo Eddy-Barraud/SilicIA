@@ -306,6 +306,81 @@ final class ChatService: ObservableObject {
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
+    /// Discards an existing assistant answer (and the preceding user prompt
+    /// that produced it, plus everything after) and re-runs `sendMessage`
+    /// with the current settings. Use case: the user changed temperature /
+    /// language / token budget and wants a fresh answer for the same prompt.
+    ///
+    /// - Note: anything after the target user prompt in the transcript is
+    ///   discarded too — the standard "regenerate from here" semantic.
+    func regenerateAssistantMessage(
+        id: UUID,
+        contextInput: String,
+        pdfURLs: [URL],
+        imageURLs: [URL] = [],
+        includeWebSearch: Bool,
+        maxDuckDuckGoResults: Int,
+        maxWikipediaResults: Int,
+        language: ModelLanguage,
+        temperature: Double,
+        maxResponseTokens: Int,
+        maxContextTokens: Int,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) async {
+        guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
+            return
+        }
+        // Walk backwards to find the user prompt that triggered this response.
+        guard let userIndex = messages[..<assistantIndex].lastIndex(where: { $0.role == .user }) else {
+            return
+        }
+        let userText = messages[userIndex].content
+
+        // Drop everything from the triggering user prompt onwards — both
+        // in-memory and from the persisted conversation. `sendMessage` will
+        // re-append the user prompt and stream a fresh assistant response.
+        messages.removeSubrange(userIndex...)
+        deletePersistedTail(fromIndex: userIndex)
+
+        // Invalidate the pre-analyzed context cache so settings changes
+        // (e.g. new max-context-tokens, new sources) get re-evaluated.
+        preAnalyzedContextKey = nil
+
+        await sendMessage(
+            userText,
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            imageURLs: imageURLs,
+            includeWebSearch: includeWebSearch,
+            maxDuckDuckGoResults: maxDuckDuckGoResults,
+            maxWikipediaResults: maxWikipediaResults,
+            language: language,
+            temperature: temperature,
+            maxResponseTokens: maxResponseTokens,
+            maxContextTokens: maxContextTokens,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        )
+    }
+
+    /// Deletes the trailing `Message` rows from the current `Conversation`
+    /// starting at the given index, mirroring how `messages` and
+    /// `currentConversation.messages` are kept in lockstep by `persistMessage`.
+    private func deletePersistedTail(fromIndex index: Int) {
+        guard let modelContext, let conversation = currentConversation else { return }
+        let persisted = conversation.messages
+        guard index < persisted.count else { return }
+        for message in persisted[index...] {
+            modelContext.delete(message)
+        }
+        // Remove from the relationship array too so subsequent appends land
+        // at the right offset.
+        conversation.messages.removeSubrange(index...)
+        conversation.updatedAt = Date()
+        scheduleContextSave()
+    }
+
     /// Clears conversation and cached context analysis so a new chat starts cleanly.
     func resetConversation() {
         pendingSaveTask?.cancel()

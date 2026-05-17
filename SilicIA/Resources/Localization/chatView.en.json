@@ -2,6 +2,7 @@
   "chat.startConversation": "Start a chat conversation with the foundation model.",
   "chat.composer.placeholder": "Type a message",
   "chat.composer.send": "Send",
+  "chat.message.regenerate": "Regenerate",
   "chat.context.title": "Context Sources",
   "chat.context.addPDF": "Add PDF",
   "chat.context.addImage": "Add image",

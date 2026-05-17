@@ -417,6 +417,16 @@ struct ChatView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(L.t("common.copy", language: settings.language))
+
+                                Button {
+                                    regenerate(messageID: message.id)
+                                } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                        .foregroundColor(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(chatService.isResponding)
+                                .help(L.t("chat.message.regenerate", language: settings.language))
                             }
                         }
                         renderedMessageContent(message)
@@ -659,28 +669,64 @@ struct ChatView: View {
 
         let message = trimmed
         messageInput = ""
-        let contextInput = contextSources
-            .compactMap { source -> String? in
-                guard case .url(let text) = source.kind else { return nil }
-                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmedText.isEmpty ? nil : trimmedText
-            }
-            .joined(separator: "\n")
-        let selectedPDFs = contextSources.compactMap { source -> URL? in
-            guard case .pdf(let url) = source.kind else { return nil }
-            return url
-        }
-        let selectedImages = contextSources.compactMap { source -> URL? in
-            guard case .image(let url) = source.kind else { return nil }
-            return url
-        }
 
         Task {
             await chatService.sendMessage(
                 message,
-                contextInput: contextInput,
-                pdfURLs: selectedPDFs,
-                imageURLs: selectedImages,
+                contextInput: currentContextInputString(),
+                pdfURLs: currentSelectedPDFs(),
+                imageURLs: currentSelectedImages(),
+                includeWebSearch: isWebSearchEnabled,
+                maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+                maxWikipediaResults: settings.maxWikipediaResults,
+                language: settings.language,
+                temperature: settings.temperature,
+                maxResponseTokens: settings.maxResponseTokens,
+                maxContextTokens: settings.maxContextTokens,
+                useDuckDuckGo: settings.useDuckDuckGo,
+                useWikipedia: settings.useWikipedia
+            )
+        }
+    }
+
+    /// Joins all URL-row text values into the newline-separated
+    /// `contextInput` string consumed by `ChatService`. Shared by
+    /// `submitMessage`, the regenerate button, and `scheduleContextPreanalysis`.
+    private func currentContextInputString() -> String {
+        contextSources
+            .compactMap { source -> String? in
+                guard case .url(let text) = source.kind else { return nil }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: "\n")
+    }
+
+    /// Returns the persistent file URLs of all PDF context rows.
+    private func currentSelectedPDFs() -> [URL] {
+        contextSources.compactMap { source -> URL? in
+            guard case .pdf(let url) = source.kind else { return nil }
+            return url
+        }
+    }
+
+    /// Returns the persistent file URLs of all image context rows.
+    private func currentSelectedImages() -> [URL] {
+        contextSources.compactMap { source -> URL? in
+            guard case .image(let url) = source.kind else { return nil }
+            return url
+        }
+    }
+
+    /// Re-issues the user prompt that produced the given assistant message,
+    /// using the current settings.
+    private func regenerate(messageID: ChatMessage.ID) {
+        Task {
+            await chatService.regenerateAssistantMessage(
+                id: messageID,
+                contextInput: currentContextInputString(),
+                pdfURLs: currentSelectedPDFs(),
+                imageURLs: currentSelectedImages(),
                 includeWebSearch: isWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
@@ -1075,21 +1121,9 @@ struct ChatView: View {
     /// Triggers background context analysis shortly after edits.
     private func scheduleContextPreanalysis() {
         preanalysisTask?.cancel()
-        let contextInput = contextSources
-            .compactMap { source -> String? in
-                guard case .url(let text) = source.kind else { return nil }
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
-            .joined(separator: "\n")
-        let selectedPDFs = contextSources.compactMap { source -> URL? in
-            guard case .pdf(let url) = source.kind else { return nil }
-            return url
-        }
-        let selectedImages = contextSources.compactMap { source -> URL? in
-            guard case .image(let url) = source.kind else { return nil }
-            return url
-        }
+        let contextInput = currentContextInputString()
+        let selectedPDFs = currentSelectedPDFs()
+        let selectedImages = currentSelectedImages()
         preanalysisTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }

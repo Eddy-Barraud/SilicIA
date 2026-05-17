@@ -2,6 +2,7 @@
   "chat.startConversation": "Inicie una conversación de chat con el modelo.",
   "chat.composer.placeholder": "Escriba un mensaje",
   "chat.composer.send": "Enviar",
+  "chat.message.regenerate": "Regenerar",
   "chat.context.title": "Fuentes de contexto",
   "chat.context.addPDF": "Añadir PDF",
   "chat.context.addImage": "Añadir imagen",
