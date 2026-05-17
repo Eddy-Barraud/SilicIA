@@ -109,6 +109,11 @@ struct RankedRAGChunk {
 struct RAGSelectionResult {
     let selectedContext: String
     let rankedChunks: [RankedRAGChunk]
+    /// Subset of `rankedChunks` that actually survived the greedy budget
+    /// filter and ended up inside `selectedContext`. Empty if no chunks
+    /// were selected (including the "fallback chunk" branch — see
+    /// `RAGContextService.selectContext` for the exception).
+    let selectedChunks: [RankedRAGChunk]
 
     /// Default number of top-ranked chunks surfaced for citation rendering.
     /// Centralized so callers (and the convenience accessor below) share one source of truth.
@@ -145,7 +150,8 @@ actor RAGContextService {
         guard !chunks.isEmpty else {
             return RAGSelectionResult(
                 selectedContext: "No additional context provided.",
-                rankedChunks: []
+                rankedChunks: [],
+                selectedChunks: []
             )
         }
 
@@ -187,6 +193,7 @@ actor RAGContextService {
         }
 
         var selected: [String] = []
+        var selectedChunks: [RankedRAGChunk] = []
         var currentChars = 0
         let separator = "\n\n---\n\n"
         for rankedChunk in ranked {
@@ -196,6 +203,7 @@ actor RAGContextService {
                 continue
             }
             selected.append(chunkEntry)
+            selectedChunks.append(rankedChunk)
             currentChars += separatorChars + chunkEntry.count
         }
 
@@ -203,14 +211,33 @@ actor RAGContextService {
             let fallback = "Source: \(first.chunk.source)\n\(first.chunk.text)"
             return RAGSelectionResult(
                 selectedContext: String(fallback.prefix(max(options.minimumFallbackContextCharacters, maxContextChars))),
-                rankedChunks: ranked
+                rankedChunks: ranked,
+                selectedChunks: [first]
             )
         }
 
         return RAGSelectionResult(
             selectedContext: selected.joined(separator: separator),
-            rankedChunks: ranked
+            rankedChunks: ranked,
+            selectedChunks: selectedChunks
         )
+    }
+
+    /// Computes normalised per-source match-score percentages from a
+    /// `RAGSelectionResult`. Selected chunks are grouped by `chunk.url`,
+    /// their `relevanceScore` summed, then expressed as percentages of the
+    /// grand total so the returned values sum to 100. Sources whose chunks
+    /// did not survive the budget filter are absent from the dictionary —
+    /// callers should treat missing keys as 0%.
+    nonisolated static func normalizedSourceScores(from result: RAGSelectionResult) -> [String: Double] {
+        var sums: [String: Double] = [:]
+        for ranked in result.selectedChunks {
+            guard let url = ranked.chunk.url else { continue }
+            sums[url, default: 0] += max(0, ranked.relevanceScore)
+        }
+        let total = sums.values.reduce(0, +)
+        guard total > 0 else { return [:] }
+        return sums.mapValues { ($0 / total) * 100 }
     }
 
     private func calculateMaxContextCharacters(
