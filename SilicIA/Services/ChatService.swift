@@ -65,6 +65,7 @@ final class ChatService: ObservableObject {
         _ message: String,
         contextInput: String,
         pdfURLs: [URL],
+        imageURLs: [URL] = [],
         includeWebSearch: Bool,
         maxDuckDuckGoResults: Int,
         maxWikipediaResults: Int,
@@ -98,6 +99,7 @@ final class ChatService: ObservableObject {
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
+            imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
             searchQuerySeed: includeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
@@ -112,7 +114,7 @@ final class ChatService: ObservableObject {
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
-        debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preChunks=\(preAnalyzedChunks.count)")
+        debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) imageCount=\(imageURLs.count) preChunks=\(preAnalyzedChunks.count)")
         let chunks: [RAGChunk]
         if canUsePreAnalyzed {
             chunks = preAnalyzedChunks
@@ -120,6 +122,7 @@ final class ChatService: ObservableObject {
             chunks = await collectChunks(
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
+                imageURLs: imageURLs,
                 includeWebSearch: includeWebSearch,
                 currentMessage: message,
                 language: language,
@@ -227,6 +230,7 @@ final class ChatService: ObservableObject {
     func preAnalyzeContext(
         contextInput: String,
         pdfURLs: [URL],
+        imageURLs: [URL] = [],
         includeWebSearch: Bool,
         maxDuckDuckGoResults: Int,
         maxWikipediaResults: Int,
@@ -248,6 +252,7 @@ final class ChatService: ObservableObject {
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
+            imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
             searchQuerySeed: "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
@@ -276,10 +281,11 @@ final class ChatService: ObservableObject {
 
         isAnalyzingContext = true
         contextAnalysisProgress = 0
-        debugContext("preAnalyzeContext started for pdfCount=\(pdfURLs.count)")
+        debugContext("preAnalyzeContext started for pdfCount=\(pdfURLs.count) imageCount=\(imageURLs.count)")
         let chunks = await collectChunks(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
+            imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
             currentMessage: "",
             maxDuckDuckGoResults: effectiveMaxDDGResults,
@@ -311,6 +317,7 @@ final class ChatService: ObservableObject {
         id: UUID,
         contextInput: String,
         pdfURLs: [URL],
+        imageURLs: [URL] = [],
         includeWebSearch: Bool,
         maxDuckDuckGoResults: Int,
         maxWikipediaResults: Int,
@@ -344,6 +351,7 @@ final class ChatService: ObservableObject {
             userText,
             contextInput: contextInput,
             pdfURLs: pdfURLs,
+            imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
             maxDuckDuckGoResults: maxDuckDuckGoResults,
             maxWikipediaResults: maxWikipediaResults,
@@ -393,10 +401,11 @@ final class ChatService: ObservableObject {
         currentConversation = nil
     }
 
-    /// Collects web and PDF chunks from provided context.
+    /// Collects web, PDF, and image chunks from provided context.
     private func collectChunks(
         contextInput: String,
         pdfURLs: [URL],
+        imageURLs: [URL] = [],
         includeWebSearch: Bool,
         currentMessage: String = "",
         language: ModelLanguage = .english,
@@ -456,7 +465,8 @@ final class ChatService: ObservableObject {
         let urls = deduplicatedURLs(contextURLs + discoveredURLs)
             .filter { !retrievedResultURLKeys.contains(normalizedURLString($0)) }
         let uniquePDFs = Array(Set(pdfURLs))
-        let totalWorkItems = max(urls.count + uniquePDFs.count + retrievedWebResults.count, 1)
+        let uniqueImages = Array(Set(imageURLs))
+        let totalWorkItems = max(urls.count + uniquePDFs.count + uniqueImages.count + retrievedWebResults.count, 1)
         var completedWorkItems = 0
         let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
         let totalMaxWebResults = effectiveMaxDDGResults + effectiveMaxWikiResults
@@ -523,7 +533,51 @@ final class ChatService: ObservableObject {
             }
         }
 
+        // Images: one chunk per file containing OCR text and/or Vision classification
+        // labels. We don't run the chunker — OCR output is short and a single chunk
+        // keeps citation block tidy ("Image: filename.jpg").
+        for imageURL in uniqueImages {
+            if let chunk = await makeImageChunk(for: imageURL) {
+                chunks.append(chunk)
+                debugContext("collectChunks image=\(imageURL.lastPathComponent) chars=\(chunk.text.count)")
+            } else {
+                debugContext("collectChunks image=\(imageURL.lastPathComponent) skipped (no extractable content)")
+            }
+            completedWorkItems += 1
+            if reportProgress {
+                contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+            }
+        }
+
         return chunks
+    }
+
+    /// Runs Vision OCR + image classification on the file and packages the
+    /// result as a single `RAGChunk`. Returns `nil` if neither OCR nor
+    /// classification produced any usable output.
+    private func makeImageChunk(for imageURL: URL) async -> RAGChunk? {
+        guard let result = await ImageAnalysisService.analyze(imageAt: imageURL),
+              !result.isEmpty else {
+            return nil
+        }
+
+        var sections: [String] = []
+        if !result.recognizedText.isEmpty {
+            sections.append(result.recognizedText)
+        }
+        if !result.labels.isEmpty {
+            let labelText = result.labels
+                .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
+                .joined(separator: ", ")
+            sections.append("Estimated content: \(labelText)")
+        }
+
+        return RAGChunk(
+            source: "Image: \(imageURL.lastPathComponent)",
+            text: sections.joined(separator: "\n\n"),
+            url: nil,
+            pdfPage: nil
+        )
     }
 
     private func buildWebSearchQuery(currentMessage: String, contextInput: String) -> String {
@@ -592,6 +646,7 @@ final class ChatService: ObservableObject {
     private func makeContextKey(
         contextInput: String,
         pdfURLs: [URL],
+        imageURLs: [URL] = [],
         includeWebSearch: Bool,
         searchQuerySeed: String,
         clampedDuckDuckGoResults: Int,
@@ -601,13 +656,14 @@ final class ChatService: ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let normalizedPDFPaths = Array(Set(pdfURLs.map(\.path))).sorted().joined(separator: "|")
+        let normalizedImagePaths = Array(Set(imageURLs.map(\.path))).sorted().joined(separator: "|")
         let normalizedQuerySeed = includeWebSearch
             ? searchQuerySeed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             : ""
-        if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedQuerySeed.isEmpty {
+        if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedImagePaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
     }
 
     private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {
@@ -714,6 +770,8 @@ final class ChatService: ObservableObject {
     }
 
     /// Runs Vision OCR on a rendered PDF page and returns recognized text.
+    /// Renders the page to a `CGImage`, then delegates to `ImageAnalysisService`
+    /// so both image attachments and PDF-OCR-fallback share the same OCR config.
     private func recognizeText(in page: PDFPage) -> String? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
@@ -734,25 +792,7 @@ final class ChatService: ObservableObject {
         guard let cgImage else {
             return nil
         }
-
-        let request = VNRecognizeTextRequest()
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
-        request.recognitionLanguages = ["fr-FR", "en-US"]
-
-        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-        do {
-            try handler.perform([request])
-        } catch {
-            debugContext("OCR request failed: \(error.localizedDescription)")
-            return nil
-        }
-
-        let text = (request.results ?? [])
-            .compactMap { $0.topCandidates(1).first?.string }
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+        return ImageAnalysisService.recognizeText(in: cgImage)
     }
 
     private func debugContext(_ message: @autoclosure () -> String) {

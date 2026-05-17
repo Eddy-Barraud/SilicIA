@@ -1,15 +1,20 @@
 //
-//  DroppedPDFStore.swift
+//  DroppedImageStore.swift
 //  SilicIA
 //
-//  Created by Copilot on 18/04/2026.
+//  Created by Eddy Barraud on 06/05/2026.
 //
 
 import Foundation
 
-/// Stores dropped PDFs in a stable temporary folder and manages cleanup.
-enum DroppedPDFStore {
-    private static let folderName = "SilicIADroppedPDFs"
+/// Stores dropped/shared images in a stable temporary folder and manages cleanup.
+/// Mirrors `DroppedPDFStore` to keep the lifecycle of dropped attachments uniform.
+enum DroppedImageStore {
+    private static let folderName = "SilicIADroppedImages"
+    private static let defaultExtension = "jpg"
+    private static let allowedExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
+    ]
 
     static var storageDirectory: URL {
         FileManager.default.temporaryDirectory.appendingPathComponent(folderName, isDirectory: true)
@@ -20,7 +25,8 @@ enum DroppedPDFStore {
 
         // File-picker / drag-drop URLs are security-scoped on the sandboxed
         // macOS app: we must request access before any read or copy, otherwise
-        // FileManager fails with EPERM.
+        // FileManager fails with EPERM and downstream Vision/PDFKit reads
+        // surface a confusing "Operation not permitted".
         let didStartAccessing = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if didStartAccessing {
@@ -38,7 +44,7 @@ enum DroppedPDFStore {
             return destinationURL
         } catch {
             #if DEBUG
-            print("[DroppedPDFStore] Failed to persist PDF from \(sourceURL.path): \(error.localizedDescription)")
+            print("[DroppedImageStore] Failed to persist image from \(sourceURL.path): \(error.localizedDescription)")
             #endif
             return nil
         }
@@ -54,7 +60,7 @@ enum DroppedPDFStore {
             return true
         } catch {
             #if DEBUG
-            print("[DroppedPDFStore] Failed to clear temporary PDFs: \(error.localizedDescription)")
+            print("[DroppedImageStore] Failed to clear temporary images: \(error.localizedDescription)")
             #endif
             return false
         }
@@ -64,7 +70,8 @@ enum DroppedPDFStore {
         let fileManager = FileManager.default
         let rawName = normalizedRawName(preferredFileName: preferredFileName, sourceURL: sourceURL)
         let base = rawName.deletingPathExtension
-        let ext = rawName.pathExtension.isEmpty ? "pdf" : rawName.pathExtension
+        let rawExt = rawName.pathExtension.lowercased()
+        let ext = allowedExtensions.contains(rawExt) ? rawExt : defaultExtension
 
         var index = 0
         while true {
@@ -85,12 +92,13 @@ enum DroppedPDFStore {
             .replacingOccurrences(of: ":", with: "-")
 
         let sourceName = sourceURL.lastPathComponent
-        let fallback = sourceName.isEmpty ? "dropped.pdf" : sourceName
+        let fallback = sourceName.isEmpty ? "dropped.\(defaultExtension)" : sourceName
         let chosen = (candidate?.isEmpty == false ? candidate! : fallback)
-        if chosen.lowercased().hasSuffix(".pdf") {
+        let chosenExt = chosen.pathExtension.lowercased()
+        if allowedExtensions.contains(chosenExt) {
             return chosen
         }
-        return "\(chosen).pdf"
+        return "\(chosen).\(defaultExtension)"
     }
 }
 

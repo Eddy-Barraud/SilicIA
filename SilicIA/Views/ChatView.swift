@@ -20,6 +20,7 @@ import SafariServices
 struct ChatView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
+    @Binding var sharedImages: [URL]
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
 
@@ -27,6 +28,7 @@ struct ChatView: View {
 
     @State private var messageInput = ""
     @State private var showFileImporter = false
+    @State private var showImageImporter = false
     @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
     @State private var preanalysisTask: Task<Void, Never>?
     @State private var settings = AppSettings.load()
@@ -105,6 +107,14 @@ struct ChatView: View {
                 contextBoxView
             }
             .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            // Whole-surface drop zone — catches anything not landing on a
+            // specific row's onDrop. Row-level handlers run first and route
+            // drops to a specific row when they hit one.
+            .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+                handleAttachmentDrop(providers, rowIndex: nil)
+            }
             #if canImport(UIKit)
             .overlay {
                 KeyboardDismissTapOverlay(onTapOutsideTextInput: {
@@ -122,6 +132,16 @@ struct ChatView: View {
                     appendPDFSources(urls)
                 }
             }
+            .fileImporter(
+                isPresented: $showImageImporter,
+                allowedContentTypes: [.image],
+                allowsMultipleSelection: true
+            ) { result in
+                guard case .success(let urls) = result else { return }
+                Task { @MainActor in
+                    appendImageSources(urls)
+                }
+            }
             .onAppear {
                 settings = AppSettings.load()
                 chatService.modelContext = modelContext
@@ -134,6 +154,9 @@ struct ChatView: View {
                 mergeSharedInputsIfNeeded()
             }
             .onChange(of: sharedPDFs) {
+                mergeSharedInputsIfNeeded()
+            }
+            .onChange(of: sharedImages) {
                 mergeSharedInputsIfNeeded()
             }
         }
@@ -538,8 +561,15 @@ struct ChatView: View {
                     Image(systemName: "plus.circle.fill")
                 }
                 .buttonStyle(.plain)
-                Button(L.t("chat.context.addPDF", language: settings.language)) {
-                    showFileImporter = true
+                Menu {
+                    Button(L.t("chat.context.addPDF", language: settings.language)) {
+                        showFileImporter = true
+                    }
+                    Button(L.t("chat.context.addImage", language: settings.language)) {
+                        showImageImporter = true
+                    }
+                } label: {
+                    Label(L.t("chat.context.addAttachment", language: settings.language), systemImage: "paperclip")
                 }
                 .buttonStyle(.bordered)
                 Button {
@@ -596,6 +626,13 @@ struct ChatView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                 }
+            case .image:
+                if case .image(let url) = source.kind {
+                    Text(url?.lastPathComponent ?? L.t("chat.context.image.attached", language: settings.language))
+                        .lineLimit(1)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
             }
             Button {
                 contextSources.remove(at: index)
@@ -616,8 +653,8 @@ struct ChatView: View {
                 .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
         )
         .cornerRadius(8)
-        .onDrop(of: [.pdf, .fileURL], isTargeted: nil) { providers in
-            handlePDFDrop(providers, rowIndex: index)
+        .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+            handleAttachmentDrop(providers, rowIndex: index)
         }
     }
 
@@ -638,6 +675,7 @@ struct ChatView: View {
                 message,
                 contextInput: currentContextInputString(),
                 pdfURLs: currentSelectedPDFs(),
+                imageURLs: currentSelectedImages(),
                 includeWebSearch: isWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
@@ -672,6 +710,14 @@ struct ChatView: View {
         }
     }
 
+    /// Returns the persistent file URLs of all image context rows.
+    private func currentSelectedImages() -> [URL] {
+        contextSources.compactMap { source -> URL? in
+            guard case .image(let url) = source.kind else { return nil }
+            return url
+        }
+    }
+
     /// Re-issues the user prompt that produced the given assistant message,
     /// using the current settings.
     private func regenerate(messageID: ChatMessage.ID) {
@@ -680,6 +726,7 @@ struct ChatView: View {
                 id: messageID,
                 contextInput: currentContextInputString(),
                 pdfURLs: currentSelectedPDFs(),
+                imageURLs: currentSelectedImages(),
                 includeWebSearch: isWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
@@ -693,78 +740,116 @@ struct ChatView: View {
         }
     }
 
-    /// Handles dropped file providers and keeps PDF URLs only.
-    private func handlePDFDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
+    /// Image file extensions accepted by the drag-and-drop / file picker pipeline.
+    private static let imageFileExtensions: Set<String> = [
+        "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
+    ]
+
+    /// Handles dropped file providers — PDFs and images. Other types are
+    /// silently ignored. Each PDF/image is persisted to its dedicated temp
+    /// store and added to `contextSources`.
+    private func handleAttachmentDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
         debugDrop("Received drop with \(providers.count) providers at rowIndex=\(String(describing: rowIndex))")
         for (index, provider) in providers.enumerated() {
             debugDrop("Provider[\(index)] registeredTypeIdentifiers=\(provider.registeredTypeIdentifiers)")
         }
-        let pdfProviders = providers.filter {
+        let acceptedProviders = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
-        debugDrop("Filtered \(pdfProviders.count) candidate PDF providers")
-        guard !pdfProviders.isEmpty else {
-            debugDrop("Drop ignored: no provider conforms to public.pdf or public.file-url")
+        debugDrop("Filtered \(acceptedProviders.count) accepted providers")
+        guard !acceptedProviders.isEmpty else {
+            debugDrop("Drop ignored: no provider conforms to public.pdf, public.image, or public.file-url")
             return false
         }
 
-        for (index, provider) in pdfProviders.enumerated() {
+        for (index, provider) in acceptedProviders.enumerated() {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-                debugDrop("Provider[\(index)] loading file representation for public.pdf")
-                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, error in
-                    if let error {
-                        debugDrop("Provider[\(index)] loadFileRepresentation error: \(error.localizedDescription)")
-                    }
-                    guard let url else {
-                        debugDrop("Provider[\(index)] loadFileRepresentation returned nil URL")
-                        return
-                    }
-                    debugDrop("Provider[\(index)] loadFileRepresentation url=\(url.path)")
-                    let preferredName = provider.suggestedName
-                    guard let persistentURL = persistDroppedPDF(url, preferredFileName: preferredName) else {
-                        debugDrop("Provider[\(index)] failed to persist dropped PDF at \(url.path)")
-                        return
-                    }
-                    debugDrop("Provider[\(index)] persisted dropped PDF at \(persistentURL.path)")
-                    Task { @MainActor in
-                        insertPDFSource(persistentURL, at: rowIndex)
-                    }
-                }
+                loadPDFFromProvider(provider, index: index, rowIndex: rowIndex)
                 continue
             }
-
-            debugDrop("Provider[\(index)] loading item for public.file-url")
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
-                if let error {
-                    debugDrop("Provider[\(index)] loadItem error: \(error.localizedDescription)")
-                }
-                debugDrop("Provider[\(index)] loadItem returned itemType=\(item.map { String(describing: type(of: $0)) } ?? "nil")")
-                let fileURL: URL?
-                if let data = item as? Data {
-                    fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-                } else if let url = item as? URL {
-                    fileURL = url
-                } else if let nsURL = item as? NSURL {
-                    fileURL = nsURL as URL
-                } else {
-                    fileURL = nil
-                }
-                guard let fileURL,
-                      fileURL.pathExtension.lowercased() == "pdf",
-                      let persistentURL = persistDroppedPDF(fileURL) else {
-                    debugDrop("Provider[\(index)] rejected dropped item; resolvedURL=\(fileURL?.path ?? "nil"), ext=\(fileURL?.pathExtension ?? "nil")")
-                    return
-                }
-                debugDrop("Provider[\(index)] persisted file-url dropped PDF at \(persistentURL.path)")
-
-                Task { @MainActor in
-                    insertPDFSource(persistentURL, at: rowIndex)
-                }
+            if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                loadImageFromProvider(provider, index: index, rowIndex: rowIndex)
+                continue
             }
+            loadFileURLFromProvider(provider, index: index, rowIndex: rowIndex)
         }
 
         return true
+    }
+
+    private func loadPDFFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
+        debugDrop("Provider[\(index)] loading file representation for public.pdf")
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, error in
+            if let error {
+                debugDrop("Provider[\(index)] loadFileRepresentation error: \(error.localizedDescription)")
+            }
+            guard let url else {
+                debugDrop("Provider[\(index)] loadFileRepresentation returned nil URL")
+                return
+            }
+            let preferredName = provider.suggestedName
+            guard let persistentURL = persistDroppedPDF(url, preferredFileName: preferredName) else { return }
+            Task { @MainActor in
+                insertPDFSource(persistentURL, at: rowIndex)
+            }
+        }
+    }
+
+    private func loadImageFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
+        debugDrop("Provider[\(index)] loading file representation for public.image")
+        provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
+            if let error {
+                debugDrop("Provider[\(index)] loadFileRepresentation error: \(error.localizedDescription)")
+            }
+            guard let url else {
+                debugDrop("Provider[\(index)] image loadFileRepresentation returned nil URL")
+                return
+            }
+            let preferredName = provider.suggestedName ?? url.lastPathComponent
+            guard let persistentURL = persistDroppedImage(url, preferredFileName: preferredName) else { return }
+            Task { @MainActor in
+                insertImageSource(persistentURL, at: rowIndex)
+            }
+        }
+    }
+
+    private func loadFileURLFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
+        debugDrop("Provider[\(index)] loading item for public.file-url")
+        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+            if let error {
+                debugDrop("Provider[\(index)] loadItem error: \(error.localizedDescription)")
+            }
+            let fileURL: URL?
+            if let data = item as? Data {
+                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
+            } else if let url = item as? URL {
+                fileURL = url
+            } else if let nsURL = item as? NSURL {
+                fileURL = nsURL as URL
+            } else {
+                fileURL = nil
+            }
+            guard let fileURL else {
+                debugDrop("Provider[\(index)] rejected dropped item; resolvedURL=nil")
+                return
+            }
+            let ext = fileURL.pathExtension.lowercased()
+            if ext == "pdf" {
+                guard let persistentURL = persistDroppedPDF(fileURL) else { return }
+                Task { @MainActor in
+                    insertPDFSource(persistentURL, at: rowIndex)
+                }
+            } else if Self.imageFileExtensions.contains(ext) {
+                guard let persistentURL = persistDroppedImage(fileURL) else { return }
+                Task { @MainActor in
+                    insertImageSource(persistentURL, at: rowIndex)
+                }
+            } else {
+                debugDrop("Provider[\(index)] unsupported extension: \(ext)")
+            }
+        }
     }
 
     /// Copies dropped PDF to a stable temporary location so it remains readable for later context analysis.
@@ -778,7 +863,18 @@ struct ChatView: View {
         return persistentURL
     }
 
-    /// Adds incoming shared URLs/PDFs to context rows once.
+    /// Copies dropped image to a stable temporary location so it remains readable for Vision analysis.
+    private func persistDroppedImage(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
+        let persistentURL = DroppedImageStore.persist(sourceURL, preferredFileName: preferredFileName)
+        if let persistentURL {
+            debugDrop("Copied dropped image from \(sourceURL.path) to \(persistentURL.path)")
+        } else {
+            debugDrop("Failed to persist dropped image from \(sourceURL.path)")
+        }
+        return persistentURL
+    }
+
+    /// Adds incoming shared URLs/PDFs/images to context rows once.
     private func mergeSharedInputsIfNeeded() {
         let incomingURLs = sharedURLs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -788,21 +884,28 @@ struct ChatView: View {
             .compactMap { sourceURL in
                 persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
             }
-        guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty else { return }
+        let incomingImages = sharedImages
+            .filter { Self.imageFileExtensions.contains($0.pathExtension.lowercased()) }
+            .compactMap { sourceURL in
+                persistDroppedImage(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+            }
+        guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty || !incomingImages.isEmpty else { return }
 
-        startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs)
+        startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
+        sharedImages.removeAll()
         scheduleContextPreanalysis()
     }
 
-    private func startNewConversationFromSharedInputs(urls: [String], pdfs: [URL]) {
+    private func startNewConversationFromSharedInputs(urls: [String], pdfs: [URL], images: [URL] = []) {
         preanalysisTask?.cancel()
         messageInput = ""
         chatService.resetConversation()
 
         var newSources: [ContextSource] = urls.map { ContextSource(kind: .url(text: $0)) }
         newSources.append(contentsOf: pdfs.map { ContextSource(kind: .pdf(url: $0)) })
+        newSources.append(contentsOf: images.map { ContextSource(kind: .image(url: $0)) })
         contextSources = newSources
         normalizeContextSources()
     }
@@ -829,6 +932,33 @@ struct ChatView: View {
         } else {
             contextSources.append(ContextSource(kind: .pdf(url: url)))
             debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
+        }
+        normalizeContextSources()
+        scheduleContextPreanalysis()
+    }
+
+    /// Inserts an image source while keeping URL placeholder behavior.
+    private func insertImageSource(_ url: URL, at rowIndex: Int?) {
+        guard Self.imageFileExtensions.contains(url.pathExtension.lowercased()) else {
+            debugDrop("Ignoring non-image URL during insert: \(url.path)")
+            return
+        }
+        guard !contextSources.contains(where: { source in
+            if case .image(let existingURL) = source.kind {
+                return existingURL == url
+            }
+            return false
+        }) else {
+            debugDrop("Ignoring duplicate image context URL: \(url.path)")
+            return
+        }
+
+        if let rowIndex, contextSources.indices.contains(rowIndex) {
+            contextSources[rowIndex].kind = .image(url: url)
+            debugDrop("Inserted dropped image into existing context row \(rowIndex): \(url.lastPathComponent)")
+        } else {
+            contextSources.append(ContextSource(kind: .image(url: url)))
+            debugDrop("Appended dropped image as new context row: \(url.lastPathComponent)")
         }
         normalizeContextSources()
         scheduleContextPreanalysis()
@@ -967,6 +1097,14 @@ struct ChatView: View {
         }
     }
 
+    /// Appends multiple images.
+    private func appendImageSources(_ urls: [URL]) {
+        for url in urls {
+            let persisted = persistDroppedImage(url, preferredFileName: url.lastPathComponent) ?? url
+            insertImageSource(persisted, at: nil)
+        }
+    }
+
     /// Ensures there is always one empty URL row available.
     private func normalizeContextSources() {
         let hasEmptyURLRow = contextSources.contains { source in
@@ -985,12 +1123,14 @@ struct ChatView: View {
         preanalysisTask?.cancel()
         let contextInput = currentContextInputString()
         let selectedPDFs = currentSelectedPDFs()
+        let selectedImages = currentSelectedImages()
         preanalysisTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
             await chatService.preAnalyzeContext(
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
+                imageURLs: selectedImages,
                 includeWebSearch: isWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
@@ -1009,8 +1149,10 @@ struct ChatView: View {
         contextSources = [ContextSource(kind: .url(text: ""))]
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
+        sharedImages.removeAll()
         chatService.resetConversation()
         _ = DroppedPDFStore.clearAll()
+        _ = DroppedImageStore.clearAll()
     }
 }
 
@@ -1019,6 +1161,7 @@ private struct ContextSource: Identifiable {
     enum Kind {
         case url(text: String)
         case pdf(url: URL?)
+        case image(url: URL?)
     }
 
     let id = UUID()
@@ -1028,6 +1171,7 @@ private struct ContextSource: Identifiable {
         switch kind {
         case .url: return "link"
         case .pdf: return "doc.richtext"
+        case .image: return "photo"
         }
     }
 
@@ -1035,6 +1179,7 @@ private struct ContextSource: Identifiable {
         switch kind {
         case .url: return .blue
         case .pdf: return .red
+        case .image: return .orange
         }
     }
 }
