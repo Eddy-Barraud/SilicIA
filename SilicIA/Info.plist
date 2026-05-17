@@ -11,5 +11,35 @@
     <string>arm64</string>
     <string>metal</string>
   </array>
+
+  <!--
+    URL scheme registration so the share-extension can deep-link the
+    host app via `silicia://share?...`. Must live in the source
+    Info.plist because Xcode's `INFOPLIST_KEY_*` build settings only
+    inject scalar values, not arrays-of-dicts.
+  -->
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>CFBundleURLName</key>
+      <string>fr.trevalim.SilicIA</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>SilicIA</string>
+      </array>
+    </dict>
+  </array>
+
+  <!--
+    iOS additionally requires the URL scheme to appear in
+    `LSApplicationQueriesSchemes` if the *app itself* will canOpenURL
+    against it (not strictly needed for incoming opens, but harmless).
+  -->
+  <key>LSApplicationQueriesSchemes</key>
+  <array>
+    <string>SilicIA</string>
+  </array>
 </dict>
 </plist>
