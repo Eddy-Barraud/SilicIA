@@ -7,6 +7,7 @@
 
 import Foundation
 import UniformTypeIdentifiers
+import os
 #if os(macOS)
 import AppKit
 typealias PlatformShareViewController = NSViewController
@@ -14,6 +15,16 @@ typealias PlatformShareViewController = NSViewController
 import UIKit
 typealias PlatformShareViewController = UIViewController
 #endif
+
+/// Unified-log channel that the share extension writes diagnostic events
+/// into. Inspect with Console.app on a connected Mac: filter the device
+/// for subsystem `fr.trevalim.silicia.shareextension`. This is the only
+/// debugging window for share-extension issues since they don't surface
+/// in Xcode's debugger without explicit attach.
+private let shareLog = Logger(
+    subsystem: "fr.trevalim.silicia.shareextension",
+    category: "ShareViewController"
+)
 
 final class ShareViewController: PlatformShareViewController {
     private static let appGroupIdentifier = "group.fr.trevalim.silicia.shared"
@@ -49,26 +60,35 @@ final class ShareViewController: PlatformShareViewController {
     private func processSharedItems() async {
         guard let extensionItems = extensionContext?.inputItems as? [NSExtensionItem],
               !extensionItems.isEmpty else {
+            shareLog.error("processSharedItems: no input items")
             return
         }
+        shareLog.info("processSharedItems started with \(extensionItems.count, privacy: .public) item(s)")
 
         var sharedWebURLs: [String] = []
         var sharedPDFFileNames: [String] = []
         var sharedImageFileNames: [String] = []
 
-        for item in extensionItems {
+        for (itemIndex, item) in extensionItems.enumerated() {
             let providers = item.attachments ?? []
-            for provider in providers {
+            shareLog.info("item[\(itemIndex, privacy: .public)] has \(providers.count, privacy: .public) attachment(s)")
+            for (providerIndex, provider) in providers.enumerated() {
+                let types = provider.registeredTypeIdentifiers.joined(separator: ", ")
+                shareLog.info("  provider[\(providerIndex, privacy: .public)] types=[\(types, privacy: .public)]")
+
                 if let sharedURL = await loadSharedWebURL(from: provider) {
+                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → web URL")
                     sharedWebURLs.append(sharedURL.absoluteString)
                 }
 
                 if let storedPDFName = await persistSharedPDF(from: provider) {
+                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → PDF: \(storedPDFName, privacy: .public)")
                     sharedPDFFileNames.append(storedPDFName)
                     continue
                 }
 
                 if let storedImageName = await persistSharedImage(from: provider) {
+                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → image: \(storedImageName, privacy: .public)")
                     sharedImageFileNames.append(storedImageName)
                 }
             }
@@ -77,9 +97,11 @@ final class ShareViewController: PlatformShareViewController {
         let deduplicatedWebURLs = deduplicated(sharedWebURLs)
         let deduplicatedPDFNames = deduplicated(sharedPDFFileNames)
         let deduplicatedImageNames = deduplicated(sharedImageFileNames)
+        shareLog.info("dedup counts: urls=\(deduplicatedWebURLs.count, privacy: .public) pdfs=\(deduplicatedPDFNames.count, privacy: .public) images=\(deduplicatedImageNames.count, privacy: .public)")
         guard !deduplicatedWebURLs.isEmpty
             || !deduplicatedPDFNames.isEmpty
             || !deduplicatedImageNames.isEmpty else {
+            shareLog.error("processSharedItems: nothing forwardable extracted — returning without opening app")
             return
         }
 
@@ -88,10 +110,13 @@ final class ShareViewController: PlatformShareViewController {
             sharedPDFFileNames: deduplicatedPDFNames,
             sharedImageFileNames: deduplicatedImageNames
         ) else {
+            shareLog.error("processSharedItems: buildAppURL returned nil")
             return
         }
+        shareLog.info("opening containing app with URL: \(appURL.absoluteString, privacy: .public)")
 
-        _ = await openContainingApp(with: appURL)
+        let opened = await openContainingApp(with: appURL)
+        shareLog.info("openContainingApp returned \(opened, privacy: .public)")
     }
 
     private func loadSharedWebURL(from provider: NSItemProvider) async -> URL? {
@@ -141,27 +166,75 @@ final class ShareViewController: PlatformShareViewController {
     }
 
     private func persistSharedImage(from provider: NSItemProvider) async -> String? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+        guard provider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
+              || provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else {
+            return nil
+        }
+
+        // Walk the provider's specific registered UTIs (e.g. public.heic,
+        // public.jpeg, public.png) first — these often work where the
+        // generic `public.image` parent UTI returns nil. Photos.app on iOS
+        // is the most common case.
+        let imageUTIs = provider.registeredTypeIdentifiers.filter { id in
+            guard let utType = UTType(id) else { return false }
+            return utType.conforms(to: .image)
+        }
+        let candidates = imageUTIs.isEmpty ? [UTType.image.identifier] : imageUTIs
+        shareLog.info("persistSharedImage: candidate UTIs=[\(candidates.joined(separator: ", "), privacy: .public)]")
+
+        for typeID in candidates {
+            // Pass 1: file representation (cheaper for large files, copies inside the closure).
             if let stored = await persistFileRepresentation(
                 from: provider,
-                typeIdentifier: UTType.image.identifier,
+                typeIdentifier: typeID,
                 allowedExtensions: Self.imageFileExtensions,
-                defaultExtension: Self.defaultImageExtension,
+                defaultExtension: Self.fileExtension(for: typeID) ?? Self.defaultImageExtension,
                 fallbackName: "shared.\(Self.defaultImageExtension)",
                 preferredFileName: provider.suggestedName
             ) {
+                shareLog.info("persistSharedImage: file representation succeeded for \(typeID, privacy: .public)")
                 return stored
             }
+            shareLog.info("persistSharedImage: file representation returned nil for \(typeID, privacy: .public) — trying data representation")
+
+            // Pass 2: raw data fallback. Some Photos.app shares only expose
+            // `loadDataRepresentation` reliably (especially HEIC originals).
+            if let stored = await persistDataRepresentation(
+                from: provider,
+                typeIdentifier: typeID,
+                allowedExtensions: Self.imageFileExtensions,
+                defaultExtension: Self.fileExtension(for: typeID) ?? Self.defaultImageExtension,
+                fallbackName: "shared.\(Self.defaultImageExtension)",
+                preferredFileName: provider.suggestedName
+            ) {
+                shareLog.info("persistSharedImage: data representation succeeded for \(typeID, privacy: .public)")
+                return stored
+            }
+            shareLog.info("persistSharedImage: data representation returned nil for \(typeID, privacy: .public)")
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
            let item = await loadItem(from: provider, typeIdentifier: UTType.fileURL.identifier),
            let sourceURL = extractURL(from: item),
            Self.imageFileExtensions.contains(sourceURL.pathExtension.lowercased()) {
+            shareLog.info("persistSharedImage: file-URL fallback for \(sourceURL.lastPathComponent, privacy: .public)")
             return persistImage(at: sourceURL, preferredFileName: provider.suggestedName ?? sourceURL.lastPathComponent)
         }
 
+        shareLog.error("persistSharedImage: all paths exhausted, returning nil")
         return nil
+    }
+
+    /// Maps a UTType identifier (e.g. `public.heic`, `public.jpeg`) to the
+    /// file extension we should save it under, so the host app's image
+    /// pipeline can recognise it. Falls back to nil for types it doesn't
+    /// know about — caller substitutes a default.
+    private static func fileExtension(for typeID: String) -> String? {
+        guard let utType = UTType(typeID),
+              let ext = utType.preferredFilenameExtension else {
+            return nil
+        }
+        return imageFileExtensions.contains(ext.lowercased()) ? ext.lowercased() : nil
     }
 
     /// Loads a file representation from the provider AND copies it to the
@@ -179,7 +252,10 @@ final class ShareViewController: PlatformShareViewController {
         preferredFileName: String?
     ) async -> String? {
         await withCheckedContinuation { continuation in
-            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+            provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+                if let error {
+                    shareLog.error("loadFileRepresentation[\(typeIdentifier, privacy: .public)] error: \(error.localizedDescription, privacy: .public)")
+                }
                 guard let url else {
                     continuation.resume(returning: nil)
                     return
@@ -192,6 +268,53 @@ final class ShareViewController: PlatformShareViewController {
                     fallbackName: fallbackName
                 )
                 continuation.resume(returning: stored)
+            }
+        }
+    }
+
+    /// Loads the provider's bytes for `typeIdentifier` as raw `Data` and
+    /// writes them to the app-group inbox. Used as a fallback when
+    /// `persistFileRepresentation` returns nil — happens in practice for
+    /// some Photos.app HEIC shares on iOS where only the data
+    /// representation is exposed.
+    private func persistDataRepresentation(
+        from provider: NSItemProvider,
+        typeIdentifier: String,
+        allowedExtensions: Set<String>,
+        defaultExtension: String,
+        fallbackName: String,
+        preferredFileName: String?
+    ) async -> String? {
+        await withCheckedContinuation { continuation in
+            provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
+                if let error {
+                    shareLog.error("loadDataRepresentation[\(typeIdentifier, privacy: .public)] error: \(error.localizedDescription, privacy: .public)")
+                }
+                guard let data, !data.isEmpty,
+                      let inbox = self.sharedInboxDirectoryURL() else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+
+                do {
+                    try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+                    // Synthesise a stand-in source URL purely so that
+                    // `uniqueInboxDestinationURL` can derive a base name.
+                    let synthSource = URL(fileURLWithPath: preferredFileName ?? fallbackName)
+                    let destination = self.uniqueInboxDestinationURL(
+                        in: inbox,
+                        sourceURL: synthSource,
+                        preferredFileName: preferredFileName,
+                        allowedExtensions: allowedExtensions,
+                        defaultExtension: defaultExtension,
+                        fallbackName: fallbackName
+                    )
+                    try data.write(to: destination, options: .atomic)
+                    continuation.resume(returning: destination.lastPathComponent)
+                } catch {
+                    shareLog.error("persistDataRepresentation write error: \(error.localizedDescription, privacy: .public)")
+                    continuation.resume(returning: nil)
+                }
             }
         }
     }
@@ -381,14 +504,38 @@ final class ShareViewController: PlatformShareViewController {
                 continuation.resume(returning: success)
             })
         }
+        shareLog.info("extensionContext.open success=\(didOpenViaExtensionContext, privacy: .public)")
+
+        if didOpenViaExtensionContext { return true }
 
         #if os(macOS)
-        if !didOpenViaExtensionContext {
-            return NSWorkspace.shared.open(url)
+        return NSWorkspace.shared.open(url)
+        #else
+        // iOS: `extensionContext.open` is known to flake (often returns
+        // false in share-sheet contexts even though the URL is openable).
+        // Walk the responder chain to find an object that responds to
+        // `openURL:` — a long-standing workaround that still works on
+        // iOS 26. Done on the main actor since UIKit is main-isolated.
+        return await MainActor.run {
+            var responder: UIResponder? = self
+            while let current = responder {
+                if let app = current as? UIApplication {
+                    app.open(url, options: [:], completionHandler: nil)
+                    shareLog.info("opened via UIApplication.open (responder-chain)")
+                    return true
+                }
+                let selector = NSSelectorFromString("openURL:")
+                if current.responds(to: selector) {
+                    _ = current.perform(selector, with: url)
+                    shareLog.info("opened via responder-chain perform openURL:")
+                    return true
+                }
+                responder = current.next
+            }
+            shareLog.error("responder-chain fallback failed: no openURL: target found")
+            return false
         }
         #endif
-
-        return didOpenViaExtensionContext
     }
 
     private func deduplicated(_ values: [String]) -> [String] {
