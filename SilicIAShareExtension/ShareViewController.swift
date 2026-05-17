@@ -18,13 +18,82 @@ typealias PlatformShareViewController = UIViewController
 
 /// Unified-log channel that the share extension writes diagnostic events
 /// into. Inspect with Console.app on a connected Mac: filter the device
-/// for subsystem `fr.trevalim.silicia.shareextension`. This is the only
-/// debugging window for share-extension issues since they don't surface
-/// in Xcode's debugger without explicit attach.
-private let shareLog = Logger(
+/// for subsystem `fr.trevalim.silicia.shareextension`.
+private let osLog = Logger(
     subsystem: "fr.trevalim.silicia.shareextension",
     category: "ShareViewController"
 )
+
+/// Tee logger that writes to both the unified log AND a plain-text file
+/// inside the app-group container so users without Console.app access
+/// can still inspect what happened. File path:
+/// macOS: `~/Library/Group Containers/group.fr.trevalim.silicia.shared/share-debug.log`
+/// iOS: surfaced inside the main app's app-group dir; open via Files-app
+/// if the container is exposed.
+private enum ShareLog {
+    private static let fileName = "share-debug.log"
+    private static let appGroupID = "group.fr.trevalim.silicia.shared"
+    private static let maxLogBytes = 64 * 1024
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static var logFileURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
+            .appendingPathComponent(fileName, isDirectory: false)
+    }
+
+    static func info(_ message: String) {
+        osLog.info("\(message, privacy: .public)")
+        appendLine(prefix: "INFO ", message)
+    }
+
+    static func error(_ message: String) {
+        osLog.error("\(message, privacy: .public)")
+        appendLine(prefix: "ERROR", message)
+    }
+
+    private static func appendLine(prefix: String, _ message: String) {
+        guard let url = logFileURL else { return }
+        let line = "\(isoFormatter.string(from: Date())) \(prefix) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        rotateIfNeeded(at: url)
+        if FileManager.default.fileExists(atPath: url.path),
+           let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(data)
+            try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    private static func rotateIfNeeded(at url: URL) {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
+        if size > maxLogBytes {
+            // Truncate to the last half of the file, prefixed with a rotation marker.
+            if let handle = try? FileHandle(forReadingFrom: url) {
+                handle.seek(toFileOffset: UInt64(size / 2))
+                let tail = handle.readDataToEndOfFile()
+                try? handle.close()
+                var rotated = "--- log rotated \(isoFormatter.string(from: Date())) ---\n".data(using: .utf8) ?? Data()
+                rotated.append(tail)
+                try? rotated.write(to: url)
+            }
+        }
+    }
+}
+
+/// Adapter that forwards calls from existing code to `ShareLog`.
+private struct ShareLogForwarder {
+    func info(_ msg: String) { ShareLog.info(msg) }
+    func error(_ msg: String) { ShareLog.error(msg) }
+}
+private let shareLog = ShareLogForwarder()
 
 final class ShareViewController: PlatformShareViewController {
     private static let appGroupIdentifier = "group.fr.trevalim.silicia.shared"
@@ -63,7 +132,7 @@ final class ShareViewController: PlatformShareViewController {
             shareLog.error("processSharedItems: no input items")
             return
         }
-        shareLog.info("processSharedItems started with \(extensionItems.count, privacy: .public) item(s)")
+        shareLog.info("processSharedItems started with \(extensionItems.count) item(s)")
 
         var sharedWebURLs: [String] = []
         var sharedPDFFileNames: [String] = []
@@ -71,24 +140,24 @@ final class ShareViewController: PlatformShareViewController {
 
         for (itemIndex, item) in extensionItems.enumerated() {
             let providers = item.attachments ?? []
-            shareLog.info("item[\(itemIndex, privacy: .public)] has \(providers.count, privacy: .public) attachment(s)")
+            shareLog.info("item[\(itemIndex)] has \(providers.count) attachment(s)")
             for (providerIndex, provider) in providers.enumerated() {
                 let types = provider.registeredTypeIdentifiers.joined(separator: ", ")
-                shareLog.info("  provider[\(providerIndex, privacy: .public)] types=[\(types, privacy: .public)]")
+                shareLog.info("  provider[\(providerIndex)] types=[\(types)]")
 
                 if let sharedURL = await loadSharedWebURL(from: provider) {
-                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → web URL")
+                    shareLog.info("  provider[\(providerIndex)] → web URL")
                     sharedWebURLs.append(sharedURL.absoluteString)
                 }
 
                 if let storedPDFName = await persistSharedPDF(from: provider) {
-                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → PDF: \(storedPDFName, privacy: .public)")
+                    shareLog.info("  provider[\(providerIndex)] → PDF: \(storedPDFName)")
                     sharedPDFFileNames.append(storedPDFName)
                     continue
                 }
 
                 if let storedImageName = await persistSharedImage(from: provider) {
-                    shareLog.info("  provider[\(providerIndex, privacy: .public)] → image: \(storedImageName, privacy: .public)")
+                    shareLog.info("  provider[\(providerIndex)] → image: \(storedImageName)")
                     sharedImageFileNames.append(storedImageName)
                 }
             }
@@ -97,7 +166,7 @@ final class ShareViewController: PlatformShareViewController {
         let deduplicatedWebURLs = deduplicated(sharedWebURLs)
         let deduplicatedPDFNames = deduplicated(sharedPDFFileNames)
         let deduplicatedImageNames = deduplicated(sharedImageFileNames)
-        shareLog.info("dedup counts: urls=\(deduplicatedWebURLs.count, privacy: .public) pdfs=\(deduplicatedPDFNames.count, privacy: .public) images=\(deduplicatedImageNames.count, privacy: .public)")
+        shareLog.info("dedup counts: urls=\(deduplicatedWebURLs.count) pdfs=\(deduplicatedPDFNames.count) images=\(deduplicatedImageNames.count)")
         guard !deduplicatedWebURLs.isEmpty
             || !deduplicatedPDFNames.isEmpty
             || !deduplicatedImageNames.isEmpty else {
@@ -113,10 +182,10 @@ final class ShareViewController: PlatformShareViewController {
             shareLog.error("processSharedItems: buildAppURL returned nil")
             return
         }
-        shareLog.info("opening containing app with URL: \(appURL.absoluteString, privacy: .public)")
+        shareLog.info("opening containing app with URL: \(appURL.absoluteString)")
 
         let opened = await openContainingApp(with: appURL)
-        shareLog.info("openContainingApp returned \(opened, privacy: .public)")
+        shareLog.info("openContainingApp returned \(opened)")
     }
 
     private func loadSharedWebURL(from provider: NSItemProvider) async -> URL? {
@@ -180,7 +249,7 @@ final class ShareViewController: PlatformShareViewController {
             return utType.conforms(to: .image)
         }
         let candidates = imageUTIs.isEmpty ? [UTType.image.identifier] : imageUTIs
-        shareLog.info("persistSharedImage: candidate UTIs=[\(candidates.joined(separator: ", "), privacy: .public)]")
+        shareLog.info("persistSharedImage: candidate UTIs=[\(candidates.joined(separator: ", "))]")
 
         for typeID in candidates {
             // Pass 1: file representation (cheaper for large files, copies inside the closure).
@@ -192,10 +261,10 @@ final class ShareViewController: PlatformShareViewController {
                 fallbackName: "shared.\(Self.defaultImageExtension)",
                 preferredFileName: provider.suggestedName
             ) {
-                shareLog.info("persistSharedImage: file representation succeeded for \(typeID, privacy: .public)")
+                shareLog.info("persistSharedImage: file representation succeeded for \(typeID)")
                 return stored
             }
-            shareLog.info("persistSharedImage: file representation returned nil for \(typeID, privacy: .public) — trying data representation")
+            shareLog.info("persistSharedImage: file representation returned nil for \(typeID) — trying data representation")
 
             // Pass 2: raw data fallback. Some Photos.app shares only expose
             // `loadDataRepresentation` reliably (especially HEIC originals).
@@ -207,17 +276,17 @@ final class ShareViewController: PlatformShareViewController {
                 fallbackName: "shared.\(Self.defaultImageExtension)",
                 preferredFileName: provider.suggestedName
             ) {
-                shareLog.info("persistSharedImage: data representation succeeded for \(typeID, privacy: .public)")
+                shareLog.info("persistSharedImage: data representation succeeded for \(typeID)")
                 return stored
             }
-            shareLog.info("persistSharedImage: data representation returned nil for \(typeID, privacy: .public)")
+            shareLog.info("persistSharedImage: data representation returned nil for \(typeID)")
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
            let item = await loadItem(from: provider, typeIdentifier: UTType.fileURL.identifier),
            let sourceURL = extractURL(from: item),
            Self.imageFileExtensions.contains(sourceURL.pathExtension.lowercased()) {
-            shareLog.info("persistSharedImage: file-URL fallback for \(sourceURL.lastPathComponent, privacy: .public)")
+            shareLog.info("persistSharedImage: file-URL fallback for \(sourceURL.lastPathComponent)")
             return persistImage(at: sourceURL, preferredFileName: provider.suggestedName ?? sourceURL.lastPathComponent)
         }
 
@@ -254,7 +323,7 @@ final class ShareViewController: PlatformShareViewController {
         await withCheckedContinuation { continuation in
             provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
                 if let error {
-                    shareLog.error("loadFileRepresentation[\(typeIdentifier, privacy: .public)] error: \(error.localizedDescription, privacy: .public)")
+                    shareLog.error("loadFileRepresentation[\(typeIdentifier)] error: \(error.localizedDescription)")
                 }
                 guard let url else {
                     continuation.resume(returning: nil)
@@ -288,7 +357,7 @@ final class ShareViewController: PlatformShareViewController {
         await withCheckedContinuation { continuation in
             provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, error in
                 if let error {
-                    shareLog.error("loadDataRepresentation[\(typeIdentifier, privacy: .public)] error: \(error.localizedDescription, privacy: .public)")
+                    shareLog.error("loadDataRepresentation[\(typeIdentifier)] error: \(error.localizedDescription)")
                 }
                 guard let data, !data.isEmpty,
                       let inbox = self.sharedInboxDirectoryURL() else {
@@ -312,7 +381,7 @@ final class ShareViewController: PlatformShareViewController {
                     try data.write(to: destination, options: .atomic)
                     continuation.resume(returning: destination.lastPathComponent)
                 } catch {
-                    shareLog.error("persistDataRepresentation write error: \(error.localizedDescription, privacy: .public)")
+                    shareLog.error("persistDataRepresentation write error: \(error.localizedDescription)")
                     continuation.resume(returning: nil)
                 }
             }
@@ -504,7 +573,7 @@ final class ShareViewController: PlatformShareViewController {
                 continuation.resume(returning: success)
             })
         }
-        shareLog.info("extensionContext.open success=\(didOpenViaExtensionContext, privacy: .public)")
+        shareLog.info("extensionContext.open success=\(didOpenViaExtensionContext)")
 
         if didOpenViaExtensionContext { return true }
 
