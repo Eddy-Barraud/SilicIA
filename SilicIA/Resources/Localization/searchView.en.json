@@ -7,6 +7,7 @@
   "search.welcome.title": "Search the Web Efficiently",
   "search.welcome.subtitle": "Get concise AI-powered summaries of web results\nwithout draining your battery",
   "search.results.empty.title": "No results found",
+  "search.results.scoring": "Ranking sources by relevance…",
   "search.results.empty.subtitle": "Try a different search query",
   "search.loading.searching": "Searching the web (DuckDuckGo + Wikipedia)...",
   "search.loading.firstGuessGenerating": "Generating quick intuition...",

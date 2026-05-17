@@ -39,6 +39,14 @@ struct SearchView: View {
     /// Missing keys are treated as 0% by the card view.
     @State private var matchingScoresByURL: [String: Double] = [:]
 
+    /// Whether the result cards should be rendered. We hide them until
+    /// RAG scoring finishes so users see the cards in their final, sorted
+    /// order — except in no-AI mode, where scoring never runs and the raw
+    /// web-search order is the best we have.
+    private var shouldDisplaySearchCards: Bool {
+        isNoAIMode || !matchingScoresByURL.isEmpty
+    }
+
     /// `searchResults` sorted by descending RAG match score, with stable
     /// ordering on ties (preserves the original web-search rank).
     /// Returns the original list unchanged while `matchingScoresByURL` is
@@ -389,22 +397,34 @@ struct SearchView: View {
                     Divider()
                 }
 
-                // Search results — once the model answer completes and
-                // `matchingScoresByURL` is populated, reorder so the highest-
-                // scoring sources surface first. Stable on ties (preserves
-                // the original web-search ordering).
-                ForEach(sortedSearchResults) { result in
-                    SearchResultCard(
-                        result: result,
-                        matchingScore: matchingScoresByURL[result.url] ?? 0,
-                        accessibilityLanguage: settings.language,
-                        isWebSummariesEnabled: settings.isWebSummariesEnabled,
-                        onRequestSummary: { tapped in
-                            presentWebPageSummary(for: tapped)
-                        }
-                    )
+                // Search results — held back until RAG match-scoring is
+                // finished, then shown sorted by descending score (stable
+                // on ties). In no-AI mode, scoring is skipped entirely, so
+                // we surface the raw web-search ordering immediately.
+                if shouldDisplaySearchCards {
+                    ForEach(sortedSearchResults) { result in
+                        SearchResultCard(
+                            result: result,
+                            matchingScore: matchingScoresByURL[result.url] ?? 0,
+                            accessibilityLanguage: settings.language,
+                            isWebSummariesEnabled: settings.isWebSummariesEnabled,
+                            onRequestSummary: { tapped in
+                                presentWebPageSummary(for: tapped)
+                            }
+                        )
+                    }
+                    .animation(.easeInOut(duration: 0.35), value: matchingScoresByURL)
+                } else if !searchResults.isEmpty {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(L.t("search.results.scoring", language: settings.language))
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
                 }
-                .animation(.easeInOut(duration: 0.35), value: matchingScoresByURL)
             }
             .padding()
         }
