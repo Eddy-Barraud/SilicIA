@@ -24,16 +24,26 @@ private let osLog = Logger(
     category: "ShareViewController"
 )
 
-/// Tee logger that writes to both the unified log AND a plain-text file
-/// inside the app-group container so users without Console.app access
-/// can still inspect what happened. File path:
-/// macOS: `~/Library/Group Containers/group.fr.trevalim.silicia.shared/share-debug.log`
-/// iOS: surfaced inside the main app's app-group dir; open via Files-app
-/// if the container is exposed.
+/// Plain-text logger written via a single atomic `Data.write` so it
+/// doesn't depend on `FileHandle` (which has subtle sandbox quirks on
+/// macOS share extensions when writing to the group-container root) or
+/// on log-file rotation. Each share-extension invocation overwrites the
+/// previous session's log; the file lives inside `IncomingSharedFiles`
+/// because that subdirectory is known to be writable from the extension.
+///
+/// File path (both macOS and iOS):
+///   `<app-group container>/IncomingSharedFiles/share-debug.log`
 private enum ShareLog {
     private static let fileName = "share-debug.log"
     private static let appGroupID = "group.fr.trevalim.silicia.shared"
-    private static let maxLogBytes = 64 * 1024
+    private static let inboxDirectoryName = "IncomingSharedFiles"
+
+    /// Process-local buffer of every log line in this share session.
+    /// Flushed to disk after every append — keeps the file in sync with
+    /// in-memory state even if the extension is terminated mid-run.
+    nonisolated(unsafe) private static var sessionLines: [String] = []
+    private static let lock = NSLock()
+
     private static let isoFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -41,50 +51,36 @@ private enum ShareLog {
     }()
 
     private static var logFileURL: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID)?
-            .appendingPathComponent(fileName, isDirectory: false)
+        guard let container = FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: appGroupID) else {
+            return nil
+        }
+        let inbox = container.appendingPathComponent(inboxDirectoryName, isDirectory: true)
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        return inbox.appendingPathComponent(fileName, isDirectory: false)
     }
 
     static func info(_ message: String) {
         osLog.info("\(message, privacy: .public)")
-        appendLine(prefix: "INFO ", message)
+        append("INFO ", message)
     }
 
     static func error(_ message: String) {
         osLog.error("\(message, privacy: .public)")
-        appendLine(prefix: "ERROR", message)
+        append("ERROR", message)
     }
 
-    private static func appendLine(prefix: String, _ message: String) {
+    private static func append(_ level: String, _ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        sessionLines.append("\(isoFormatter.string(from: Date())) \(level) \(message)")
+        flush()
+    }
+
+    private static func flush() {
         guard let url = logFileURL else { return }
-        let line = "\(isoFormatter.string(from: Date())) \(prefix) \(message)\n"
-        guard let data = line.data(using: .utf8) else { return }
-        rotateIfNeeded(at: url)
-        if FileManager.default.fileExists(atPath: url.path),
-           let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            try? handle.close()
-        } else {
-            try? data.write(to: url)
-        }
-    }
-
-    private static func rotateIfNeeded(at url: URL) {
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attrs?[.size] as? NSNumber)?.intValue ?? 0
-        if size > maxLogBytes {
-            // Truncate to the last half of the file, prefixed with a rotation marker.
-            if let handle = try? FileHandle(forReadingFrom: url) {
-                handle.seek(toFileOffset: UInt64(size / 2))
-                let tail = handle.readDataToEndOfFile()
-                try? handle.close()
-                var rotated = "--- log rotated \(isoFormatter.string(from: Date())) ---\n".data(using: .utf8) ?? Data()
-                rotated.append(tail)
-                try? rotated.write(to: url)
-            }
-        }
+        let body = sessionLines.joined(separator: "\n") + "\n"
+        try? body.data(using: .utf8)?.write(to: url, options: .atomic)
     }
 }
 
@@ -107,21 +103,28 @@ final class ShareViewController: PlatformShareViewController {
 #if os(macOS)
     override func viewDidAppear() {
         super.viewDidAppear()
+        shareLog.info("viewDidAppear (macOS)")
         launchShareProcessingIfNeeded()
     }
 #else
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        shareLog.info("viewDidAppear (iOS)")
         launchShareProcessingIfNeeded()
     }
 #endif
 
     private func launchShareProcessingIfNeeded() {
-        guard !didProcessInput else { return }
+        guard !didProcessInput else {
+            shareLog.info("launchShareProcessingIfNeeded: already processed; skipping")
+            return
+        }
         didProcessInput = true
+        shareLog.info("launchShareProcessingIfNeeded: scheduling processSharedItems task")
 
         Task {
             await processSharedItems()
+            shareLog.info("processSharedItems completed; calling completeRequest")
             extensionContext?.completeRequest(returningItems: nil)
         }
     }
