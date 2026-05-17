@@ -43,10 +43,6 @@ struct SilicIAApp: App {
             )
                 .onOpenURL { url in
                     handleIncomingURL(url)
-                    // The URL handler might have failed to parse names (e.g.
-                    // share-extension URL got truncated); always sweep the
-                    // app-group inbox as a safety net.
-                    drainSharedInbox()
                 }
 #if os(macOS)
                 .onAppear {
@@ -54,7 +50,6 @@ struct SilicIAApp: App {
                         for url in urls {
                             handleIncomingURL(url)
                         }
-                        drainSharedInbox()
                     }
                     let pending = appDelegate.drainPendingURLs()
                     if !pending.isEmpty {
@@ -62,15 +57,6 @@ struct SilicIAApp: App {
                             handleIncomingURL(url)
                         }
                     }
-                    // Sweep inbox on every cold-start so files dropped while
-                    // the main app was closed get picked up.
-                    drainSharedInbox()
-                }
-#else
-                .onAppear {
-                    // iOS: same idea — pick up anything the share extension
-                    // dropped, in case the URL deep-link didn't fire.
-                    drainSharedInbox()
                 }
 #endif
         }
@@ -205,53 +191,6 @@ struct SilicIAApp: App {
         return imported
     }
 
-    /// Scans the app-group inbox for any leftover files dropped there by the
-    /// share extension and imports them. Resilient fallback for cases where
-    /// the share-extension URL scheme failed to deep-link us with explicit
-    /// filenames in the query string (a known issue on iOS share sheets).
-    /// Anything found here is treated as "user-shared" and surfaces in
-    /// `sharedPDFs` / `sharedImages` exactly as if it had come through the
-    /// regular URL-scheme path.
-    @discardableResult
-    private func drainSharedInbox() -> Bool {
-        guard let groupContainer = FileManager.default.containerURL(
-            forSecurityApplicationGroupIdentifier: Self.sharedAppGroupIdentifier
-        ) else { return false }
-
-        let inbox = groupContainer.appendingPathComponent(Self.sharedInboxDirectoryName, isDirectory: true)
-        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: inbox.path),
-              !contents.isEmpty else {
-            return false
-        }
-
-        var newPDFs: [URL] = []
-        var newImages: [URL] = []
-        for fileName in contents {
-            // Leave the share-extension diagnostic files in place so the
-            // user can inspect them.
-            if fileName == "share-debug.log" || fileName == "share-extension-boot.txt" {
-                continue
-            }
-            let ext = URL(fileURLWithPath: fileName).pathExtension.lowercased()
-            let sourceURL = inbox.appendingPathComponent(fileName)
-            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
-            if ext == "pdf" {
-                if let persisted = DroppedPDFStore.persist(sourceURL, preferredFileName: fileName) {
-                    newPDFs.append(persisted)
-                    try? FileManager.default.removeItem(at: sourceURL)
-                }
-            } else if Self.imageFileExtensions.contains(ext) {
-                if let persisted = DroppedImageStore.persist(sourceURL, preferredFileName: fileName) {
-                    newImages.append(persisted)
-                    try? FileManager.default.removeItem(at: sourceURL)
-                }
-            }
-        }
-
-        if !newPDFs.isEmpty { sharedPDFs = newPDFs }
-        if !newImages.isEmpty { sharedImages = newImages }
-        return !newPDFs.isEmpty || !newImages.isEmpty
-    }
 }
 
 #if os(macOS)
