@@ -57,6 +57,54 @@ struct SearchView: View {
         isNoAIMode || !matchingScoresByURL.isEmpty
     }
 
+    /// Filters raw per-URL relevance scores to only those URLs actually
+    /// displayed as cards, renormalizes so the values sum to 100, then
+    /// applies largest-remainder (Hamilton) rounding so the integer values
+    /// shown in the `MatchScoreBadge`s also sum to exactly 100 — naive
+    /// `round()` would let three 33.33s collapse to 99% or six 16.67s
+    /// expand to 102%.
+    private static func rebalanceScores(
+        _ raw: [String: Double],
+        displayedURLs: Set<String>
+    ) -> [String: Double] {
+        let filtered = raw.filter { displayedURLs.contains($0.key) }
+        let total = filtered.values.reduce(0, +)
+        guard total > 0 else { return [:] }
+
+        let scaled = filtered.mapValues { ($0 / total) * 100 }
+
+        // Largest-remainder allocation: floor each value, then distribute
+        // the leftover units to the entries with the largest fractional
+        // remainders. Ties broken by URL for determinism.
+        var floors: [String: Int] = [:]
+        var remainders: [(url: String, frac: Double)] = []
+        for (url, value) in scaled {
+            let f = floor(value)
+            floors[url] = Int(f)
+            remainders.append((url, value - f))
+        }
+        var leftover = 100 - floors.values.reduce(0, +)
+        remainders.sort { lhs, rhs in
+            lhs.frac != rhs.frac ? lhs.frac > rhs.frac : lhs.url < rhs.url
+        }
+        var i = 0
+        while leftover > 0 && i < remainders.count {
+            floors[remainders[i].url, default: 0] += 1
+            leftover -= 1
+            i += 1
+        }
+        // Negative leftover (sum exceeds 100 from FP drift) — trim smallest.
+        if leftover < 0 {
+            for entry in remainders.reversed() where leftover < 0 {
+                if let v = floors[entry.url], v > 0 {
+                    floors[entry.url] = v - 1
+                    leftover += 1
+                }
+            }
+        }
+        return floors.mapValues { Double($0) }
+    }
+
     /// `searchResults` sorted by descending RAG match score, with stable
     /// ordering on ties (preserves the original web-search rank).
     /// Returns the original list unchanged while `matchingScoresByURL` is
@@ -1373,7 +1421,18 @@ struct SearchView: View {
             queries: queries,
             onMatchingScores: { scores in
                 Task { @MainActor in
-                    matchingScoresByURL = scores
+                    // AIService chunks the full overfetched `fetchedResults`
+                    // array — wider than the displayed `searchResults` (capped
+                    // at `resultsCount`). Without filtering, the overfetched
+                    // URLs eat percentage points that never reach a visible
+                    // card, so badges add up to less than 100%. Restrict to
+                    // displayed URLs and renormalize so the visible total is
+                    // always 100%, with largest-remainder rounding so the
+                    // integer badges sum to exactly 100% too.
+                    matchingScoresByURL = Self.rebalanceScores(
+                        scores,
+                        displayedURLs: Set(searchResults.map(\.url))
+                    )
                 }
             }
         )
