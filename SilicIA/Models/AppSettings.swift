@@ -26,9 +26,9 @@ enum ModelLanguage: String, CaseIterable, Codable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 6
     var maxWikipediaResults: Int = 2
-    var maxResponseTokens: Int = 1500
+    var maxResponseTokens: Int = 500
     var temperature: Double = 0.4
-    var maxContextTokens: Int = 2400
+    var maxContextTokens: Int = 3400
     var isFirstGuessEnabled: Bool = true
     var isWebSummariesEnabled: Bool = false
     var useDuckDuckGo: Bool = true
