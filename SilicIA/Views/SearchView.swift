@@ -343,22 +343,20 @@ struct SearchView: View {
         let isInputEmpty = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let isPrimaryDisabled = isInputEmpty || searchService.isSearching
         return VStack(spacing: 10) {
-            // Primary search field with an in-field send button — the
-            // canonical pattern for LLM-app search bars (Claude, Gemini)
-            // where the most common action is one tap away.
-            HStack(spacing: 8) {
+            // Growing text field — expands vertically as the query grows.
+            // The send button lives in the action row below, so there's no
+            // need for Return/Enter to submit; on iOS the keyboard Search
+            // button still fires `.onSubmit` via `.submitLabel(.search)`.
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
+                    .padding(.top, 3)
 
-                // Single-line so Return / Enter fires `.onSubmit` on both
-                // macOS and iOS. A multi-line `axis: .vertical` field
-                // swallows the key as a newline and never submits, which
-                // is the wrong default for a search input — search bars
-                // are universally one-line.
-                TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery)
+                TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.body)
+                    .lineLimit(1...6)
                     .focused($isSearchFieldFocused)
                     .submitLabel(.search)
                     #if canImport(UIKit)
@@ -375,9 +373,48 @@ struct SearchView: View {
                             .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .padding(.top, 3)
                     .help(L.t("common.clear", language: settings.language))
                     .accessibilityLabel(L.t("common.clear", language: settings.language))
                 }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(controlBackgroundColor)
+            .cornerRadius(12)
+
+            if let errorMessage,
+               !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            // Action row: Chat + Extensive left-aligned, send arrow right.
+            HStack(spacing: 8) {
+                Button(action: handleChatButtonTap) {
+                    Label(chatButtonTitle, systemImage: "bubble.left.and.bubble.right")
+                        .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isChatButtonDisabled)
+                .accessibilityLabel(chatButtonTitle)
+
+                Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
+                    Label(
+                        L.t("search.button.deep", language: settings.language),
+                        systemImage: "sparkle.magnifyingglass"
+                    )
+                    .font(.subheadline)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(isPrimaryDisabled)
+                .accessibilityLabel(L.t("search.button.deep", language: settings.language))
+
+                Spacer()
 
                 Button(action: { performSearch(generationProfile: .fast) }) {
                     Image(systemName: "arrow.up.circle.fill")
@@ -393,57 +430,10 @@ struct SearchView: View {
                 .help(L.t("search.button.go", language: settings.language))
                 .accessibilityLabel(L.t("search.button.go", language: settings.language))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4)
-            .background(controlBackgroundColor)
-            .cornerRadius(12)
-
-            if let errorMessage,
-               !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            // Secondary actions row — visually subordinate to the primary
-            // input above. "Deep" stays a peer of "Search" (it just trades
-            // latency for context depth), "Chat" only activates once
-            // there's something worth chatting about.
-            HStack(spacing: 8) {
-                Button(action: handleChatButtonTap) {
-                    Label(
-                        chatButtonTitle,
-                        systemImage: "bubble.left.and.bubble.right"
-                    )
-                    .font(.subheadline)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
-                .disabled(isChatButtonDisabled)
-                .accessibilityLabel(chatButtonTitle)
-
-                Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
-                    Label(
-                        L.t("search.button.deep", language: settings.language),
-                        systemImage: "sparkle.magnifyingglass"
-                    )
-                    .font(.subheadline)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .frame(maxWidth: .infinity)
-                .disabled(isPrimaryDisabled)
-                .accessibilityLabel(L.t("search.button.deep", language: settings.language))
-            }
         }
         .padding(10)
         .background(textBackgroundColor)
         .overlay(
-            // Subtle stroke matching the ChatView composer container, so
-            // the search field + secondary buttons read as one focal
-            // input island rather than a flat strip.
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
