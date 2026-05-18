@@ -576,6 +576,16 @@ struct ChatView: View {
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
                 #endif
+                // On macOS, Return sends the message; Shift+Return inserts
+                // a newline. `.onSubmit` never fires on axis:.vertical fields,
+                // so we intercept the key directly.
+                #if os(macOS)
+                .onKeyPress(keys: [.return]) { press in
+                    guard !press.modifiers.contains(.shift) else { return .ignored }
+                    submitMessage()
+                    return .handled
+                }
+                #endif
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
 
