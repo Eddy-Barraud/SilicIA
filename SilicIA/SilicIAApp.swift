@@ -24,6 +24,9 @@ struct SilicIAApp: App {
     @State private var sharedPDFs: [URL] = []
     @State private var sharedImages: [URL] = []
     @State private var pendingSearchQuery: String?
+    /// Set on first appear of the root view to the localized reason text
+    /// when the Foundation Model isn't available on this device.
+    @State private var modelUnavailableMessage: String?
 
     private static let imageFileExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
@@ -43,6 +46,23 @@ struct SilicIAApp: App {
             )
                 .onOpenURL { url in
                     handleIncomingURL(url)
+                }
+                .onAppear {
+                    checkFoundationModelAvailabilityIfNeeded()
+                }
+                .alert(
+                    FoundationModelAvailability.alertTitle,
+                    isPresented: Binding(
+                        get: { modelUnavailableMessage != nil },
+                        set: { newValue in
+                            if !newValue { modelUnavailableMessage = nil }
+                        }
+                    ),
+                    presenting: modelUnavailableMessage
+                ) { _ in
+                    Button("OK", role: .cancel) { }
+                } message: { message in
+                    Text(message)
                 }
 #if os(macOS)
                 .onAppear {
@@ -64,6 +84,16 @@ struct SilicIAApp: App {
             .defaultSize(width: 500, height: 900)
         #endif
         .modelContainer(for: [Conversation.self, Message.self])
+    }
+
+    /// Surfaces a one-shot localized alert when Apple Intelligence isn't
+    /// available on this device. SilicIA has no NLP fallback, so the
+    /// alternative would be silent failures inside chat / search.
+    private func checkFoundationModelAvailabilityIfNeeded() {
+        guard modelUnavailableMessage == nil else { return }
+        if case .unavailable(let reason) = FoundationModelAvailability.check() {
+            modelUnavailableMessage = reason
+        }
     }
 
     /// Routes incoming shared URLs and files to chat context.
