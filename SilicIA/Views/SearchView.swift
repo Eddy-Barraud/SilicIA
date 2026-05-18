@@ -337,8 +337,12 @@ struct SearchView: View {
                     .foregroundStyle(.secondary)
                     .accessibilityHidden(true)
 
-                TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery, axis: .vertical)
-                    .lineLimit(1...5)
+                // Single-line so Return / Enter fires `.onSubmit` on both
+                // macOS and iOS. A multi-line `axis: .vertical` field
+                // swallows the key as a newline and never submits, which
+                // is the wrong default for a search input — search bars
+                // are universally one-line.
+                TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery)
                     .textFieldStyle(.plain)
                     .font(.body)
                     .focused($isSearchFieldFocused)

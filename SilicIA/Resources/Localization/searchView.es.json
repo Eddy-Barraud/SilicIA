@@ -1,9 +1,9 @@
 {
   "search.placeholder": "Buscar en la web...",
   "search.button.go": "Buscar",
-  "search.button.deep": "Profundo",
-  "search.button.chat": "Chat",
-  "search.button.chatMore": "Más chat",
+  "search.button.deep": "Búsqueda profunda",
+  "search.button.chat": "Hablar de esto",
+  "search.button.chatMore": "Continuar en chat",
   "search.welcome.title": "Busque en la Web con eficacia",
   "search.welcome.subtitle": "Obtenga resúmenes concisos con IA de los resultados web\nsin agotar la batería",
   "search.results.empty.title": "No se encontraron resultados",
