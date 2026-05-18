@@ -4,13 +4,14 @@
   "common.cancel": "Annuler",
   "common.delete": "Supprimer",
   "common.copy": "Copier",
+  "common.clear": "Effacer",
   "common.search": "Rechercher",
   "common.send": "Envoyer",
   "common.thinking": "Réflexion…",
   "common.new": "Nouveau",
   "common.history": "Historique",
   "common.openPage": "Ouvrir la page",
-  "common.startOver": "Nettoyer",
+  "common.startOver": "Recommencer",
   "common.you": "Vous",
   "common.assistant": "Assistant"
 }

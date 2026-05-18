@@ -29,7 +29,14 @@ struct ChatView: View {
     @State private var messageInput = ""
     @State private var showFileImporter = false
     @State private var showImageImporter = false
-    @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
+    /// User-attached context. Stays empty by default — the previous design
+    /// always carried a phantom empty URL placeholder so the user could
+    /// type into it, but that exposed an alien blank row at all times.
+    /// New design: an explicit "+" menu adds rows on demand.
+    @State private var contextSources: [ContextSource] = []
+    /// Focus state for the newest URL row, so picking "Add URL" from the
+    /// "+" menu immediately drops the keyboard caret into the new row.
+    @FocusState private var focusedURLRowID: ContextSource.ID?
     @State private var preanalysisTask: Task<Void, Never>?
     @State private var settings = AppSettings.load()
     @State private var showSettings = false
@@ -102,9 +109,10 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                // Composer is a single unified container: attached
+                // sources at the top, multi-line input in the middle,
+                // [+ menu] and [send] in the bottom action row.
                 composerView
-
-                contextBoxView
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -162,43 +170,54 @@ struct ChatView: View {
         }
     }
 
-    /// Renders top-level chat actions.
+    /// Renders top-level chat actions. Icon-only buttons sized for the
+    /// minimum 44pt tap target, with `.help` (macOS hover) and
+    /// `.accessibilityLabel` (VoiceOver) on every entry.
     private var chatHeaderView: some View {
-        HStack {
-            Button(action: { startOver() }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle")
-                    Text(L.t("common.new", language: settings.language))
-                        .fontWeight(.medium)
-                }
-            }
-            .buttonStyle(.bordered)
+        HStack(spacing: 4) {
+            headerIconButton(
+                systemImage: "square.and.pencil",
+                label: L.t("common.new", language: settings.language),
+                action: { startOver() }
+            )
 
             Spacer()
 
-            Button(action: { showHistory = true }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                    Text(L.t("common.history", language: settings.language))
-                        .fontWeight(.medium)
-                }
-            }
-            .buttonStyle(.bordered)
+            headerIconButton(
+                systemImage: "clock.arrow.circlepath",
+                label: L.t("common.history", language: settings.language),
+                action: { showHistory = true }
+            )
 
-            Button(action: {
-                #if canImport(UIKit)
-                dismissKeyboard()
-                #endif
-                showSettings = true
-            }) {
-                Image(systemName: "gear")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
+            headerIconButton(
+                systemImage: "gearshape",
+                label: L.t("common.settings", language: settings.language),
+                action: {
+                    #if canImport(UIKit)
+                    dismissKeyboard()
+                    #endif
+                    showSettings = true
+                }
+            )
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
+    }
+
+    /// Standard icon-only header button: 44pt tap target, secondary tint,
+    /// hover help + VoiceOver label baked in.
+    @ViewBuilder
+    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var chatSettingsPage: some View {
@@ -390,6 +409,7 @@ struct ChatView: View {
                     Text(L.t("chat.startConversation", language: settings.language))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
                 }
 
                 ForEach(chatService.messages) { message in
@@ -417,6 +437,7 @@ struct ChatView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(L.t("common.copy", language: settings.language))
+                                .accessibilityLabel(L.t("common.copy", language: settings.language))
 
                                 Button {
                                     regenerate(messageID: message.id)
@@ -427,6 +448,7 @@ struct ChatView: View {
                                 .buttonStyle(.plain)
                                 .disabled(chatService.isResponding)
                                 .help(L.t("chat.message.regenerate", language: settings.language))
+                                .accessibilityLabel(L.t("chat.message.regenerate", language: settings.language))
                             }
                         }
                         renderedMessageContent(message)
@@ -519,85 +541,182 @@ struct ChatView: View {
     }
     
 
-    /// Renders input area and send action.
+    /// Unified composer: attached-source list, primary multi-line input,
+    /// and bottom action row (`+` add-menu on the left, circular send on
+    /// the right) all live in one rounded, stroked container so the
+    /// input surface reads as a single focal point — the layout pattern
+    /// Claude / ChatGPT / Gemini converged on.
     private var composerView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isInputFieldFocused)
-                    #if canImport(UIKit)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    #endif
-                    .onSubmit {
-                        submitMessage()
+        let isSendDisabled = messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || chatService.isResponding
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Attached-source list. Hidden when nothing has been added.
+            // The web-search toggle surfaces as a chip when enabled, so
+            // its state is visible alongside the actual sources.
+            if isWebSearchEnabled || !contextSources.isEmpty {
+                VStack(spacing: 6) {
+                    if isWebSearchEnabled {
+                        webSearchChip
                     }
-
-                Button(L.t("chat.composer.send", language: settings.language)) {
-                    submitMessage()
+                    ForEach(Array(contextSources.enumerated()), id: \.element.id) { index, source in
+                        contextRow(source: source, at: index)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatService.isResponding)
             }
-        }
-    }
 
-    /// Renders optional free-form context and selected PDF labels.
-    private var contextBoxView: some View {
-        VStack(alignment: .leading, spacing: 8) {
+            // Primary text input. One visible line at rest, expanding
+            // up to 5 lines as the user types — keeps the container
+            // compact when empty, never crowds the action row.
+            TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.plain)
+                .font(.body)
+                .focused($isInputFieldFocused)
+                #if canImport(UIKit)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                #endif
+                // On macOS, Return sends the message; Shift+Return inserts
+                // a newline. `.onSubmit` never fires on axis:.vertical fields,
+                // so we intercept the key directly.
+                #if os(macOS)
+                .onKeyPress(keys: [.return]) { press in
+                    guard !press.modifiers.contains(.shift) else { return .ignored }
+                    submitMessage()
+                    return .handled
+                }
+                #endif
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+
+            // Bottom action row: + menu (leading), analyzing progress
+            // (centre, when active), send icon (trailing).
             HStack(spacing: 8) {
-                Image(systemName: chatService.isAnalyzingContext ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath.circle")
-                    .foregroundColor(chatService.isAnalyzingContext ? .accentColor : .secondary)
-                    .symbolEffect(.rotate.byLayer, isActive: chatService.isAnalyzingContext)
-                Text(L.t("chat.context.title", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                attachmentMenu
+
+                if chatService.isAnalyzingContext {
+                    HStack(spacing: 6) {
+                        ProgressView(value: chatService.contextAnalysisProgress)
+                            .controlSize(.small)
+                            .frame(maxWidth: 80)
+                        Text(L.t("chat.context.analyzing", language: settings.language))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
                 Spacer()
-                Button {
-                    contextSources.append(ContextSource(kind: .url(text: "")))
-                } label: {
-                    Image(systemName: "plus.circle.fill")
+
+                Button(action: submitMessage) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .resizable()
+                        .frame(width: 32, height: 32)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isSendDisabled ? Color.secondary : Color.accentColor)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                Menu {
-                    Button(L.t("chat.context.addPDF", language: settings.language)) {
-                        showFileImporter = true
-                    }
-                    Button(L.t("chat.context.addImage", language: settings.language)) {
-                        showImageImporter = true
-                    }
-                } label: {
-                    Label(L.t("chat.context.addAttachment", language: settings.language), systemImage: "paperclip")
-                }
-                .buttonStyle(.bordered)
-                Button {
-                    isWebSearchEnabled.toggle()
-                } label: {
-                    Label(L.t("chat.context.web", language: settings.language), systemImage: "globe")
-                }
-                .buttonStyle(.bordered)
-                .tint(isWebSearchEnabled ? .accentColor : .secondary)
+                .disabled(isSendDisabled)
+                .help(L.t("chat.composer.send", language: settings.language))
+                .accessibilityLabel(L.t("chat.composer.send", language: settings.language))
             }
+        }
+        .padding(8)
+        .background(textBackgroundColor)
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .cornerRadius(12)
+    }
 
-            ForEach(Array(contextSources.enumerated()), id: \.element.id) { index, source in
-                contextRow(source: source, at: index)
+    /// Single "+" menu that gathers every attach-or-toggle action that
+    /// used to be three separate buttons in the legacy context-box
+    /// header. Web-search toggle is the last item with a checkmark so
+    /// its state is visible inside the menu too.
+    private var attachmentMenu: some View {
+        Menu {
+            Button {
+                appendNewURLRow()
+            } label: {
+                Label(L.t("chat.context.addURL", language: settings.language), systemImage: "link")
             }
+            Button {
+                showFileImporter = true
+            } label: {
+                Label(L.t("chat.context.addPDF", language: settings.language), systemImage: "doc.richtext")
+            }
+            Button {
+                showImageImporter = true
+            } label: {
+                Label(L.t("chat.context.addImage", language: settings.language), systemImage: "photo")
+            }
+            Divider()
+            Toggle(isOn: $isWebSearchEnabled) {
+                Label(L.t("chat.context.web", language: settings.language), systemImage: "globe")
+            }
+        } label: {
+            Image(systemName: "plus.circle.fill")
+                .resizable()
+                .frame(width: 28, height: 28)
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(Color.accentColor)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .menuIndicator(.hidden)
+        .buttonStyle(.plain)
+        .help(L.t("chat.context.addAttachment", language: settings.language))
+        .accessibilityLabel(L.t("chat.context.addAttachment", language: settings.language))
+    }
 
-            if chatService.isAnalyzingContext {
-                HStack(spacing: 8) {
-                    ProgressView(value: chatService.contextAnalysisProgress)
-                        .controlSize(.small)
-                    Text(L.t("chat.context.analyzing", language: settings.language))
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
+    /// Compact pill showing that web search is currently enabled. Tap
+    /// to disable — mirrors the "delete chip" gesture on attached
+    /// sources.
+    private var webSearchChip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe")
+                .foregroundStyle(Color.accentColor)
+            Text(L.t("chat.context.web", language: settings.language))
+                .lineLimit(1)
+                .foregroundStyle(.primary)
+            Spacer()
+            Button {
+                isWebSearchEnabled = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(L.t("common.delete", language: settings.language))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
+        )
+        .cornerRadius(8)
+    }
+
+    /// Appends a fresh empty URL row to `contextSources` and focuses
+    /// its text field so the user can start typing immediately.
+    private func appendNewURLRow() {
+        let new = ContextSource(kind: .url(text: ""))
+        contextSources.append(new)
+        // Defer focus to next runloop so the row is actually in the view tree.
+        DispatchQueue.main.async {
+            focusedURLRowID = new.id
         }
     }
 
-    /// Renders a single editable source row.
+    /// Renders a single attached source as a compact chip-like row.
+    /// URL rows stay editable inline; PDF and image rows are read-only
+    /// filename labels with a trailing delete button.
     private func contextRow(source: ContextSource, at index: Int) -> some View {
         HStack(spacing: 8) {
             Image(systemName: source.kindSymbol)
@@ -605,7 +724,7 @@ struct ChatView: View {
             switch source.kind {
             case .url:
                 TextField(
-                    index == 0 ? L.t("chat.context.urlPlaceholder.first", language: settings.language) : L.t("chat.context.urlPlaceholder.other", language: settings.language),
+                    L.t("chat.context.urlPlaceholder.other", language: settings.language),
                     text: Binding(
                         get: {
                             guard case .url(let text) = contextSources[index].kind else { return "" }
@@ -617,8 +736,8 @@ struct ChatView: View {
                         }
                     )
                 )
-                .textFieldStyle(.roundedBorder)
-                .focused($isInputFieldFocused)
+                .textFieldStyle(.plain)
+                .focused($focusedURLRowID, equals: source.id)
             case .pdf:
                 if case .pdf(let url) = source.kind {
                     Text(url?.lastPathComponent ?? "PDF")
@@ -636,15 +755,13 @@ struct ChatView: View {
             }
             Button {
                 contextSources.remove(at: index)
-                if contextSources.isEmpty {
-                    contextSources = [ContextSource(kind: .url(text: ""))]
-                }
                 scheduleContextPreanalysis()
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(L.t("common.delete", language: settings.language))
         }
         .padding(8)
         .background(textBackgroundColor)
@@ -666,6 +783,9 @@ struct ChatView: View {
 
         let trimmed = messageInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
+        // Drop any "+ → Add URL" rows the user opened but never filled.
+        compactEmptyURLSources()
 
         let message = trimmed
         messageInput = ""
@@ -907,7 +1027,6 @@ struct ChatView: View {
         newSources.append(contentsOf: pdfs.map { ContextSource(kind: .pdf(url: $0)) })
         newSources.append(contentsOf: images.map { ContextSource(kind: .image(url: $0)) })
         contextSources = newSources
-        normalizeContextSources()
     }
 
     /// Inserts a PDF source while keeping URL placeholder behavior.
@@ -933,7 +1052,6 @@ struct ChatView: View {
             contextSources.append(ContextSource(kind: .pdf(url: url)))
             debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
         }
-        normalizeContextSources()
         scheduleContextPreanalysis()
     }
 
@@ -960,7 +1078,6 @@ struct ChatView: View {
             contextSources.append(ContextSource(kind: .image(url: url)))
             debugDrop("Appended dropped image as new context row: \(url.lastPathComponent)")
         }
-        normalizeContextSources()
         scheduleContextPreanalysis()
     }
 
@@ -1105,16 +1222,15 @@ struct ChatView: View {
         }
     }
 
-    /// Ensures there is always one empty URL row available.
-    private func normalizeContextSources() {
-        let hasEmptyURLRow = contextSources.contains { source in
+    /// Trims trailing empty URL rows that the user dropped via the
+    /// "+ → Add URL" affordance without typing anything. Called before
+    /// submit so the model never sees phantom blank URLs in context.
+    private func compactEmptyURLSources() {
+        contextSources.removeAll { source in
             if case .url(let text) = source.kind {
                 return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             }
             return false
-        }
-        if !hasEmptyURLRow {
-            contextSources.append(ContextSource(kind: .url(text: "")))
         }
     }
 
@@ -1146,7 +1262,7 @@ struct ChatView: View {
     private func startOver() {
         preanalysisTask?.cancel()
         messageInput = ""
-        contextSources = [ContextSource(kind: .url(text: ""))]
+        contextSources = []
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
         sharedImages.removeAll()

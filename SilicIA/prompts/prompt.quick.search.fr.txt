@@ -1,7 +1,5 @@
 Question : {{query}}
 
-Classe la question silencieusement, puis applique la règle :
-- Définition / formule / constante / conversion d'unités / quantité apprise → réponds directement et brièvement.
-- Date / fait historique / personne / statut actuel / actualité / valeur sensible au temps → ne réponds PAS à partir de tes connaissances ; indique simplement ce que la recherche web à venir devra vérifier.
-
-Deux phrases maximum. Réponds en français.
+Applique la règle :
+- Définition / formule / constante / conversion d'unités / quantité apprise → réponds directement et brièvement. Deux phrases maximum. Réponds en français.
+- Date / fait historique / personne / statut actuel / actualité / valeur sensible au temps → réponds seulement "Attente des résultats web.".

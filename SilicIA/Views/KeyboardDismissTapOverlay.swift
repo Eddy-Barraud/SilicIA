@@ -11,19 +11,33 @@ import SwiftUI
 import UIKit
 
 /// Captures taps anywhere in the view tree except text inputs, and calls `onTapOutsideTextInput`.
+///
+/// The previous implementation tried to attach its window-level
+/// recognizer from `updateUIView`, but at that point the underlying
+/// `UIView` is usually not yet a child of a `UIWindow`, so
+/// `uiView.window` returns nil and attachment is silently skipped —
+/// breaking the "tap anywhere to dismiss the keyboard" UX. The fix is
+/// a `WindowTrackingView` that calls back the coordinator from
+/// `didMoveToWindow`, which fires at the precise moment a `UIWindow`
+/// becomes available.
 struct KeyboardDismissTapOverlay: UIViewRepresentable {
     let onTapOutsideTextInput: () -> Void
 
     func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
+        let view = WindowTrackingView(frame: .zero)
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = false
+        view.onWindowChange = { [weak coordinator = context.coordinator] window in
+            coordinator?.attachRecognizer(to: window)
+        }
         return view
     }
 
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.onTapOutsideTextInput = onTapOutsideTextInput
-        context.coordinator.attachRecognizerIfNeeded(from: uiView)
+        // Defensive: in case `didMoveToWindow` fired before we wired
+        // up the closure (unlikely, but cheap), attach now.
+        context.coordinator.attachRecognizer(to: uiView.window)
     }
 
     static func dismantleUIView(_ uiView: UIView, coordinator: Coordinator) {
@@ -34,18 +48,29 @@ struct KeyboardDismissTapOverlay: UIViewRepresentable {
         Coordinator(onTapOutsideTextInput: onTapOutsideTextInput)
     }
 
+    private final class WindowTrackingView: UIView {
+        var onWindowChange: ((UIWindow?) -> Void)?
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            onWindowChange?(window)
+        }
+    }
+
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onTapOutsideTextInput: () -> Void
-        private weak var attachedView: UIView?
+        private weak var attachedWindow: UIWindow?
         private var recognizer: UITapGestureRecognizer?
 
         init(onTapOutsideTextInput: @escaping () -> Void) {
             self.onTapOutsideTextInput = onTapOutsideTextInput
         }
 
-        func attachRecognizerIfNeeded(from uiView: UIView) {
-            guard let window = uiView.window else { return }
-            guard attachedView !== window else { return }
+        func attachRecognizer(to window: UIWindow?) {
+            guard let window else {
+                detachRecognizer()
+                return
+            }
+            guard attachedWindow !== window else { return }
 
             detachRecognizer()
 
@@ -54,16 +79,16 @@ struct KeyboardDismissTapOverlay: UIViewRepresentable {
             recognizer.delegate = self
             window.addGestureRecognizer(recognizer)
 
-            attachedView = window
+            attachedWindow = window
             self.recognizer = recognizer
         }
 
         func detachRecognizer() {
-            if let recognizer, let attachedView {
-                attachedView.removeGestureRecognizer(recognizer)
+            if let recognizer, let attachedWindow {
+                attachedWindow.removeGestureRecognizer(recognizer)
             }
             recognizer = nil
-            attachedView = nil
+            attachedWindow = nil
         }
 
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
