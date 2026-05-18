@@ -16,6 +16,14 @@ import AppKit
 struct SilicIAApp: App {
     init() {
         _ = LocalizationService.shared
+        // Decide *before* the window appears whether to render the
+        // blocking screen, so the user never sees a flash of the main
+        // UI on devices where Apple Intelligence isn't available.
+        if case .unavailable(let reason) = FoundationModelAvailability.check() {
+            _modelUnavailableMessage = State(initialValue: reason)
+        } else {
+            _modelUnavailableMessage = State(initialValue: nil)
+        }
     }
     private static let sharedAppGroupIdentifier = "group.fr.trevalim.silicia.shared"
     private static let sharedInboxDirectoryName = "IncomingSharedFiles"
@@ -24,8 +32,9 @@ struct SilicIAApp: App {
     @State private var sharedPDFs: [URL] = []
     @State private var sharedImages: [URL] = []
     @State private var pendingSearchQuery: String?
-    /// Set on first appear of the root view to the localized reason text
-    /// when the Foundation Model isn't available on this device.
+    /// When non-nil, the entire window is replaced by the blocking
+    /// `ModelUnavailableView` — Apple Intelligence isn't available on
+    /// this device and the app has no NLP fallback.
     @State private var modelUnavailableMessage: String?
 
     private static let imageFileExtensions: Set<String> = [
@@ -38,62 +47,39 @@ struct SilicIAApp: App {
     /// Declares the app's primary window scene.
     var body: some Scene {
         WindowGroup {
-            ContentView(
-                sharedURLs: $sharedURLs,
-                sharedPDFs: $sharedPDFs,
-                sharedImages: $sharedImages,
-                pendingSearchQuery: $pendingSearchQuery
-            )
-                .onOpenURL { url in
-                    handleIncomingURL(url)
-                }
-                .onAppear {
-                    checkFoundationModelAvailabilityIfNeeded()
-                }
-                .alert(
-                    FoundationModelAvailability.alertTitle,
-                    isPresented: Binding(
-                        get: { modelUnavailableMessage != nil },
-                        set: { newValue in
-                            if !newValue { modelUnavailableMessage = nil }
-                        }
-                    ),
-                    presenting: modelUnavailableMessage
-                ) { _ in
-                    Button("OK", role: .cancel) { }
-                } message: { message in
-                    Text(message)
-                }
+            if let message = modelUnavailableMessage {
+                ModelUnavailableView(message: message)
+            } else {
+                ContentView(
+                    sharedURLs: $sharedURLs,
+                    sharedPDFs: $sharedPDFs,
+                    sharedImages: $sharedImages,
+                    pendingSearchQuery: $pendingSearchQuery
+                )
+                    .onOpenURL { url in
+                        handleIncomingURL(url)
+                    }
 #if os(macOS)
-                .onAppear {
-                    appDelegate.onOpenURLs = { urls in
-                        for url in urls {
-                            handleIncomingURL(url)
+                    .onAppear {
+                        appDelegate.onOpenURLs = { urls in
+                            for url in urls {
+                                handleIncomingURL(url)
+                            }
+                        }
+                        let pending = appDelegate.drainPendingURLs()
+                        if !pending.isEmpty {
+                            for url in pending {
+                                handleIncomingURL(url)
+                            }
                         }
                     }
-                    let pending = appDelegate.drainPendingURLs()
-                    if !pending.isEmpty {
-                        for url in pending {
-                            handleIncomingURL(url)
-                        }
-                    }
-                }
 #endif
+            }
         }
         #if os(macOS)
             .defaultSize(width: 500, height: 900)
         #endif
         .modelContainer(for: [Conversation.self, Message.self])
-    }
-
-    /// Surfaces a one-shot localized alert when Apple Intelligence isn't
-    /// available on this device. SilicIA has no NLP fallback, so the
-    /// alternative would be silent failures inside chat / search.
-    private func checkFoundationModelAvailabilityIfNeeded() {
-        guard modelUnavailableMessage == nil else { return }
-        if case .unavailable(let reason) = FoundationModelAvailability.check() {
-            modelUnavailableMessage = reason
-        }
     }
 
     /// Routes incoming shared URLs and files to chat context.

@@ -83,12 +83,21 @@ enum FoundationModelAvailability {
         }
     }
 
-    /// Localized title for the warning alert/banner.
+    /// Localized title for the blocking screen.
     static var alertTitle: String {
         switch systemLanguageCode {
         case "fr": return "Apple Intelligence requise"
         case "es": return "Se requiere Apple Intelligence"
         default:   return "Apple Intelligence required"
+        }
+    }
+
+    /// Localized label for the "quit the app" button on the blocking screen.
+    static var closeButtonLabel: String {
+        switch systemLanguageCode {
+        case "fr": return "Fermer SilicIA"
+        case "es": return "Cerrar SilicIA"
+        default:   return "Close SilicIA"
         }
     }
 }
