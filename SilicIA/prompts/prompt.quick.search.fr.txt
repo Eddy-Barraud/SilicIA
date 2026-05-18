@@ -1,6 +1,7 @@
-Question: {{query}}
+Question : {{query}}
 
-Si tu n'es pas sûr de la réponse, ne dis rien.
-Réponds de manière courte, précise et factuelle.
-Réponds en français.
-Réponds en deux phrases maximum.
+Classe la question, puis applique la règle :
+- Définition / formule / constante / conversion d'unités / quantité apprise → réponds directement et brièvement.
+- Date / fait historique / personne / statut actuel / actualité / valeur sensible au temps → ne réponds PAS à partir de tes connaissances ; indique simplement ce que la recherche web à venir devra vérifier.
+
+Deux phrases maximum. Réponds en français.

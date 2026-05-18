@@ -1,6 +1,7 @@
 Question: {{query}}
 
-If not sure about answer, don't say anything.
-Answer in a short, precise and factual manner.
-Answer in English.
-Answer in two sentences maximum.
+Classify the question, then follow the rule:
+- Definition / formula / constant / unit conversion / learned quantity → answer it directly and concisely.
+- Date / historical fact / person / current status / news / time-sensitive value → do NOT answer from your own knowledge; just state what the upcoming web research will verify.
+
+Two sentences maximum. Answer in English.
