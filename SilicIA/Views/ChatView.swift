@@ -102,9 +102,14 @@ struct ChatView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                composerView
-
+                // Modern LLM-app convention (Claude / ChatGPT / Gemini):
+                // attachments and tool toggles live just above the input,
+                // so the eye flows from "what I attached" → "what I'm
+                // about to ask" → "send". Composer stays anchored at the
+                // bottom for thumb reach.
                 contextBoxView
+
+                composerView
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -162,43 +167,54 @@ struct ChatView: View {
         }
     }
 
-    /// Renders top-level chat actions.
+    /// Renders top-level chat actions. Icon-only buttons sized for the
+    /// minimum 44pt tap target, with `.help` (macOS hover) and
+    /// `.accessibilityLabel` (VoiceOver) on every entry.
     private var chatHeaderView: some View {
-        HStack {
-            Button(action: { startOver() }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle")
-                    Text(L.t("common.new", language: settings.language))
-                        .fontWeight(.medium)
-                }
-            }
-            .buttonStyle(.bordered)
+        HStack(spacing: 4) {
+            headerIconButton(
+                systemImage: "square.and.pencil",
+                label: L.t("common.new", language: settings.language),
+                action: { startOver() }
+            )
 
             Spacer()
 
-            Button(action: { showHistory = true }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "clock")
-                    Text(L.t("common.history", language: settings.language))
-                        .fontWeight(.medium)
-                }
-            }
-            .buttonStyle(.bordered)
+            headerIconButton(
+                systemImage: "clock.arrow.circlepath",
+                label: L.t("common.history", language: settings.language),
+                action: { showHistory = true }
+            )
 
-            Button(action: {
-                #if canImport(UIKit)
-                dismissKeyboard()
-                #endif
-                showSettings = true
-            }) {
-                Image(systemName: "gear")
-                    .font(.title2)
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
+            headerIconButton(
+                systemImage: "gearshape",
+                label: L.t("common.settings", language: settings.language),
+                action: {
+                    #if canImport(UIKit)
+                    dismissKeyboard()
+                    #endif
+                    showSettings = true
+                }
+            )
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
+    }
+
+    /// Standard icon-only header button: 44pt tap target, secondary tint,
+    /// hover help + VoiceOver label baked in.
+    @ViewBuilder
+    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var chatSettingsPage: some View {
@@ -417,6 +433,7 @@ struct ChatView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(L.t("common.copy", language: settings.language))
+                                .accessibilityLabel(L.t("common.copy", language: settings.language))
 
                                 Button {
                                     regenerate(messageID: message.id)
@@ -427,6 +444,7 @@ struct ChatView: View {
                                 .buttonStyle(.plain)
                                 .disabled(chatService.isResponding)
                                 .help(L.t("chat.message.regenerate", language: settings.language))
+                                .accessibilityLabel(L.t("chat.message.regenerate", language: settings.language))
                             }
                         }
                         renderedMessageContent(message)
@@ -519,28 +537,39 @@ struct ChatView: View {
     }
     
 
-    /// Renders input area and send action.
+    /// Renders input area and send action. Composer follows the
+    /// Claude / ChatGPT / Gemini convention: text field expands to fill
+    /// available width, send action is a single circular accent-tinted
+    /// icon button on the trailing edge.
     private var composerView: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .bottom, spacing: 10) {
-                TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
-                    .lineLimit(1...5)
-                    .textFieldStyle(.roundedBorder)
-                    .focused($isInputFieldFocused)
-                    #if canImport(UIKit)
-                    .textInputAutocapitalization(.sentences)
-                    .autocorrectionDisabled(false)
-                    #endif
-                    .onSubmit {
-                        submitMessage()
-                    }
-
-                Button(L.t("chat.composer.send", language: settings.language)) {
+        let isSendDisabled = messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || chatService.isResponding
+        return HStack(alignment: .bottom, spacing: 10) {
+            TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
+                .lineLimit(1...5)
+                .textFieldStyle(.roundedBorder)
+                .focused($isInputFieldFocused)
+                #if canImport(UIKit)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled(false)
+                #endif
+                .onSubmit {
                     submitMessage()
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatService.isResponding)
+
+            Button(action: submitMessage) {
+                Image(systemName: "arrow.up.circle.fill")
+                    .resizable()
+                    .frame(width: 32, height: 32)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isSendDisabled ? Color.secondary : Color.accentColor)
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(isSendDisabled)
+            .help(L.t("chat.composer.send", language: settings.language))
+            .accessibilityLabel(L.t("chat.composer.send", language: settings.language))
         }
     }
 

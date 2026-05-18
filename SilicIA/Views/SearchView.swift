@@ -257,8 +257,10 @@ struct SearchView: View {
 
     // MARK: - Header View
     private var headerView: some View {
-        HStack {
+        HStack(spacing: 4) {
             if showSettings {
+                // Settings is a sub-screen; keep its back button as the
+                // dominant affordance so users know how to leave.
                 Button(action: { showSettings = false }) {
                     HStack(spacing: 6) {
                         Image(systemName: "chevron.left")
@@ -267,6 +269,7 @@ struct SearchView: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                .accessibilityLabel(L.t("common.back", language: settings.language))
 
                 Text(L.t("search.settings.title", language: settings.language))
                     .font(.headline)
@@ -275,27 +278,41 @@ struct SearchView: View {
 
                 Spacer(minLength: 0)
             } else {
-                Button(action: { goHome() }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "arrow.2.circlepath")
-                        Text(L.t("common.startOver", language: settings.language))
-                            .fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.bordered)
+                // Reset action sits on the leading edge so it mirrors the
+                // chat tab's "new conversation" button position.
+                headerIconButton(
+                    systemImage: "arrow.counterclockwise",
+                    label: L.t("common.startOver", language: settings.language),
+                    action: { goHome() }
+                )
 
                 Spacer()
 
-                Button(action: { showSettings = true }) {
-                    Image(systemName: "gear")
-                        .font(.title2)
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
+                headerIconButton(
+                    systemImage: "gearshape",
+                    label: L.t("common.settings", language: settings.language),
+                    action: { showSettings = true }
+                )
             }
         }
         .padding()
         .background(controlBackgroundColor)
+    }
+
+    /// 44pt-tap-target icon button used in the top bar. Matches the
+    /// equivalent helper in `ChatView` so the two tabs feel symmetric.
+    @ViewBuilder
+    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(label)
+        .accessibilityLabel(label)
     }
 
     private var settingsPage: some View {
@@ -309,10 +326,16 @@ struct SearchView: View {
 
     // MARK: - Search Bar View
     private var searchBarView: some View {
-        VStack(spacing: 10) {
-            HStack {
+        let isInputEmpty = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isPrimaryDisabled = isInputEmpty || searchService.isSearching
+        return VStack(spacing: 10) {
+            // Primary search field with an in-field send button — the
+            // canonical pattern for LLM-app search bars (Claude, Gemini)
+            // where the most common action is one tap away.
+            HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
 
                 TextField(L.t("search.placeholder", language: settings.language), text: $searchQuery, axis: .vertical)
                     .lineLimit(1...5)
@@ -331,14 +354,31 @@ struct SearchView: View {
                 if !searchQuery.isEmpty {
                     Button(action: { searchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .foregroundColor(.secondary)
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .help(L.t("common.clear", language: settings.language))
+                    .accessibilityLabel(L.t("common.clear", language: settings.language))
                 }
+
+                Button(action: { performSearch(generationProfile: .fast) }) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .resizable()
+                        .frame(width: 28, height: 28)
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(isPrimaryDisabled ? Color.secondary : Color.accentColor)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(isPrimaryDisabled)
+                .help(L.t("search.button.go", language: settings.language))
+                .accessibilityLabel(L.t("search.button.go", language: settings.language))
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
             .background(controlBackgroundColor)
-            .cornerRadius(8)
+            .cornerRadius(12)
 
             if let errorMessage,
                !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -348,6 +388,10 @@ struct SearchView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            // Secondary actions row — visually subordinate to the primary
+            // input above. "Deep" stays a peer of "Search" (it just trades
+            // latency for context depth), "Chat" only activates once
+            // there's something worth chatting about.
             HStack(spacing: 8) {
                 Button(action: handleChatButtonTap) {
                     Label(
@@ -357,16 +401,10 @@ struct SearchView: View {
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .frame(maxWidth: .infinity)
                 .disabled(isChatButtonDisabled)
-
-                Button(action: { performSearch(generationProfile: .fast) }) {
-                    Text(L.t("search.button.go", language: settings.language))
-                        .fontWeight(.medium)
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                .disabled(searchQuery.isEmpty || searchService.isSearching)
+                .accessibilityLabel(chatButtonTitle)
 
                 Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
                     Label(
@@ -376,8 +414,10 @@ struct SearchView: View {
                     .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
+                .controlSize(.small)
                 .frame(maxWidth: .infinity)
-                .disabled(searchQuery.isEmpty || searchService.isSearching)
+                .disabled(isPrimaryDisabled)
+                .accessibilityLabel(L.t("search.button.deep", language: settings.language))
             }
         }
         .padding()
@@ -385,7 +425,6 @@ struct SearchView: View {
         .cornerRadius(10)
         .padding(.horizontal)
         .padding(.vertical, 8)
-        
     }
 
     // MARK: - Results View
@@ -617,29 +656,90 @@ struct SearchView: View {
     // MARK: - Welcome View
     private var welcomeView: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 64))
-                    .foregroundColor(.accentColor)
+            VStack(spacing: 20) {
+                // Smaller hero icon — modern LLM apps lead with prompts,
+                // not visual filler. Keeps room for the example chips.
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 48, weight: .regular))
+                    .foregroundStyle(.tint)
+                    .padding(.top, 16)
+                    .accessibilityHidden(true)
 
-                VStack(spacing: 8) {
+                VStack(spacing: 6) {
                     Text(L.t("search.welcome.title", language: settings.language))
                         .font(.title2)
                         .fontWeight(.semibold)
+                        .multilineTextAlignment(.center)
 
                     Text(L.t("search.welcome.subtitle", language: settings.language))
                         .font(.body)
-                        .foregroundColor(.secondary)
+                        .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
 
-                .padding(.top)
-
+                // Example-query chips. Tap to drop the prompt into the
+                // search field; user can tweak it or hit Search.
+                exampleQueryChips
+                    .padding(.top, 8)
             }
             .padding()
         }
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Three localized example queries that pre-fill the search field
+    /// on tap. Picked to span the categories the first-guess prompt
+    /// already understands (definition / time-sensitive / how-to).
+    @ViewBuilder
+    private var exampleQueryChips: some View {
+        let examples: [String] = {
+            switch settings.language {
+            case .french:
+                return [
+                    "Qu'est-ce que la photosynthèse ?",
+                    "Actualité des marchés financiers cette semaine",
+                    "Comment configurer SwiftData étape par étape"
+                ]
+            case .spanish:
+                return [
+                    "¿Qué es la fotosíntesis?",
+                    "Noticias del mercado financiero esta semana",
+                    "Cómo configurar SwiftData paso a paso"
+                ]
+            default:
+                return [
+                    "What is photosynthesis?",
+                    "Financial market news this week",
+                    "How to set up SwiftData step by step"
+                ]
+            }
+        }()
+
+        VStack(spacing: 8) {
+            ForEach(examples, id: \.self) { example in
+                Button {
+                    searchQuery = example
+                    isSearchFieldFocused = true
+                } label: {
+                    HStack {
+                        Image(systemName: "text.cursor")
+                            .foregroundStyle(.tertiary)
+                        Text(example)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 10)
+                    .background(controlBackgroundColor)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(example)
+            }
+        }
+        .padding(.horizontal, 4)
     }
 
     // MARK: - Settings Panel
