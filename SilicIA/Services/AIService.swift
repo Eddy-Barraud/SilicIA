@@ -7,7 +7,6 @@
 
 import Foundation
 import Combine
-import NaturalLanguage
 import FoundationModels
 
 @MainActor
@@ -125,18 +124,21 @@ class AIService: ObservableObject {
             let content = String(describing: response.content)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            if content.isEmpty {
-                return fallbackFirstGuess(for: trimmedQuery, language: language)
-            }
+            if content.isEmpty { return "" }
 
-            let sanitized = sanitizeLaTeXDocumentWrappers(content)
-            return sanitized.isEmpty ? fallbackFirstGuess(for: trimmedQuery, language: language) : sanitized
+            return sanitizeLaTeXDocumentWrappers(content)
         } catch {
-            return fallbackFirstGuess(for: trimmedQuery, language: language)
+            // FoundationModels failed (likely Apple Intelligence unavailable —
+            // the app's launch check surfaces this to the user). Return empty
+            // rather than a hand-rolled placeholder.
+            return ""
         }
     }
 
-    /// Expands one query into up to `maxDerivedQueries` related web-search queries.
+    /// Expands one query into up to `maxDerivedQueries` related web-search
+    /// queries via the on-device language model. Returns an empty array if
+    /// Foundation Models is unavailable or fails — callers fall back to
+    /// running the single original query.
     func expandSearchQueries(
         query: String,
         language: ModelLanguage = .french,
@@ -145,12 +147,6 @@ class AIService: ObservableObject {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty, maxDerivedQueries > 0 else { return [] }
 
-        let fallback = fallbackDerivedQueries(
-            for: trimmedQuery,
-            language: language,
-            maxDerivedQueries: maxDerivedQueries
-        )
-
         do {
             let session = queryExpanderSession(for: language)
             let raw = String(describing: try await session.respond(
@@ -158,42 +154,16 @@ class AIService: ObservableObject {
                 options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 140)
             ).content)
 
-            let rawCandidates = raw
-                .components(separatedBy: .newlines)
-                .map { sanitizeDerivedQueryLine($0) }
-                .filter { !$0.isEmpty }
-
             let parsed = parseDerivedQueries(
                 raw,
                 originalQuery: trimmedQuery,
                 maxDerivedQueries: maxDerivedQueries
             )
-
-            let completed = completeDerivedQueries(
-                parsed,
-                originalQuery: trimmedQuery,
-                fallback: fallback,
-                language: language,
-                maxDerivedQueries: maxDerivedQueries
-            )
-
-            debugLog(
-                "query expansion counts: expected=\(maxDerivedQueries), raw=\(rawCandidates.count), keptNonURL=\(parsed.count), completed=\(completed.count)"
-            )
-            debugLog("query expansion final: \(completed.joined(separator: " | "))")
-
-            return completed
+            debugLog("query expansion: expected=\(maxDerivedQueries), kept=\(parsed.count) — \(parsed.joined(separator: " | "))")
+            return parsed
         } catch {
-            let completed = completeDerivedQueries(
-                [],
-                originalQuery: trimmedQuery,
-                fallback: fallback,
-                language: language,
-                maxDerivedQueries: maxDerivedQueries
-            )
-            debugLog("query expansion fallback-only due to error: \(error.localizedDescription)")
-            debugLog("query expansion final: \(completed.joined(separator: " | "))")
-            return completed
+            debugLog("query expansion failed: \(error.localizedDescription)")
+            return []
         }
     }
 
@@ -595,144 +565,6 @@ class AIService: ObservableObject {
         return false
     }
 
-    /// Ensures we always return exactly `maxDerivedQueries` non-URL alternatives.
-    private func completeDerivedQueries(
-        _ parsed: [String],
-        originalQuery: String,
-        fallback: [String],
-        language: ModelLanguage,
-        maxDerivedQueries: Int
-    ) -> [String] {
-        guard maxDerivedQueries > 0 else { return [] }
-
-        var completed: [String] = []
-        var seen = Set<String>()
-        seen.insert(normalizeQueryKey(originalQuery))
-
-        let intentFallbacks = fallbackDerivedQueries(
-            for: originalQuery,
-            language: language,
-            maxDerivedQueries: max(5, maxDerivedQueries)
-        )
-
-        func shouldKeep(_ cleaned: String) -> Bool {
-            guard !cleaned.isEmpty else { return false }
-            guard !isRawURLSearchQuery(cleaned) else { return false }
-            guard isMeaningfullyDifferentFromOriginal(cleaned, originalQuery: originalQuery) else { return false }
-            guard !isNearDuplicate(ofAny: cleaned, in: [originalQuery] + completed) else { return false }
-            return true
-        }
-
-        func appendIfValid(_ candidate: String) {
-            let cleaned = sanitizeDerivedQueryLine(candidate)
-            guard shouldKeep(cleaned) else { return }
-            guard seen.insert(normalizeQueryKey(cleaned)).inserted else { return }
-            completed.append(cleaned)
-        }
-
-        for candidate in parsed {
-            appendIfValid(candidate)
-            if completed.count == maxDerivedQueries { return completed }
-        }
-
-        for candidate in fallback {
-            appendIfValid(candidate)
-            if completed.count == maxDerivedQueries { return completed }
-        }
-
-        for candidate in intentFallbacks {
-            appendIfValid(candidate)
-            if completed.count == maxDerivedQueries { return completed }
-        }
-
-        var fillerIndex = 1
-        while completed.count < maxDerivedQueries {
-            if language == .french {
-                appendIfValid("\(originalQuery) méthode fiable \(fillerIndex)")
-            } else {
-                appendIfValid("\(originalQuery) reliable method \(fillerIndex)")
-            }
-            fillerIndex += 1
-
-            // Last resort to guarantee progress if strict filters reject too much.
-            if fillerIndex > 20 && completed.count < maxDerivedQueries {
-                let coarse = language == .french
-                    ? "\(originalQuery) guide complet \(completed.count + 1)"
-                    : "\(originalQuery) complete guide \(completed.count + 1)"
-                let cleaned = sanitizeDerivedQueryLine(coarse)
-                if seen.insert(normalizeQueryKey(cleaned)).inserted {
-                    completed.append(cleaned)
-                }
-            }
-        }
-
-        return completed
-    }
-
-    /// Language-aware intent-based fallback expansions.
-    private func fallbackDerivedQueries(for query: String, language: ModelLanguage, maxDerivedQueries: Int) -> [String] {
-        let isTravelDistance = looksLikeTravelDistanceQuery(query)
-
-        let candidates: [String]
-        if language == .french {
-            if isTravelDistance {
-                candidates = [
-                    "\(query) distance totale km",
-                    "\(query) durée trajet voiture train",
-                    "\(query) meilleur itinéraire avec péage",
-                    "\(query) carte et étapes détaillées",
-                    "\(query) données officielles de distance"
-                ]
-            } else {
-                candidates = [
-                    "\(query) définition et points clés",
-                    "\(query) comparaison des alternatives",
-                    "\(query) données récentes source officielle",
-                    "\(query) guide pratique étape par étape",
-                    "\(query) erreurs fréquentes et vérification"
-                ]
-            }
-        } else {
-            if isTravelDistance {
-                candidates = [
-                    "\(query) total distance in km",
-                    "\(query) travel time by car and train",
-                    "\(query) best route with toll options",
-                    "\(query) map with route steps",
-                    "\(query) official distance data sources"
-                ]
-            } else {
-                candidates = [
-                    "\(query) definition and key points",
-                    "\(query) alternatives comparison",
-                    "\(query) latest data official source",
-                    "\(query) step by step practical guide",
-                    "\(query) common mistakes and validation"
-                ]
-            }
-        }
-
-        return Array(candidates.prefix(maxDerivedQueries))
-    }
-
-    /// Heuristic detection for route/distance intents to improve fallback relevance.
-    private func looksLikeTravelDistanceQuery(_ query: String) -> Bool {
-        let q = normalizeQueryKey(query)
-        let travelKeywords = [
-            "distance", "trajet", "itineraire", "itinéraire", "route", "km", "kilometre", "kilomètre", "driving", "travel"
-        ]
-        return travelKeywords.contains { q.contains($0) }
-    }
-
-    /// Fallback guess used when on-device generation is unavailable.
-    private func fallbackFirstGuess(for query: String, language: ModelLanguage) -> String {
-        if language == .french {
-            return "Intuition rapide : la réponse dépend du contexte exact. Je lance une vérification web pour confirmer les points clés sur \"\(query)\"."
-        }
-
-        return "Quick intuition: the answer depends on the exact context. I am checking web sources to confirm the key points about \"\(query)\"."
-    }
-
     /// Removes full LaTeX document wrappers that the renderer does not expect.
     private func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -863,68 +695,14 @@ class AIService: ObservableObject {
 
             return txt_response
         } catch {
+            // The app's launch-time check (see `FoundationModelAvailability`)
+            // already warns when Apple Intelligence is unavailable, so we no
+            // longer carry a deterministic NLP fallback. Return empty here —
+            // the UI surfaces this as "no summary" rather than a misleading
+            // hand-written one.
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
-            // Fallback to basic summarization
-            return await generateConciseSummary(query: query, context: context, results: results, language: language)
+            return ""
         }
-    }
-
-    /// Builds an extractive fallback summary.
-    private func generateConciseSummary(query: String, context: String, results: [SearchResult], language: ModelLanguage = .french) async -> String {
-        // For M3 MacBooks without full Apple Intelligence, we'll create an efficient
-        // extractive summary that highlights key information
-
-        let isFrench = language == .french
-
-        // Split context into sentences
-        let tokenizer = NLTokenizer(unit: .sentence)
-        tokenizer.string = context
-
-        var sentences: [(sentence: String, score: Double)] = []
-        tokenizer.enumerateTokens(in: context.startIndex..<context.endIndex) { range, _ in
-            let sentence = String(context[range]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sentence.isEmpty {
-                // Score sentence based on query relevance
-                let score = calculateRelevanceScore(sentence: sentence, query: query)
-                sentences.append((sentence, score))
-            }
-            return true
-        }
-
-        // Sort by relevance and take top sentences
-        let topSentences = sentences
-            .sorted { $0.score > $1.score }
-            .prefix(4)
-            .map { $0.sentence }
-
-        // Build summary
-        var summaryParts: [String] = []
-
-        // Add query context in the selected language
-        if isFrench {
-            summaryParts.append("Basé sur votre recherche pour '\(query)' :")
-        } else {
-            summaryParts.append("Based on your search for '\(query)':")
-        }
-        summaryParts.append("")
-
-        // Add key findings
-        if !topSentences.isEmpty {
-            summaryParts.append(isFrench ? "**Principaux résultats :**" : "**Key Findings:**")
-            for (_, sentence) in topSentences.enumerated() {
-                // Clean up the sentence
-                let cleaned = sentence
-                    .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-
-                if !cleaned.isEmpty {
-                    summaryParts.append("• \(cleaned)")
-                }
-            }
-            summaryParts.append("")
-        }
-
-        return summaryParts.joined(separator: "\n")
     }
 
     private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
@@ -1076,48 +854,6 @@ class AIService: ObservableObject {
         Stay factual; do not invent information that is not in the page.
         Respond in English.
         """
-    }
-
-    /// Calculates lexical relevance of one sentence against the query.
-    private func calculateRelevanceScore(sentence: String, query: String) -> Double {
-        let sentenceLower = sentence.lowercased()
-        let queryWords = query.lowercased().components(separatedBy: .whitespacesAndNewlines)
-
-        var score = 0.0
-
-        // Check for query word matches
-        for word in queryWords where word.count > 2 {
-            if sentenceLower.contains(word) {
-                score += 1.0
-            }
-        }
-
-        // Bonus for sentence length (prefer informative sentences)
-        let wordCount = sentence.components(separatedBy: .whitespacesAndNewlines).count
-        if wordCount > 5 && wordCount < 30 {
-            score += 0.5
-        }
-
-        // Extract key terms using NaturalLanguage
-        let tagger = NLTagger(tagSchemes: [.lexicalClass])
-        tagger.string = sentence
-
-        var hasImportantTerms = false
-        tagger.enumerateTags(in: sentence.startIndex..<sentence.endIndex,
-                           unit: .word,
-                           scheme: .lexicalClass) { tag, _ in
-            if tag == .noun || tag == .verb {
-                hasImportantTerms = true
-                return false
-            }
-            return true
-        }
-
-        if hasImportantTerms {
-            score += 0.3
-        }
-
-        return score
     }
 
 }

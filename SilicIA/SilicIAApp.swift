@@ -16,6 +16,14 @@ import AppKit
 struct SilicIAApp: App {
     init() {
         _ = LocalizationService.shared
+        // Decide *before* the window appears whether to render the
+        // blocking screen, so the user never sees a flash of the main
+        // UI on devices where Apple Intelligence isn't available.
+        if case .unavailable(let reason) = FoundationModelAvailability.check() {
+            _modelUnavailableMessage = State(initialValue: reason)
+        } else {
+            _modelUnavailableMessage = State(initialValue: nil)
+        }
     }
     private static let sharedAppGroupIdentifier = "group.fr.trevalim.silicia.shared"
     private static let sharedInboxDirectoryName = "IncomingSharedFiles"
@@ -24,6 +32,10 @@ struct SilicIAApp: App {
     @State private var sharedPDFs: [URL] = []
     @State private var sharedImages: [URL] = []
     @State private var pendingSearchQuery: String?
+    /// When non-nil, the entire window is replaced by the blocking
+    /// `ModelUnavailableView` — Apple Intelligence isn't available on
+    /// this device and the app has no NLP fallback.
+    @State private var modelUnavailableMessage: String?
 
     private static let imageFileExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
@@ -35,30 +47,34 @@ struct SilicIAApp: App {
     /// Declares the app's primary window scene.
     var body: some Scene {
         WindowGroup {
-            ContentView(
-                sharedURLs: $sharedURLs,
-                sharedPDFs: $sharedPDFs,
-                sharedImages: $sharedImages,
-                pendingSearchQuery: $pendingSearchQuery
-            )
-                .onOpenURL { url in
-                    handleIncomingURL(url)
-                }
+            if let message = modelUnavailableMessage {
+                ModelUnavailableView(message: message)
+            } else {
+                ContentView(
+                    sharedURLs: $sharedURLs,
+                    sharedPDFs: $sharedPDFs,
+                    sharedImages: $sharedImages,
+                    pendingSearchQuery: $pendingSearchQuery
+                )
+                    .onOpenURL { url in
+                        handleIncomingURL(url)
+                    }
 #if os(macOS)
-                .onAppear {
-                    appDelegate.onOpenURLs = { urls in
-                        for url in urls {
-                            handleIncomingURL(url)
+                    .onAppear {
+                        appDelegate.onOpenURLs = { urls in
+                            for url in urls {
+                                handleIncomingURL(url)
+                            }
+                        }
+                        let pending = appDelegate.drainPendingURLs()
+                        if !pending.isEmpty {
+                            for url in pending {
+                                handleIncomingURL(url)
+                            }
                         }
                     }
-                    let pending = appDelegate.drainPendingURLs()
-                    if !pending.isEmpty {
-                        for url in pending {
-                            handleIncomingURL(url)
-                        }
-                    }
-                }
 #endif
+            }
         }
         #if os(macOS)
             .defaultSize(width: 500, height: 900)
