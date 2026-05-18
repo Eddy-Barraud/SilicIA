@@ -43,6 +43,7 @@ struct SearchView: View {
 
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []
+    @State private var hasAttemptedSearch: Bool = false
     /// Per-source RAG match-score percentages keyed by `SearchResult.url`.
     /// Populated by `aiService.summarize` via its `onMatchingScores` callback.
     /// Missing keys are treated as 0% by the card view.
@@ -211,7 +212,7 @@ struct SearchView: View {
                         loadingView
                     } else if !searchResults.isEmpty {
                         resultsView
-                    } else if searchQuery.isEmpty {
+                    } else if !hasAttemptedSearch {
                         welcomeView
                     } else {
                         emptyStateView
@@ -369,7 +370,7 @@ struct SearchView: View {
                     }
 
                 if !searchQuery.isEmpty {
-                    Button(action: { searchQuery = "" }) {
+                    Button(action: { searchQuery = ""; hasAttemptedSearch = false }) {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(.secondary)
                     }
@@ -1228,6 +1229,7 @@ struct SearchView: View {
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return }
         searchQuery = trimmedQuery
+        hasAttemptedSearch = true
 
         let requestID = UUID()
         activeSearchRequestID = requestID
@@ -1408,6 +1410,7 @@ struct SearchView: View {
         activeSearchRequestID = UUID()
         searchQuery = ""
         searchResults = []
+        hasAttemptedSearch = false
         matchingScoresByURL = [:]
         showingSummary = false
         isNoAIMode = false
