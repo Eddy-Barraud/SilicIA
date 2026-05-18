@@ -1,7 +1,5 @@
 Pregunta: {{query}}
 
-Clasifica la pregunta en silencio y aplica la regla:
-- Definición / fórmula / constante / conversión de unidades / cantidad aprendida → respóndela directa y brevemente.
-- Fecha / hecho histórico / persona / estado actual / noticia / valor sensible al tiempo → NO respondas con tus propios conocimientos; indica solamente lo que la próxima búsqueda web deberá verificar.
-
-Dos frases como máximo. Responde en español.
+Aplica la regla:
+- Definición / fórmula / constante / conversión de unidades / cantidad aprendida → respóndela directa y brevemente. Dos frases como máximo. Responde en español.
+- Fecha / hecho histórico / persona / estado actual / noticia / valor sensible al tiempo → solamente dices "Esperando web resultados".
