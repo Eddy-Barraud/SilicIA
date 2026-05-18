@@ -564,12 +564,11 @@ struct ChatView: View {
                 }
             }
 
-            // Primary text input. Bigger vertical padding than the
-            // previous flat `.roundedBorder` field so it looks like the
-            // main affordance of the screen, not a small auxiliary
-            // control.
+            // Primary text input. One visible line at rest, expanding
+            // up to 5 lines as the user types — keeps the container
+            // compact when empty, never crowds the action row.
             TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
-                .lineLimit(2...8)
+                .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .focused($isInputFieldFocused)
@@ -578,7 +577,7 @@ struct ChatView: View {
                 .autocorrectionDisabled(false)
                 #endif
                 .padding(.horizontal, 4)
-                .padding(.vertical, 6)
+                .padding(.vertical, 2)
 
             // Bottom action row: + menu (leading), analyzing progress
             // (centre, when active), send icon (trailing).
@@ -613,13 +612,13 @@ struct ChatView: View {
                 .accessibilityLabel(L.t("chat.composer.send", language: settings.language))
             }
         }
-        .padding(12)
+        .padding(8)
         .background(textBackgroundColor)
         .overlay(
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
-        .cornerRadius(16)
+        .cornerRadius(12)
     }
 
     /// Single "+" menu that gathers every attach-or-toggle action that

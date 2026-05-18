@@ -234,6 +234,19 @@ struct SearchView: View {
         .onAppear {
             settings = AppSettings.load()
             consumeInitialQueryIfNeeded()
+            // Drop the caret into the search field whenever this screen
+            // appears in an idle state. Triggers the iOS soft keyboard
+            // immediately so the user can start typing without an extra
+            // tap. We skip it when results are visible to avoid stealing
+            // focus while the user is scanning them.
+            if searchResults.isEmpty && !searchService.isSearching {
+                // Defer a runloop so the TextField is mounted before we
+                // request focus — SwiftUI ignores focus changes made
+                // before the target view is in the responder chain.
+                DispatchQueue.main.async {
+                    isSearchFieldFocused = true
+                }
+            }
         }
         .onChange(of: settings) {
             settings.save()
@@ -424,18 +437,18 @@ struct SearchView: View {
                 .accessibilityLabel(L.t("search.button.deep", language: settings.language))
             }
         }
-        .padding()
+        .padding(10)
         .background(textBackgroundColor)
         .overlay(
             // Subtle stroke matching the ChatView composer container, so
             // the search field + secondary buttons read as one focal
             // input island rather than a flat strip.
-            RoundedRectangle(cornerRadius: 16)
+            RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
-        .cornerRadius(16)
-        .padding(.horizontal)
-        .padding(.vertical, 8)
+        .cornerRadius(12)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Results View
