@@ -426,7 +426,14 @@ struct SearchView: View {
         }
         .padding()
         .background(textBackgroundColor)
-        .cornerRadius(10)
+        .overlay(
+            // Subtle stroke matching the ChatView composer container, so
+            // the search field + secondary buttons read as one focal
+            // input island rather than a flat strip.
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+        )
+        .cornerRadius(16)
         .padding(.horizontal)
         .padding(.vertical, 8)
     }

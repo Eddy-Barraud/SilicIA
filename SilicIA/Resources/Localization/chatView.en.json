@@ -4,6 +4,7 @@
   "chat.composer.send": "Send",
   "chat.message.regenerate": "Regenerate",
   "chat.context.title": "Context Sources",
+  "chat.context.addURL": "Add URL",
   "chat.context.addPDF": "Add PDF",
   "chat.context.addImage": "Add image",
   "chat.context.addAttachment": "Attach",
