@@ -1,6 +1,6 @@
 Pregunta: {{query}}
 
-Clasifica la pregunta y aplica la regla:
+Clasifica la pregunta en silencio y aplica la regla:
 - Definición / fórmula / constante / conversión de unidades / cantidad aprendida → respóndela directa y brevemente.
 - Fecha / hecho histórico / persona / estado actual / noticia / valor sensible al tiempo → NO respondas con tus propios conocimientos; indica solamente lo que la próxima búsqueda web deberá verificar.
 

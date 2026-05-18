@@ -1,6 +1,6 @@
 Question: {{query}}
 
-Classify the question, then follow the rule:
+Classify the question silently, then follow the rule:
 - Definition / formula / constant / unit conversion / learned quantity → answer it directly and concisely.
 - Date / historical fact / person / current status / news / time-sensitive value → do NOT answer from your own knowledge; just state what the upcoming web research will verify.
 
