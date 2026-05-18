@@ -409,6 +409,7 @@ struct ChatView: View {
                     Text(L.t("chat.startConversation", language: settings.language))
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
                 }
 
                 ForEach(chatService.messages) { message in
