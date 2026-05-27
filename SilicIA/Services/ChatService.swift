@@ -548,9 +548,15 @@ final class ChatService: ObservableObject {
             let pageTexts = extractPDFPageTexts(from: pdfURL)
             debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) extractedPages=\(pageTexts.count)")
             for (pageIndex, pageText) in pageTexts.enumerated() {
+                // Convert any whitespace-aligned tables (invoices, quotes,
+                // spreadsheets exported as PDF) to Markdown pipe rows BEFORE
+                // chunking. Otherwise the chunker's whitespace normalisation
+                // collapses the columns and the model can't tell a price
+                // from a TVA percentage on the same row.
+                let tabularized = RAGChunker.convertWhitespaceAlignedTables(pageText)
                 let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
                 let chunked = ragChunker.chunk(
-                    text: pageText,
+                    text: tabularized,
                     source: source,
                     maxChunkTokens: Self.pdfChunkMaxTokens,
                     overlapTokens: Self.pdfChunkOverlapTokens,

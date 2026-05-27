@@ -94,6 +94,107 @@ struct RAGChunker {
         return chunks
     }
 
+    /// Detects rows in plain text where columns are aligned by 2+ spaces
+    /// or tabs and converts them to Markdown pipe tables. Designed for PDF
+    /// extraction: PDFKit's `page.string` preserves visual spacing between
+    /// columns but the chunker's `normalizeWhitespace` would otherwise
+    /// collapse them, leaving a row like
+    ///
+    ///     Amortisseurs    2    64,24    20%    77,08    154,17
+    ///
+    /// as the flat `"Amortisseurs 2 64,24 20% 77,08 154,17"` — the model
+    /// can no longer tell which number sits under which header, so a
+    /// "price of Amortisseurs" query lands on the VAT percentage instead
+    /// of the total.
+    ///
+    /// Heuristic: a "table row" is a line with at least 3 cells separated
+    /// by runs of 2+ spaces/tabs. Consecutive table rows whose cell counts
+    /// agree (give or take one) are grouped into a single Markdown block,
+    /// with a `| --- |` separator inserted after the first row (treated as
+    /// the header). Standalone rows (≤2 cells) are passed through verbatim.
+    ///
+    /// Call this BEFORE `normalizeWhitespace` — once horizontal runs are
+    /// collapsed, the column boundaries are unrecoverable.
+    nonisolated static func convertWhitespaceAlignedTables(_ text: String) -> String {
+        let lines = text.components(separatedBy: "\n")
+        var output: [String] = []
+        var pending: [[String]] = []
+
+        func flushTable() {
+            guard !pending.isEmpty else { return }
+            // Require at least 2 rows of ≥3 cells to count as a table —
+            // otherwise we'd reformat any prose line that happens to have
+            // a few wide gaps.
+            if pending.count >= 2,
+               let columnCount = pending.map(\.count).max(),
+               columnCount >= 3 {
+                let padded = pending.map { row -> [String] in
+                    row.count >= columnCount
+                        ? row
+                        : row + Array(repeating: "", count: columnCount - row.count)
+                }
+                output.append("| " + padded[0].joined(separator: " | ") + " |")
+                output.append("|" + String(repeating: " --- |", count: columnCount))
+                for row in padded.dropFirst() {
+                    output.append("| " + row.joined(separator: " | ") + " |")
+                }
+            } else {
+                for row in pending {
+                    output.append(row.joined(separator: " "))
+                }
+            }
+            pending = []
+        }
+
+        for line in lines {
+            let cells = splitTabularLine(line)
+            if cells.count >= 3 {
+                pending.append(cells)
+            } else {
+                flushTable()
+                output.append(line)
+            }
+        }
+        flushTable()
+
+        return output.joined(separator: "\n")
+    }
+
+    /// Splits a line on runs of 2+ horizontal whitespace (space/tab/NBSP).
+    /// Single spaces stay inside the cell so multi-word headers like
+    /// `"Prix HT"` survive. Returns empty when the line is whitespace-only
+    /// or has fewer than 2 horizontal-whitespace-run separators.
+    private nonisolated static func splitTabularLine(_ line: String) -> [String] {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return [] }
+
+        var cells: [String] = []
+        var current = ""
+        var spaceRun = 0
+        var inLeading = true
+
+        let separators: Set<Character> = [" ", "\t", "\u{00A0}"]
+        for char in line {
+            if separators.contains(char) {
+                if !inLeading { spaceRun += 1 }
+            } else {
+                if spaceRun >= 2, !current.isEmpty {
+                    cells.append(current.trimmingCharacters(in: .whitespaces))
+                    current = ""
+                } else if spaceRun >= 1, !current.isEmpty {
+                    current.append(" ")
+                }
+                current.append(char)
+                spaceRun = 0
+                inLeading = false
+            }
+        }
+        if !current.isEmpty {
+            cells.append(current.trimmingCharacters(in: .whitespaces))
+        }
+        return cells.filter { !$0.isEmpty }
+    }
+
     /// Collapses whitespace runs while preserving structural newlines.
     /// Horizontal runs (spaces, tabs, NBSP) → single space.
     /// Vertical runs of 3+ newlines → double newline (paragraph break).

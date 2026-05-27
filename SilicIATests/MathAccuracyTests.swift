@@ -239,6 +239,88 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertEqual(result, html)
     }
 
+    // MARK: - Whitespace-aligned table detection (PDF path)
+
+    /// A multi-column invoice row aligned with multi-space gaps should
+    /// convert to a Markdown pipe table — exactly the regression motivating
+    /// the fix: a PDF row like
+    ///   `Amortisseurs    2    64,24    20%    77,08    154,17`
+    /// must no longer collapse to a flat sequence of numbers the model
+    /// can't map back to column headers.
+    func testWhitespaceAlignedTableConvertsToMarkdown() {
+        let pdf = """
+        Description           Qté   Prix HT   TVA   Prix TTC   Total
+        Amortisseurs          2     64,24     20%   77,08      154,17
+        Triangles             1     120,00    20%   144,00     144,00
+        """
+        let converted = RAGChunker.convertWhitespaceAlignedTables(pdf)
+        XCTAssertTrue(converted.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |"),
+                      "Header row missing pipes in: \n\(converted)")
+        XCTAssertTrue(converted.contains("| Amortisseurs | 2 | 64,24 | 20% | 77,08 | 154,17 |"),
+                      "Amortisseurs row missing or mis-aligned in: \n\(converted)")
+        XCTAssertTrue(converted.contains("| --- |"),
+                      "Markdown header-separator missing in: \n\(converted)")
+    }
+
+    /// Multi-word cell headers ("Prix HT", "Prix TTC") must survive — the
+    /// splitter has to glue on single spaces and only break on 2+ spaces.
+    func testTabularSplitGluesSingleSpacesIntoCells() {
+        let pdf = """
+        Article          Prix HT   TVA
+        Amortisseurs     64,24     20%
+        Triangles        120,00    20%
+        """
+        let converted = RAGChunker.convertWhitespaceAlignedTables(pdf)
+        XCTAssertTrue(converted.contains("| Article | Prix HT | TVA |"),
+                      "Multi-word header 'Prix HT' got split on its internal space: \n\(converted)")
+    }
+
+    /// Plain prose with occasional double-spaces must NOT get reformatted
+    /// as a table — false positives would mangle ordinary reading text.
+    func testProseIsNotConvertedToTable() {
+        let prose = "This is a paragraph.  It has two sentences with a double space.\nA second line follows."
+        let converted = RAGChunker.convertWhitespaceAlignedTables(prose)
+        XCTAssertFalse(converted.contains("|"),
+                       "Prose paragraph was wrongly converted to a Markdown table: \n\(converted)")
+    }
+
+    /// Single tabular row alone (no peer row) shouldn't trigger conversion —
+    /// would produce a header without data.
+    func testStandaloneTabularLineIsNotConverted() {
+        let line = "Field 1    Field 2    Field 3"
+        let converted = RAGChunker.convertWhitespaceAlignedTables(line)
+        XCTAssertFalse(converted.contains("|"),
+                       "Standalone wide-gap line was wrongly converted: \n\(converted)")
+    }
+
+    /// End-to-end through the chunker: after conversion + chunking, the
+    /// Amortisseurs row remains a contiguous unit and the price "154,17"
+    /// sits in the same chunk as the row's other cells.
+    func testAmortisseursRowSurvivesChunkingIntact() {
+        let pdf = """
+        Devis voiture 208
+
+        Description           Qté   Prix HT   TVA   Prix TTC   Total
+        Amortisseurs          2     64,24     20%   77,08      154,17
+        Triangles             1     120,00    20%   144,00     144,00
+
+        Total TTC: 298,17
+        """
+        let converted = RAGChunker.convertWhitespaceAlignedTables(pdf)
+        let chunks = RAGChunker().chunk(
+            text: converted,
+            source: "test",
+            maxChunkTokens: 200,
+            overlapTokens: 20
+        )
+        let priceChunk = chunks.first { $0.text.contains("Amortisseurs") }
+        XCTAssertNotNil(priceChunk, "No chunk contains the Amortisseurs row")
+        XCTAssertTrue(priceChunk?.text.contains("154,17") == true,
+                      "Amortisseurs total price 154,17 missing from its chunk: \(priceChunk?.text ?? "nil")")
+        XCTAssertTrue(priceChunk?.text.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |") == true,
+                      "Header row missing from the same chunk as Amortisseurs row — model loses column context: \(priceChunk?.text ?? "nil")")
+    }
+
     // MARK: - Test helpers
 
     /// Extracts the inner HTML of the first `<table>...</table>` block,
