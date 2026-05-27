@@ -1,0 +1,71 @@
+name: Test SilicIA
+
+# Math-accuracy regression suite + existing unit tests. The MathAccuracyTests
+# class guards the deterministic pieces of the math/numbers pipeline: chunker
+# integrity around multi-digit numbers, sentence/paragraph-aware boundaries,
+# numeric-aware RAG relevance scoring, and HTML-table-to-Markdown conversion
+# inside the web scraper. Run on every push / PR so a regression on any of
+# those primitives can't slip in unnoticed.
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    runs-on: macos-26
+    env:
+      CODE_SIGNING_ALLOWED: "NO"
+      CODE_SIGNING_REQUIRED: "NO"
+      CODE_SIGN_IDENTITY: ""
+      DEVELOPMENT_TEAM: ""
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Restore Xcode Cache
+      uses: irgaly/xcode-cache@v1
+      with:
+        key: xcode-test-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
+        restore-keys: |
+          xcode-test-cache-${{ runner.os }}-${{ github.ref_name }}-
+
+    - name: Select Xcode
+      run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
+    - name: Xcode Version
+      run: xcodebuild -version
+
+    - name: Run Tests
+      run: |
+        set -o pipefail
+        xcodebuild \
+          -project SilicIA.xcodeproj \
+          -scheme SilicIA \
+          -configuration Debug \
+          -destination "platform=macOS" \
+          CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          DEVELOPMENT_TEAM="" \
+          test | tee /tmp/test.log
+
+    - name: Verify MathAccuracyTests ran
+      # Fail loudly if the math-accuracy class was skipped or renamed away —
+      # otherwise a refactor could silently drop coverage of the numeric
+      # pipeline and we wouldn't notice until production answers regress.
+      run: |
+        if ! grep -q "Test Suite 'MathAccuracyTests' passed" /tmp/test.log; then
+          echo "::error::MathAccuracyTests did not run or did not pass — check the test log."
+          exit 1
+        fi
+        echo "MathAccuracyTests ran and passed."
+
+    - name: Upload Test Logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-logs
+        path: /tmp/test.log
