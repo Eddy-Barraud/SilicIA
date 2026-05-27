@@ -33,6 +33,12 @@ final class ChatService: ObservableObject {
     /// Security-scoped bookmark for the same PDF, for hosts that want to
     /// resolve the file across launches.
     @Published var currentConversationPDFBookmark: Data?
+    /// Normalized base filenames of every PDF currently in context, in
+    /// order. The host watches this to mirror the full set of PDFs (not
+    /// just the anchor) into its UI when a conversation is restored.
+    @Published var currentConversationPDFFilenames: [String] = []
+    /// Security-scoped bookmarks aligned to `currentConversationPDFFilenames`.
+    @Published var currentConversationPDFBookmarks: [Data] = []
 
     private let webScraper = WebScrapingService()
     private let webSearchService = WebSearchService()
@@ -47,6 +53,11 @@ final class ChatService: ObservableObject {
     /// `persistMessage` to stamp a freshly created conversation with the
     /// document the user is asking about.
     private var activePDFURLForNewConversation: URL?
+    /// The *full* PDF context list from the most recent `sendMessage` call.
+    /// Stamped onto a freshly created conversation, and synced onto an
+    /// existing conversation so it always reflects whatever PDFs the
+    /// composer currently has attached.
+    private var activePDFURLsForNewConversation: [URL] = []
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLCap = 30
@@ -88,6 +99,8 @@ final class ChatService: ObservableObject {
         useWikipedia: Bool = true
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
+        activePDFURLsForNewConversation = pdfURLs
+        syncCurrentConversationPDFs(with: pdfURLs)
         messages.append(ChatMessage(role: .user, content: message))
         persistMessage(role: "user", content: message, citations: nil)
         errorMessage = nil
@@ -413,7 +426,10 @@ final class ChatService: ObservableObject {
         currentConversation = nil
         currentConversationPDFFilename = nil
         currentConversationPDFBookmark = nil
+        currentConversationPDFFilenames = []
+        currentConversationPDFBookmarks = []
         activePDFURLForNewConversation = nil
+        activePDFURLsForNewConversation = []
     }
 
     /// Collects web, PDF, and image chunks from provided context.
@@ -990,16 +1006,21 @@ final class ChatService: ObservableObject {
         // Create conversation if needed
         if currentConversation == nil {
             let (filename, bookmark) = pdfStampForNewConversation()
+            let (filenames, bookmarks) = pdfStampListForNewConversation()
             let conv = Conversation(
                 messages: [],
                 title: role == "user" ? generateTitle(from: content) : nil,
                 pdfFilename: filename,
-                pdfBookmark: bookmark
+                pdfBookmark: bookmark,
+                pdfFilenames: filenames,
+                pdfBookmarks: bookmarks
             )
             currentConversation = conv
             modelContext.insert(conv)
             currentConversationPDFFilename = filename
             currentConversationPDFBookmark = bookmark
+            currentConversationPDFFilenames = filenames
+            currentConversationPDFBookmarks = bookmarks
         }
 
         guard let conversation = currentConversation else { return }
@@ -1143,6 +1164,8 @@ final class ChatService: ObservableObject {
         currentConversation = conversation
         currentConversationPDFFilename = conversation.pdfFilename
         currentConversationPDFBookmark = conversation.pdfBookmark
+        currentConversationPDFFilenames = conversation.pdfFilenames
+        currentConversationPDFBookmarks = conversation.pdfBookmarks
 
         // Convert SwiftData messages to ChatMessage for UI
         messages = conversation.messages
@@ -1160,6 +1183,46 @@ final class ChatService: ObservableObject {
         let filename = Self.pdfBaseFilename(url.lastPathComponent)
         let bookmark = try? makeSecurityScopedBookmark(for: url)
         return (filename, bookmark)
+    }
+
+    /// Same as `pdfStampForNewConversation` but for the *full* set of PDFs
+    /// currently in context, not just the anchor. Bookmarks that fail to
+    /// build are skipped so the two parallel arrays stay aligned.
+    private func pdfStampListForNewConversation() -> ([String], [Data]) {
+        var names: [String] = []
+        var bookmarks: [Data] = []
+        for url in activePDFURLsForNewConversation {
+            guard let bookmark = try? makeSecurityScopedBookmark(for: url) else { continue }
+            names.append(Self.pdfBaseFilename(url.lastPathComponent))
+            bookmarks.append(bookmark)
+        }
+        return (names, bookmarks)
+    }
+
+    /// Keeps the active conversation's persisted PDF list in sync with
+    /// whatever the composer currently has attached. Called from
+    /// `sendMessage` so adds/removes that happen between turns reach the
+    /// store on the next message.
+    private func syncCurrentConversationPDFs(with pdfURLs: [URL]) {
+        guard let conv = currentConversation else { return }
+        var names: [String] = []
+        var bookmarks: [Data] = []
+        for url in pdfURLs {
+            guard let bookmark = try? makeSecurityScopedBookmark(for: url) else { continue }
+            names.append(Self.pdfBaseFilename(url.lastPathComponent))
+            bookmarks.append(bookmark)
+        }
+        // Skip the SwiftData write (and the @Published republish) when the
+        // arrays haven't actually changed, so we don't trigger redundant
+        // host-side reactions mid-send.
+        if conv.pdfFilenames != names {
+            conv.pdfFilenames = names
+            currentConversationPDFFilenames = names
+        }
+        if conv.pdfBookmarks != bookmarks {
+            conv.pdfBookmarks = bookmarks
+            currentConversationPDFBookmarks = bookmarks
+        }
     }
 
     /// Strips the trailing " (N)" suffix that `DroppedPDFStore` adds when
@@ -1190,20 +1253,38 @@ final class ChatService: ObservableObject {
 #endif
     }
 
-    /// Returns the most recently updated conversation anchored to a PDF with
-    /// the given filename, or `nil` if none. Both the stored stamp and the
-    /// query filename are normalized via `pdfBaseFilename`, so reopening
-    /// the same PDF across sessions (even after `DroppedPDFStore` mints a
-    /// "X (N).pdf" copy) lands on the same conversation.
+    /// Returns the most recently updated conversation that included a PDF
+    /// with the given filename in context — whether it was the *anchor*
+    /// (the legacy `pdfFilename` field, populated on the first turn) or
+    /// any later addition (the `pdfFilenames` array, kept in sync by
+    /// `syncCurrentConversationPDFs`). Both sides are normalized via
+    /// `pdfBaseFilename` so a re-dropped "X (3).pdf" still lands on the
+    /// original "X.pdf" conversation.
+    ///
+    /// Implementation note: we used to compose this in a single `#Predicate`
+    /// with `pdfFilenames.contains(normalized)`, but SwiftData's predicate
+    /// engine crashes (`EXC_BAD_ACCESS`) on `[String].contains` against a
+    /// `@Model` property — that operator doesn't translate to the backing
+    /// store. So this runs in two steps: cheap anchor predicate first,
+    /// then an in-memory scan of the broader set as a fallback.
     func findLatestConversation(matchingPDFFilename filename: String) -> Conversation? {
         guard let modelContext else { return nil }
         let normalized = Self.pdfBaseFilename(filename)
-        var descriptor = FetchDescriptor<Conversation>(
+
+        var anchorDescriptor = FetchDescriptor<Conversation>(
             predicate: #Predicate { $0.pdfFilename == normalized },
             sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
         )
-        descriptor.fetchLimit = 1
-        return try? modelContext.fetch(descriptor).first
+        anchorDescriptor.fetchLimit = 1
+        if let anchor = try? modelContext.fetch(anchorDescriptor).first {
+            return anchor
+        }
+
+        let allDescriptor = FetchDescriptor<Conversation>(
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        guard let all = try? modelContext.fetch(allDescriptor) else { return nil }
+        return all.first { $0.pdfFilenames.contains(normalized) }
     }
 
     /// Returns a conversation anchored to a PDF with the given checksum,

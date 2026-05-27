@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Combine
 import UniformTypeIdentifiers
 import LaTeXSwiftUI
 #if os(macOS)
@@ -41,6 +42,15 @@ struct ChatView: View {
     /// any conversation already anchored to it. Optional; ignored in
     /// SilicIA's default flow.
     var onPDFAddedToContext: ((URL) -> Void)? = nil
+    /// Mirror of `onPDFAddedToContext` for removals. Fires when the user
+    /// clicks the × on a PDF context row. Hosts use it to close the
+    /// matching tab.
+    var onPDFRemovedFromContext: ((URL) -> Void)? = nil
+    /// Host-driven PDF removals. When PDFtalkme closes a tab, it sends
+    /// the URL through this publisher; `ChatView` removes the matching
+    /// `.pdf` context row. Decoupled from `sharedPDFs` so removals don't
+    /// collide with the existing "add" inbox flow.
+    var pdfRemovalRequests: AnyPublisher<URL, Never>? = nil
 
     /// In `.pdfTalkme` mode, web search is force-disabled regardless of
     /// the AppStorage flag — the host app is offline-only.
@@ -194,6 +204,22 @@ struct ChatView: View {
             }
             .onChange(of: sharedImages) {
                 mergeSharedInputsIfNeeded()
+            }
+            // Host-driven PDF removal — PDFtalkme closes a tab and pipes the
+            // URL through; we drop any matching `.pdf` context row by base
+            // filename so a sandbox-renamed copy ("X (2).pdf") still resolves.
+            .onReceive(pdfRemovalRequests ?? Empty<URL, Never>().eraseToAnyPublisher()) { url in
+                let key = ChatService.pdfBaseFilename(url.lastPathComponent)
+                let before = contextSources.count
+                contextSources.removeAll { source in
+                    if case .pdf(let existingURL?) = source.kind {
+                        return ChatService.pdfBaseFilename(existingURL.lastPathComponent) == key
+                    }
+                    return false
+                }
+                if contextSources.count != before {
+                    scheduleContextPreanalysis()
+                }
             }
         }
     }
@@ -786,7 +812,10 @@ struct ChatView: View {
                 }
             }
             Button {
-                contextSources.remove(at: index)
+                let removed = contextSources.remove(at: index)
+                if case .pdf(let url?) = removed.kind {
+                    onPDFRemovedFromContext?(url)
+                }
                 scheduleContextPreanalysis()
             } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -1103,9 +1132,13 @@ struct ChatView: View {
             debugDrop("Ignoring non-PDF URL during insert: \(url.path)")
             return
         }
+        // Dedup by *base* filename so re-dropping the same source file
+        // (which `DroppedPDFStore` re-persists as "X (2).pdf", "X (3).pdf"…)
+        // doesn't add a phantom second context row.
+        let incomingKey = ChatService.pdfBaseFilename(url.lastPathComponent)
         guard !contextSources.contains(where: { source in
-            if case .pdf(let existingURL) = source.kind {
-                return existingURL == url
+            if case .pdf(let existingURL) = source.kind, let existingURL {
+                return ChatService.pdfBaseFilename(existingURL.lastPathComponent) == incomingKey
             }
             return false
         }) else {

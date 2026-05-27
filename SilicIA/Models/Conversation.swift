@@ -25,15 +25,24 @@ final class Conversation {
     var updatedAt: Date
     /// JSON string storing context sources used in the conversation.
     var contextSources: String
-    /// Filename of the primary PDF this conversation is anchored to, if any.
-    /// Used as the cheap first-pass key when reopening a PDF.
+    /// Filename of the *primary* PDF this conversation is anchored to, if
+    /// any. Used as the cheap first-pass query key when reopening a PDF.
+    /// Equals `pdfFilenames.first` whenever the conversation was created
+    /// with at least one PDF in context.
     var pdfFilename: String?
-    /// Security-scoped bookmark to the primary PDF — lets us reopen the file
-    /// after the user moves it or relaunches the app under the sandbox.
+    /// Security-scoped bookmark to the primary PDF.
     var pdfBookmark: Data?
-    /// SHA-256 of the primary PDF's bytes. Computed lazily in the background
-    /// and used as a fallback identifier when filename + bookmark fail.
+    /// SHA-256 of the primary PDF's bytes (lazy, set in the background).
     var pdfChecksum: String?
+    /// Normalized base filenames of *every* PDF that was in context when
+    /// this conversation last sent a message. Order is preserved so the
+    /// host (PDFtalkme) can restore the same tab arrangement.
+    var pdfFilenames: [String] = []
+    /// Security-scoped bookmarks for every PDF in `pdfFilenames`, aligned
+    /// by index. Storing a parallel array (rather than a `[Codable]` of
+    /// pairs) keeps the migration trivial — SwiftData treats both
+    /// `[String]` and `[Data]` as primitive arrays.
+    var pdfBookmarks: [Data] = []
 
     init(
         id: UUID = UUID(),
@@ -44,7 +53,9 @@ final class Conversation {
         contextSources: String = "{}",
         pdfFilename: String? = nil,
         pdfBookmark: Data? = nil,
-        pdfChecksum: String? = nil
+        pdfChecksum: String? = nil,
+        pdfFilenames: [String] = [],
+        pdfBookmarks: [Data] = []
     ) {
         self.id = id
         self.messages = messages
@@ -55,5 +66,7 @@ final class Conversation {
         self.pdfFilename = pdfFilename
         self.pdfBookmark = pdfBookmark
         self.pdfChecksum = pdfChecksum
+        self.pdfFilenames = pdfFilenames
+        self.pdfBookmarks = pdfBookmarks
     }
 }
