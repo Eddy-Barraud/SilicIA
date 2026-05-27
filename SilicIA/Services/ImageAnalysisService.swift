@@ -70,6 +70,75 @@ enum ImageAnalysisService {
         return ImageAnalysisResult(recognizedText: recognizedText, labels: labels)
     }
 
+    /// Runs OCR on `cgImage` and reconstructs the **visual reading order** by
+    /// grouping each `VNRecognizedTextObservation` into rows by its `.boundingBox`
+    /// Y-coordinate, then sorting within each row by X-coordinate. Cells inside
+    /// a row are separated by 4 spaces so the downstream pipeline's
+    /// `RAGChunker.convertWhitespaceAlignedTables` can detect the table and
+    /// emit a Markdown pipe block.
+    ///
+    /// This is the antidote to PDFKit's `page.string` returning column-major
+    /// dumps (all descriptions → all quantities → all prices), which happens
+    /// when an invoice/quote PDF stores text in column-major drawing order.
+    /// Vision's bounding boxes always reflect the *visual* layout, not the
+    /// drawing order, so rows recombine correctly here.
+    ///
+    /// Returns `nil` when Vision fails or produces no observations.
+    static func recognizeTextWithLayout(
+        in cgImage: CGImage,
+        languages: [String] = defaultRecognitionLanguages
+    ) -> String? {
+        let request = makeTextRequest(languages: languages)
+        let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+        do {
+            try handler.perform([request])
+        } catch {
+            #if DEBUG
+            print("[ImageAnalysisService] OCR-with-layout request failed: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+        guard let observations = request.results, !observations.isEmpty else {
+            return nil
+        }
+
+        // Sort top-to-bottom. Vision coordinates: origin is bottom-left,
+        // so higher midY = higher up on the page.
+        let topToBottom = observations.sorted { $0.boundingBox.midY > $1.boundingBox.midY }
+
+        // Group into rows by Y-midpoint proximity. Tolerance uses the
+        // observation's own bounding-box height as a proxy for line height
+        // so dense pages and large-print pages both group correctly.
+        var rows: [[VNRecognizedTextObservation]] = []
+        for obs in topToBottom {
+            let y = obs.boundingBox.midY
+            let halfHeight = obs.boundingBox.height / 2
+            if var last = rows.last,
+               let referenceY = last.first.map({ $0.boundingBox.midY }),
+               abs(y - referenceY) <= halfHeight {
+                last.append(obs)
+                rows[rows.count - 1] = last
+            } else {
+                rows.append([obs])
+            }
+        }
+
+        // Within each row, sort left-to-right and join by 4 spaces. The
+        // wide separator survives into the chunker pipeline and triggers
+        // `convertWhitespaceAlignedTables` to emit a Markdown pipe row.
+        let lines: [String] = rows.compactMap { row in
+            let leftToRight = row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
+            let cells = leftToRight.compactMap { $0.topCandidates(1).first?.string }
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            guard !cells.isEmpty else { return nil }
+            return cells.joined(separator: "    ")
+        }
+
+        let joined = lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        return joined.isEmpty ? nil : joined
+    }
+
     /// Runs OCR on an already-decoded `CGImage`. Returns the recognized text or
     /// `nil` if Vision threw or produced an empty result.
     ///

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import Combine
 import UniformTypeIdentifiers
 import LaTeXSwiftUI
 #if os(macOS)
@@ -25,6 +26,21 @@ enum ChatViewMode {
     case pdfTalkme
 }
 
+/// Identifies which file picker the composer's `+` menu is currently
+/// driving. Used to multiplex a single `.fileImporter` modifier — see
+/// `ChatView.activeFilePicker`.
+private enum FilePickerKind: Hashable {
+    case pdf
+    case image
+
+    var allowedContentTypes: [UTType] {
+        switch self {
+        case .pdf: return [.pdf]
+        case .image: return [.image]
+        }
+    }
+}
+
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
     @Binding var sharedURLs: [String]
@@ -41,6 +57,15 @@ struct ChatView: View {
     /// any conversation already anchored to it. Optional; ignored in
     /// SilicIA's default flow.
     var onPDFAddedToContext: ((URL) -> Void)? = nil
+    /// Mirror of `onPDFAddedToContext` for removals. Fires when the user
+    /// clicks the × on a PDF context row. Hosts use it to close the
+    /// matching tab.
+    var onPDFRemovedFromContext: ((URL) -> Void)? = nil
+    /// Host-driven PDF removals. When PDFtalkme closes a tab, it sends
+    /// the URL through this publisher; `ChatView` removes the matching
+    /// `.pdf` context row. Decoupled from `sharedPDFs` so removals don't
+    /// collide with the existing "add" inbox flow.
+    var pdfRemovalRequests: AnyPublisher<URL, Never>? = nil
 
     /// In `.pdfTalkme` mode, web search is force-disabled regardless of
     /// the AppStorage flag — the host app is offline-only.
@@ -55,8 +80,11 @@ struct ChatView: View {
     }
 
     @State private var messageInput = ""
-    @State private var showFileImporter = false
-    @State private var showImageImporter = false
+    /// Kind of file picker currently presented. Single enum so we can use
+    /// one `.fileImporter` modifier — stacking two `.fileImporter`s on the
+    /// same view is a SwiftUI footgun where only the last applied modifier
+    /// is wired, silently breaking the other.
+    @State private var activeFilePicker: FilePickerKind? = nil
     /// User-attached context. Stays empty by default — the previous design
     /// always carried a phantom empty URL placeholder so the user could
     /// type into it, but that exposed an alien blank row at all times.
@@ -158,24 +186,29 @@ struct ChatView: View {
                 })
             }
             #endif
+            // Single multiplexed file importer — stacking two `.fileImporter`
+            // modifiers on the same view silently breaks one of them, so we
+            // drive both flows from one `activeFilePicker` enum. The kind is
+            // captured into `pickerKind` before resetting state, since the
+            // callback may fire after the binding has cleared.
             .fileImporter(
-                isPresented: $showFileImporter,
-                allowedContentTypes: [.pdf],
+                isPresented: Binding(
+                    get: { activeFilePicker != nil },
+                    set: { isPresented in
+                        if !isPresented { activeFilePicker = nil }
+                    }
+                ),
+                allowedContentTypes: activeFilePicker?.allowedContentTypes ?? [.pdf],
                 allowsMultipleSelection: true
-            ) { result in
+            ) { [pickerKind = activeFilePicker] result in
+                activeFilePicker = nil
                 guard case .success(let urls) = result else { return }
                 Task { @MainActor in
-                    appendPDFSources(urls)
-                }
-            }
-            .fileImporter(
-                isPresented: $showImageImporter,
-                allowedContentTypes: [.image],
-                allowsMultipleSelection: true
-            ) { result in
-                guard case .success(let urls) = result else { return }
-                Task { @MainActor in
-                    appendImageSources(urls)
+                    switch pickerKind {
+                    case .pdf: appendPDFSources(urls)
+                    case .image: appendImageSources(urls)
+                    case .none: break
+                    }
                 }
             }
             .onAppear {
@@ -194,6 +227,22 @@ struct ChatView: View {
             }
             .onChange(of: sharedImages) {
                 mergeSharedInputsIfNeeded()
+            }
+            // Host-driven PDF removal — PDFtalkme closes a tab and pipes the
+            // URL through; we drop any matching `.pdf` context row by base
+            // filename so a sandbox-renamed copy ("X (2).pdf") still resolves.
+            .onReceive(pdfRemovalRequests ?? Empty<URL, Never>().eraseToAnyPublisher()) { url in
+                let key = ChatService.pdfBaseFilename(url.lastPathComponent)
+                let before = contextSources.count
+                contextSources.removeAll { source in
+                    if case .pdf(let existingURL?) = source.kind {
+                        return ChatService.pdfBaseFilename(existingURL.lastPathComponent) == key
+                    }
+                    return false
+                }
+                if contextSources.count != before {
+                    scheduleContextPreanalysis()
+                }
             }
         }
     }
@@ -608,11 +657,21 @@ struct ChatView: View {
                 .autocorrectionDisabled(false)
                 #endif
                 // On macOS, Return sends the message; Shift+Return inserts
-                // a newline. `.onSubmit` never fires on axis:.vertical fields,
-                // so we intercept the key directly.
+                // a newline. `.onSubmit` never fires on axis:.vertical fields.
+                //
+                // Two important details:
+                //   1. Use the simpler `.onKeyPress(.return)` overload — the
+                //      `keys:` overload (with a KeyPress argument) has lower
+                //      interception priority, and NSTextView swallows Return
+                //      for newline insertion before SwiftUI sees it.
+                //   2. The simpler overload's closure takes no argument, so
+                //      we read shift state from `NSEvent.modifierFlags`
+                //      directly. AppKit is already imported above.
                 #if os(macOS)
-                .onKeyPress(keys: [.return]) { press in
-                    guard !press.modifiers.contains(.shift) else { return .ignored }
+                .onKeyPress(.return) {
+                    if NSEvent.modifierFlags.contains(.shift) {
+                        return .ignored   // Shift+Return → NSTextView inserts newline
+                    }
                     submitMessage()
                     return .handled
                 }
@@ -676,12 +735,12 @@ struct ChatView: View {
                 Label(L.t("chat.context.addURL", language: settings.language), systemImage: "link")
             }
             Button {
-                showFileImporter = true
+                activeFilePicker = .pdf
             } label: {
                 Label(L.t("chat.context.addPDF", language: settings.language), systemImage: "doc.richtext")
             }
             Button {
-                showImageImporter = true
+                activeFilePicker = .image
             } label: {
                 Label(L.t("chat.context.addImage", language: settings.language), systemImage: "photo")
             }
@@ -786,7 +845,10 @@ struct ChatView: View {
                 }
             }
             Button {
-                contextSources.remove(at: index)
+                let removed = contextSources.remove(at: index)
+                if case .pdf(let url?) = removed.kind {
+                    onPDFRemovedFromContext?(url)
+                }
                 scheduleContextPreanalysis()
             } label: {
                 Image(systemName: "xmark.circle.fill")
@@ -1103,9 +1165,13 @@ struct ChatView: View {
             debugDrop("Ignoring non-PDF URL during insert: \(url.path)")
             return
         }
+        // Dedup by *base* filename so re-dropping the same source file
+        // (which `DroppedPDFStore` re-persists as "X (2).pdf", "X (3).pdf"…)
+        // doesn't add a phantom second context row.
+        let incomingKey = ChatService.pdfBaseFilename(url.lastPathComponent)
         guard !contextSources.contains(where: { source in
-            if case .pdf(let existingURL) = source.kind {
-                return existingURL == url
+            if case .pdf(let existingURL) = source.kind, let existingURL {
+                return ChatService.pdfBaseFilename(existingURL.lastPathComponent) == incomingKey
             }
             return false
         }) else {

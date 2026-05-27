@@ -84,6 +84,23 @@ class WebScrapingService: ObservableObject {
         pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
         options: [.caseInsensitive]
     )
+    /// Matches a whole `<table>...</table>` block. Used to extract tables
+    /// *before* the generic tag stripper destroys their structure, so we can
+    /// emit a Markdown pipe table the model can actually read.
+    static let tableBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<table[^>]*>([\\s\\S]*?)</table>",
+        options: [.caseInsensitive]
+    )
+    /// Matches a `<tr>...</tr>` row inside a table block.
+    static let tableRowRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<tr[^>]*>([\\s\\S]*?)</tr>",
+        options: [.caseInsensitive]
+    )
+    /// Matches a `<td>...</td>` or `<th>...</th>` cell inside a row.
+    static let tableCellRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<(t[dh])[^>]*>([\\s\\S]*?)</\\1>",
+        options: [.caseInsensitive]
+    )
     /// Strips HTML comments.
     private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<!--[\\s\\S]*?-->",
@@ -235,6 +252,11 @@ class WebScrapingService: ObservableObject {
     private func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
+        // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
+        //    generic tag stripper flattens them. Numeric stats pages rely
+        //    almost entirely on tables, and the model handles `| col |`
+        //    layouts far better than space-separated rubble.
+        text = Self.extractAndReplaceTables(text)
         // 1. Strip script/style/nav/header/footer blocks (and their content) in one alternation pass.
         text = Self.applyRegex(Self.nonContentBlockRegex, to: text, replacement: "")
         // 2. Strip HTML comments.
@@ -243,8 +265,10 @@ class WebScrapingService: ObservableObject {
         text = Self.applyRegex(Self.htmlTagRegex, to: text, replacement: " ")
         // 4. Decode common HTML entities (named + numeric + hex) in a single pass.
         text = Self.decodeHTMLEntities(text)
-        // 5. Collapse whitespace runs.
-        text = Self.applyRegex(Self.whitespaceRunRegex, to: text, replacement: " ")
+        // 5. Collapse whitespace runs. Use the chunker's whitespace normaliser
+        //    so newlines (paragraph + table-row boundaries) survive the
+        //    pipeline — the chunker uses those as preferred split points.
+        text = RAGChunker.normalizeWhitespace(text)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
         // 6. Cap length. `String.prefix(_:)` operates on extended grapheme
@@ -256,6 +280,91 @@ class WebScrapingService: ObservableObject {
         }
 
         return text
+    }
+
+    /// Finds every `<table>` in `html`, converts it to a Markdown pipe table,
+    /// and splices the result back into the document — surrounded by blank
+    /// lines so it forms its own paragraph block. Surviving `\n` characters
+    /// later guide the RAG chunker toward row-aligned split points.
+    static func extractAndReplaceTables(_ html: String) -> String {
+        guard let tableRegex = tableBlockRegex else { return html }
+        let nsRange = NSRange(html.startIndex..., in: html)
+        let matches = tableRegex.matches(in: html, options: [], range: nsRange)
+        guard !matches.isEmpty else { return html }
+
+        var result = ""
+        result.reserveCapacity(html.count)
+        var cursor = html.startIndex
+        for match in matches {
+            guard let full = Range(match.range, in: html),
+                  let inner = Range(match.range(at: 1), in: html) else {
+                continue
+            }
+            if cursor < full.lowerBound {
+                result.append(contentsOf: html[cursor..<full.lowerBound])
+            }
+            let markdown = convertTableToMarkdown(String(html[inner]))
+            if !markdown.isEmpty {
+                result.append("\n\n")
+                result.append(markdown)
+                result.append("\n\n")
+            }
+            cursor = full.upperBound
+        }
+        if cursor < html.endIndex {
+            result.append(contentsOf: html[cursor...])
+        }
+        return result
+    }
+
+    /// Converts the inner HTML of a `<table>` element to a Markdown pipe
+    /// table. Empty input → empty output. Uneven row lengths are padded.
+    /// Cell text has nested tags stripped and pipe characters escaped so the
+    /// resulting Markdown is well-formed.
+    static func convertTableToMarkdown(_ tableInnerHTML: String) -> String {
+        guard let rowRegex = tableRowRegex, let cellRegex = tableCellRegex else { return "" }
+        let nsRange = NSRange(tableInnerHTML.startIndex..., in: tableInnerHTML)
+        let rowMatches = rowRegex.matches(in: tableInnerHTML, options: [], range: nsRange)
+        var rows: [[String]] = []
+        for rowMatch in rowMatches {
+            guard let inner = Range(rowMatch.range(at: 1), in: tableInnerHTML) else { continue }
+            let rowText = String(tableInnerHTML[inner])
+            let rowNSRange = NSRange(rowText.startIndex..., in: rowText)
+            let cellMatches = cellRegex.matches(in: rowText, options: [], range: rowNSRange)
+            var cells: [String] = []
+            for cellMatch in cellMatches {
+                guard let cellRange = Range(cellMatch.range(at: 2), in: rowText) else { continue }
+                cells.append(sanitizeCellText(String(rowText[cellRange])))
+            }
+            if !cells.isEmpty {
+                rows.append(cells)
+            }
+        }
+        guard !rows.isEmpty else { return "" }
+
+        let columnCount = rows.map(\.count).max() ?? 0
+        guard columnCount > 0 else { return "" }
+        let padded = rows.map { row -> [String] in
+            row.count == columnCount ? row : row + Array(repeating: "", count: columnCount - row.count)
+        }
+        var lines: [String] = []
+        lines.append("| " + padded[0].joined(separator: " | ") + " |")
+        lines.append("|" + String(repeating: " --- |", count: columnCount))
+        for row in padded.dropFirst() {
+            lines.append("| " + row.joined(separator: " | ") + " |")
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// Strips nested tags, decodes entities, collapses whitespace, escapes
+    /// stray pipes so they don't break the surrounding Markdown table.
+    private static func sanitizeCellText(_ text: String) -> String {
+        var t = text
+        t = applyRegex(htmlTagRegex, to: t, replacement: " ")
+        t = decodeHTMLEntities(t)
+        t = applyRegex(whitespaceRunRegex, to: t, replacement: " ")
+        t = t.replacingOccurrences(of: "|", with: "\\|")
+        return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Applies a cached regex with `replacement` over the full string. No-op when the regex is nil.
