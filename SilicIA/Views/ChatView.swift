@@ -16,6 +16,15 @@ import UIKit
 import SafariServices
 #endif
 
+/// Operating mode for `ChatView`. `.full` is SilicIA's default experience;
+/// `.pdfTalkme` strips features that don't make sense in PDFtalkme — the
+/// attachment "+" menu (the host app controls the single PDF) and the
+/// web-search settings (PDFtalkme is offline-only by design).
+enum ChatViewMode {
+    case full
+    case pdfTalkme
+}
+
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
     @Binding var sharedURLs: [String]
@@ -25,6 +34,19 @@ struct ChatView: View {
     @Environment(\.modelContext) private var modelContext
 
     let chatService: ChatService
+    var mode: ChatViewMode = .full
+
+    /// In `.pdfTalkme` mode, web search is force-disabled regardless of
+    /// the AppStorage flag — the host app is offline-only.
+    private var effectiveIsWebSearchEnabled: Bool {
+        mode == .pdfTalkme ? false : isWebSearchEnabled
+    }
+    private var effectiveUseDuckDuckGo: Bool {
+        mode == .pdfTalkme ? false : settings.useDuckDuckGo
+    }
+    private var effectiveUseWikipedia: Bool {
+        mode == .pdfTalkme ? false : settings.useWikipedia
+    }
 
     @State private var messageInput = ""
     @State private var showFileImporter = false
@@ -327,6 +349,7 @@ struct ChatView: View {
                 }
             }
 
+            if mode != .pdfTalkme {
             VStack(alignment: .leading, spacing: 8) {
                 Text(L.t("chat.settings.searchSources", language: settings.language))
                     .font(.subheadline)
@@ -377,6 +400,7 @@ struct ChatView: View {
                     .font(.caption)
                     .foregroundColor(.red)
                 }
+            }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -593,7 +617,9 @@ struct ChatView: View {
             // Bottom action row: + menu (leading), analyzing progress
             // (centre, when active), send icon (trailing).
             HStack(spacing: 8) {
-                attachmentMenu
+                if mode != .pdfTalkme {
+                    attachmentMenu
+                }
 
                 if chatService.isAnalyzingContext {
                     HStack(spacing: 6) {
@@ -796,15 +822,15 @@ struct ChatView: View {
                 contextInput: currentContextInputString(),
                 pdfURLs: currentSelectedPDFs(),
                 imageURLs: currentSelectedImages(),
-                includeWebSearch: isWebSearchEnabled,
+                includeWebSearch: effectiveIsWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
-                useDuckDuckGo: settings.useDuckDuckGo,
-                useWikipedia: settings.useWikipedia
+                useDuckDuckGo: effectiveUseDuckDuckGo,
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }
@@ -847,15 +873,15 @@ struct ChatView: View {
                 contextInput: currentContextInputString(),
                 pdfURLs: currentSelectedPDFs(),
                 imageURLs: currentSelectedImages(),
-                includeWebSearch: isWebSearchEnabled,
+                includeWebSearch: effectiveIsWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
-                useDuckDuckGo: settings.useDuckDuckGo,
-                useWikipedia: settings.useWikipedia
+                useDuckDuckGo: effectiveUseDuckDuckGo,
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }
@@ -1247,13 +1273,13 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 imageURLs: selectedImages,
-                includeWebSearch: isWebSearchEnabled,
+                includeWebSearch: effectiveIsWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                 maxWikipediaResults: settings.maxWikipediaResults,
                 maxContextTokens: settings.maxContextTokens,
                 maxResponseTokens: settings.maxResponseTokens,
-                useDuckDuckGo: settings.useDuckDuckGo,
-                useWikipedia: settings.useWikipedia
+                useDuckDuckGo: effectiveUseDuckDuckGo,
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }
