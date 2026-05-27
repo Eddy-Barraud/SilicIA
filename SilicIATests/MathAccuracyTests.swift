@@ -321,6 +321,76 @@ final class MathAccuracyTests: XCTestCase {
                       "Header row missing from the same chunk as Amortisseurs row — model loses column context: \(priceChunk?.text ?? "nil")")
     }
 
+    // MARK: - Column-major PDF detection
+
+    /// PDFKit's `page.string` for many invoice templates emits text in draw
+    /// order: all descriptions, then all quantities, then all prices, etc.
+    /// `ChatService.looksColumnMajor` must flag this so we re-extract via
+    /// layout-aware OCR.
+    func testColumnMajorDetectedOnInvoiceDump() {
+        let columnMajor = """
+        Devis
+        Description
+        Amortisseurs
+        Coupelles
+        Jeu de protection
+        Géometrie
+        Joint spy PSA G
+        Joint spy PSA D
+        Huile de boite
+        2,00
+        2,00
+        2,00
+        1,00
+        1,00
+        1,00
+        1,00
+        63,33
+        77,08
+        33,33
+        43,75
+        141,67
+        54,17
+        29,40
+        20,00
+        20,00
+        20,00
+        20,00
+        20,00
+        20,00
+        20,00
+        """
+        XCTAssertTrue(ChatService.looksColumnMajor(columnMajor),
+                      "Failed to detect column-major dump containing long runs of numeric-only lines")
+    }
+
+    /// Ordinary prose with occasional numbers must NOT trip the detector —
+    /// otherwise every PDF with a few statistics would be re-OCR'd needlessly.
+    func testProseDoesNotTriggerColumnMajorDetection() {
+        let prose = """
+        The company grew by 10% in 2025. Revenue reached 1,234,567 euros
+        across three regions. The largest division contributed 65% of total
+        sales while the smallest one accounted for just 8% of revenue.
+        """
+        XCTAssertFalse(ChatService.looksColumnMajor(prose),
+                       "Prose with numeric content was wrongly flagged as column-major")
+    }
+
+    /// A short numeric run (fewer than 5 consecutive numeric-only lines)
+    /// should not trip the detector — invoices may have brief number
+    /// blocks (e.g. totals) that don't indicate column-major layout.
+    func testShortNumericRunIsNotColumnMajor() {
+        let text = """
+        Total HT    777,09
+        Total TVA   155,41
+        Total TTC   932,50
+        Acomptes    0,00
+        Net à payer 932,50
+        """
+        XCTAssertFalse(ChatService.looksColumnMajor(text),
+                       "Aligned totals were wrongly flagged as column-major")
+    }
+
     // MARK: - Test helpers
 
     /// Extracts the inner HTML of the first `<table>...</table>` block,

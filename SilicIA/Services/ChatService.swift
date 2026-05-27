@@ -776,7 +776,19 @@ final class ChatService: ObservableObject {
             guard let page = document.page(at: pageIndex) else { continue }
             if let pageString = page.string?.trimmingCharacters(in: .whitespacesAndNewlines),
                !pageString.isEmpty {
-                pages.append(pageString)
+                // Some invoice/quote PDFs store text in column-major drawing
+                // order: PDFKit then returns "all descriptions, then all
+                // quantities, then all prices…" with no horizontal structure.
+                // Detect that case and re-extract via Vision OCR, which sees
+                // the page's *visual* layout (bounding boxes) rather than the
+                // PDF's draw order — rows recombine correctly there.
+                if Self.looksColumnMajor(pageString),
+                   let layoutText = layoutAwareOCRText(for: page) {
+                    debugContext("extractPDFPageTexts page \(pageIndex + 1): page.string was column-major (\(pageString.count) chars); replaced with layout-aware OCR (\(layoutText.count) chars)")
+                    pages.append(layoutText)
+                } else {
+                    pages.append(pageString)
+                }
                 continue
             }
             if let attributedPageString = page.attributedString?.string.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -812,10 +824,54 @@ final class ChatService: ObservableObject {
         return pages
     }
 
-    /// Runs Vision OCR on a rendered PDF page and returns recognized text.
-    /// Renders the page to a `CGImage`, then delegates to `ImageAnalysisService`
-    /// so both image attachments and PDF-OCR-fallback share the same OCR config.
-    private func recognizeText(in page: PDFPage) -> String? {
+    /// Returns layout-aware OCR text for `page` — Vision recognizes the page
+    /// and groups observations into visual rows by Y-coordinate, cells within
+    /// a row separated by 4 spaces. The downstream
+    /// `RAGChunker.convertWhitespaceAlignedTables` then turns the tabular
+    /// rows into Markdown pipe blocks.
+    private func layoutAwareOCRText(for page: PDFPage) -> String? {
+        guard let cgImage = renderedCGImage(for: page) else { return nil }
+        return ImageAnalysisService.recognizeTextWithLayout(in: cgImage)
+    }
+
+    /// Heuristic: does the plain-text page dump look like a column-major
+    /// PDF table (e.g. an invoice where PDFKit emits all descriptions, then
+    /// all quantities, then all prices)?
+    ///
+    /// Signal: a long run of consecutive lines where each line is a single
+    /// short numeric token. Real prose would intersperse multi-word lines;
+    /// real tables stored row-major would mix text and numbers per line.
+    /// A run of 5+ consecutive "numeric-only" lines reliably indicates a
+    /// column-major dump.
+    static func looksColumnMajor(_ text: String) -> Bool {
+        var run = 0
+        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if isNumericOnlyLine(trimmed) {
+                run += 1
+                if run >= 5 { return true }
+            } else {
+                run = 0
+            }
+        }
+        return false
+    }
+
+    /// True when `line` is a short token consisting only of digits, common
+    /// numeric separators, percent / currency symbols, and whitespace.
+    private static func isNumericOnlyLine(_ line: String) -> Bool {
+        if line.isEmpty || line.count > 20 { return false }
+        guard line.contains(where: { $0.isNumber }) else { return false }
+        return line.allSatisfy { c in
+            c.isNumber || c == "." || c == "," || c == " "
+                || c == "%" || c == "€" || c == "$" || c == "£"
+                || c == "-" || c == "+"
+        }
+    }
+
+    /// Renders `page` to a `CGImage` at a sane DPI for OCR. Shared by the
+    /// image-only-PDF fallback and the column-major-detected re-extraction.
+    private func renderedCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
         let maxSide: CGFloat = 2000
@@ -828,13 +884,17 @@ final class ChatService: ObservableObject {
         )
         let image = page.thumbnail(of: targetSize, for: .mediaBox)
         #if os(macOS)
-        let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
         #else
-        let cgImage = image.cgImage
+        return image.cgImage
         #endif
-        guard let cgImage else {
-            return nil
-        }
+    }
+
+    /// Runs Vision OCR on a rendered PDF page and returns recognized text.
+    /// Renders the page to a `CGImage`, then delegates to `ImageAnalysisService`
+    /// so both image attachments and PDF-OCR-fallback share the same OCR config.
+    private func recognizeText(in page: PDFPage) -> String? {
+        guard let cgImage = renderedCGImage(for: page) else { return nil }
         return ImageAnalysisService.recognizeText(in: cgImage)
     }
 
