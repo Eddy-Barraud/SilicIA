@@ -26,6 +26,13 @@ final class ChatService: ObservableObject {
     @Published var errorMessage: String?
     @Published var isAnalyzingContext = false
     @Published var contextAnalysisProgress = 0.0
+    /// Filename of the PDF the current conversation is anchored to, if any.
+    /// PDFtalkme observes this to keep its left pane in sync with whichever
+    /// conversation is loaded (e.g. when the user picks one from history).
+    @Published var currentConversationPDFFilename: String?
+    /// Security-scoped bookmark for the same PDF, for hosts that want to
+    /// resolve the file across launches.
+    @Published var currentConversationPDFBookmark: Data?
 
     private let webScraper = WebScrapingService()
     private let webSearchService = WebSearchService()
@@ -36,6 +43,10 @@ final class ChatService: ObservableObject {
     var modelContext: ModelContext?
     private var currentConversation: Conversation?
     private var pendingSaveTask: Task<Void, Never>?
+    /// PDF URL captured from the most recent `sendMessage` call. Used by
+    /// `persistMessage` to stamp a freshly created conversation with the
+    /// document the user is asking about.
+    private var activePDFURLForNewConversation: URL?
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLCap = 30
@@ -76,6 +87,7 @@ final class ChatService: ObservableObject {
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) async {
+        activePDFURLForNewConversation = pdfURLs.first
         messages.append(ChatMessage(role: .user, content: message))
         persistMessage(role: "user", content: message, citations: nil)
         errorMessage = nil
@@ -399,6 +411,9 @@ final class ChatService: ObservableObject {
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
         currentConversation = nil
+        currentConversationPDFFilename = nil
+        currentConversationPDFBookmark = nil
+        activePDFURLForNewConversation = nil
     }
 
     /// Collects web, PDF, and image chunks from provided context.
@@ -974,12 +989,17 @@ final class ChatService: ObservableObject {
 
         // Create conversation if needed
         if currentConversation == nil {
+            let (filename, bookmark) = pdfStampForNewConversation()
             let conv = Conversation(
                 messages: [],
-                title: role == "user" ? generateTitle(from: content) : nil
+                title: role == "user" ? generateTitle(from: content) : nil,
+                pdfFilename: filename,
+                pdfBookmark: bookmark
             )
             currentConversation = conv
             modelContext.insert(conv)
+            currentConversationPDFFilename = filename
+            currentConversationPDFBookmark = bookmark
         }
 
         guard let conversation = currentConversation else { return }
@@ -1121,11 +1141,92 @@ final class ChatService: ObservableObject {
         guard let conversation = try? modelContext.fetch(descriptor).first else { return }
 
         currentConversation = conversation
+        currentConversationPDFFilename = conversation.pdfFilename
+        currentConversationPDFBookmark = conversation.pdfBookmark
 
         // Convert SwiftData messages to ChatMessage for UI
         messages = conversation.messages
             .sorted { $0.timestamp < $1.timestamp }
             .map { ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content, citations: $0.citations) }
+    }
+
+    /// Builds the PDF stamp for a freshly created conversation from
+    /// `activePDFURLForNewConversation`. Returns `(nil, nil)` when no PDF
+    /// was attached or the bookmark can't be created (e.g. file isn't
+    /// reachable). Filename is *normalized* (see `Self.pdfBaseFilename`)
+    /// so two drops of the same source file collapse onto one conv key.
+    private func pdfStampForNewConversation() -> (String?, Data?) {
+        guard let url = activePDFURLForNewConversation else { return (nil, nil) }
+        let filename = Self.pdfBaseFilename(url.lastPathComponent)
+        let bookmark = try? makeSecurityScopedBookmark(for: url)
+        return (filename, bookmark)
+    }
+
+    /// Strips the trailing " (N)" suffix that `DroppedPDFStore` adds when
+    /// the same filename is dropped twice ("X.pdf" → "X.pdf",
+    /// "X (3).pdf" → "X.pdf"). The normalized form is the conversation
+    /// lookup key — it's filename-stable across sessions, sandbox copy
+    /// numbering, and Spotlight/share-extension rewrites.
+    static func pdfBaseFilename(_ raw: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: #" \(\d+\)(?=\.[^.]+$)"#) else {
+            return raw
+        }
+        let ns = raw as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        return regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+    }
+
+    private func makeSecurityScopedBookmark(for url: URL) throws -> Data {
+#if os(macOS)
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        return try url.bookmarkData(
+            options: [.withSecurityScope],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        )
+#else
+        return try url.bookmarkData()
+#endif
+    }
+
+    /// Returns the most recently updated conversation anchored to a PDF with
+    /// the given filename, or `nil` if none. Both the stored stamp and the
+    /// query filename are normalized via `pdfBaseFilename`, so reopening
+    /// the same PDF across sessions (even after `DroppedPDFStore` mints a
+    /// "X (N).pdf" copy) lands on the same conversation.
+    func findLatestConversation(matchingPDFFilename filename: String) -> Conversation? {
+        guard let modelContext else { return nil }
+        let normalized = Self.pdfBaseFilename(filename)
+        var descriptor = FetchDescriptor<Conversation>(
+            predicate: #Predicate { $0.pdfFilename == normalized },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    /// Returns a conversation anchored to a PDF with the given checksum,
+    /// most recently updated first. Used as a fallback when filename
+    /// lookup misses (e.g. the user renamed the file).
+    func findLatestConversation(matchingPDFChecksum checksum: String) -> Conversation? {
+        guard let modelContext else { return nil }
+        var descriptor = FetchDescriptor<Conversation>(
+            predicate: #Predicate { $0.pdfChecksum == checksum },
+            sortBy: [SortDescriptor(\.updatedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try? modelContext.fetch(descriptor).first
+    }
+
+    /// Stamps the current conversation with a freshly computed checksum.
+    /// Safe to call from a background hash — no-op if the conversation has
+    /// already been re-opened/replaced or already carries a matching value.
+    func updateCurrentConversationChecksum(_ checksum: String) {
+        guard let conversation = currentConversation,
+              conversation.pdfChecksum != checksum else { return }
+        conversation.pdfChecksum = checksum
+        scheduleContextSave()
     }
 }
 

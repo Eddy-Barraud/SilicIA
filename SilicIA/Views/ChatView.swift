@@ -35,6 +35,12 @@ struct ChatView: View {
 
     let chatService: ChatService
     var mode: ChatViewMode = .full
+    /// Called whenever a PDF lands in `contextSources` via this view (drop,
+    /// "+" menu, shared inbox). Hosts use it to mirror the file into their
+    /// own UI — e.g. PDFtalkme opens the PDF on the left pane and restores
+    /// any conversation already anchored to it. Optional; ignored in
+    /// SilicIA's default flow.
+    var onPDFAddedToContext: ((URL) -> Void)? = nil
 
     /// In `.pdfTalkme` mode, web search is force-disabled regardless of
     /// the AppStorage flag — the host app is offline-only.
@@ -1037,11 +1043,47 @@ struct ChatView: View {
             }
         guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty || !incomingImages.isEmpty else { return }
 
-        startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
+        // If a conversation is already loaded and anchored to one of the
+        // incoming PDFs, don't reset — just add the file(s) to context. This
+        // lets PDFtalkme (and SilicIA history flows) re-open a conversation
+        // and attach its PDF without clobbering the restored messages.
+        // Compare via `pdfBaseFilename` so "X.pdf" matches a freshly
+        // re-persisted "X (2).pdf" copy from `DroppedPDFStore`.
+        let activeFilename = chatService.currentConversationPDFFilename
+        let matchesActiveConversation = activeFilename.map { name in
+            let normalizedActive = ChatService.pdfBaseFilename(name)
+            return incomingPDFs.contains {
+                ChatService.pdfBaseFilename($0.lastPathComponent) == normalizedActive
+            }
+        } ?? false
+
+        if matchesActiveConversation {
+            attachSharedInputsToCurrentConversation(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
+        } else {
+            startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
+        }
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
         sharedImages.removeAll()
         scheduleContextPreanalysis()
+    }
+
+    /// Adds the incoming attachments to the existing conversation's context
+    /// rows without resetting the chat. Used when reopening a PDF whose
+    /// conversation is already loaded — we want the PDF available as RAG
+    /// context for the next message, but the prior turns must stay.
+    private func attachSharedInputsToCurrentConversation(urls: [String], pdfs: [URL], images: [URL]) {
+        for u in urls where !contextSources.contains(where: {
+            if case .url(let text) = $0.kind { return text == u } else { return false }
+        }) {
+            contextSources.append(ContextSource(kind: .url(text: u)))
+        }
+        for pdf in pdfs { insertPDFSource(pdf, at: nil) }
+        for image in images where !contextSources.contains(where: {
+            if case .image(let existing) = $0.kind { return existing == image } else { return false }
+        }) {
+            contextSources.append(ContextSource(kind: .image(url: image)))
+        }
     }
 
     private func startNewConversationFromSharedInputs(urls: [String], pdfs: [URL], images: [URL] = []) {
@@ -1078,6 +1120,7 @@ struct ChatView: View {
             contextSources.append(ContextSource(kind: .pdf(url: url)))
             debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
         }
+        onPDFAddedToContext?(url)
         scheduleContextPreanalysis()
     }
 

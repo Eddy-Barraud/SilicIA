@@ -25,6 +25,15 @@ final class Conversation {
     var updatedAt: Date
     /// JSON string storing context sources used in the conversation.
     var contextSources: String
+    /// Filename of the primary PDF this conversation is anchored to, if any.
+    /// Used as the cheap first-pass key when reopening a PDF.
+    var pdfFilename: String?
+    /// Security-scoped bookmark to the primary PDF — lets us reopen the file
+    /// after the user moves it or relaunches the app under the sandbox.
+    var pdfBookmark: Data?
+    /// SHA-256 of the primary PDF's bytes. Computed lazily in the background
+    /// and used as a fallback identifier when filename + bookmark fail.
+    var pdfChecksum: String?
 
     init(
         id: UUID = UUID(),
@@ -32,7 +41,10 @@ final class Conversation {
         title: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
-        contextSources: String = "{}"
+        contextSources: String = "{}",
+        pdfFilename: String? = nil,
+        pdfBookmark: Data? = nil,
+        pdfChecksum: String? = nil
     ) {
         self.id = id
         self.messages = messages
@@ -40,5 +52,8 @@ final class Conversation {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.contextSources = contextSources
+        self.pdfFilename = pdfFilename
+        self.pdfBookmark = pdfBookmark
+        self.pdfChecksum = pdfChecksum
     }
 }
