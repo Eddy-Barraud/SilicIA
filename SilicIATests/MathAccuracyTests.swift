@@ -376,6 +376,44 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertTrue(result[1].text.contains("| X | Y | Z | 1 | 2 | 3 |"))
     }
 
+    /// Regression: when the same page contains both a small 5-column ID
+    /// table AND the 6-column items table, the propagation must pick the
+    /// items header for chunks of 6-column data rows — NOT the first-seen
+    /// header. This is the bug that made the model answer with the wrong
+    /// column (6,65 € for "prix coupelle") even though chunks looked good.
+    func testHeaderPropagationPicksMatchingColumnCount() {
+        let withTwoHeaders = RAGChunk(
+            source: "test", text: """
+            Header info before any tables.
+
+            | Numéro | Date | Code | Mode | TVA |
+            | --- | --- | --- | --- | --- |
+            | DE001 | 21/01 | CL01 | 30j | FR25 |
+
+            Référence intermédiaire entre deux tables.
+
+            | Code | Description | Qté | P.U. HT | Montant HT | TVA |
+            | --- | --- | --- | --- | --- | --- |
+            | AR1 | Triangles | 2,00 | 63,33 | 126,65 | 20,00 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        // Next chunk = nothing but 6-column items rows.
+        let itemsOnly = RAGChunk(
+            source: "test", text: """
+            | AR2 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |
+            | AR3 | Coupelles | 2,00 | 33,33 | 66,65 | 20,00 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        let result = RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, itemsOnly])
+        XCTAssertEqual(result.count, 2)
+        XCTAssertTrue(result[1].text.hasPrefix("| Code | Description | Qté | P.U. HT | Montant HT | TVA |"),
+                      "Wrong header propagated — expected the 6-col items header, got: \n\(result[1].text)")
+        XCTAssertFalse(result[1].text.contains("| Numéro | Date | Code | Mode | TVA |"),
+                       "5-col ID header leaked into a 6-col data-row chunk: \n\(result[1].text)")
+    }
+
     /// A chunk with neither header nor data rows is left alone — no
     /// spurious header inserted into prose.
     func testProseChunkUnchanged() {

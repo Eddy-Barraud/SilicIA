@@ -116,8 +116,12 @@ struct RAGChunker {
     nonisolated static func preserveTableHeadersAcrossChunks(_ chunks: [RAGChunk]) -> [RAGChunk] {
         guard chunks.count > 1 else { return chunks }
 
-        struct TableHeader { let header: String; let separator: String; let columnCount: Int }
-        var lastHeader: TableHeader? = nil
+        // Keyed by column count so a 5-column ID table and a 6-column items
+        // table coexisting on the same page don't clobber each other. When a
+        // later chunk carries N-column data rows, we look up the N-column
+        // header — not "whichever header came last".
+        var recentHeaders: [Int: (header: String, separator: String)] = [:]
+
         var result: [RAGChunk] = []
         result.reserveCapacity(chunks.count)
 
@@ -131,61 +135,86 @@ struct RAGChunker {
                 lines.removeFirst()
             }
 
-            // 2. Look for a header+separator pair inside the chunk. If
-            //    found, refresh `lastHeader` and emit as-is.
-            var headerInChunk: TableHeader? = nil
-            if lines.count >= 2 {
-                for i in 0..<(lines.count - 1) {
+            // 2. Locate the first data row in the chunk and check whether a
+            //    matching header+separator pair already sits above it. If
+            //    it does, the chunk is self-sufficient — no propagation.
+            let firstDataRow = findFirstDataRow(in: lines)
+            let hasHeaderAboveData: Bool = {
+                guard let dataIndex = firstDataRow.index, dataIndex > 0 else {
+                    return false
+                }
+                // Scan everything before the first data row for a
+                // header+separator pair whose column count matches.
+                var i = 0
+                while i < dataIndex - 1 {
                     let line = lines[i].trimmingCharacters(in: .whitespaces)
                     let next = lines[i + 1].trimmingCharacters(in: .whitespaces)
                     if isMarkdownTableRow(line), !isMarkdownTableSeparator(line),
-                       isMarkdownTableSeparator(next) {
-                        headerInChunk = TableHeader(
-                            header: lines[i],
-                            separator: lines[i + 1],
-                            columnCount: markdownColumnCount(in: line)
-                        )
-                        break
+                       isMarkdownTableSeparator(next),
+                       markdownColumnCount(in: line) == firstDataRow.columnCount {
+                        return true
                     }
+                    i += 1
                 }
-            }
-            if let headerInChunk {
-                lastHeader = headerInChunk
-                result.append(RAGChunk(
-                    source: chunk.source,
-                    text: lines.joined(separator: "\n"),
-                    url: chunk.url,
-                    pdfPage: chunk.pdfPage
-                ))
-                continue
+                return false
+            }()
+
+            // 3. No matching header above the first data row → prepend the
+            //    cached header for that column count, if we have one.
+            if !hasHeaderAboveData,
+               let dataCount = firstDataRow.columnCount,
+               let header = recentHeaders[dataCount] {
+                lines = [header.header, header.separator] + lines
             }
 
-            // 3. No header in chunk. If it carries data rows AND we have a
-            //    cached header from earlier in the document, prepend it so
-            //    the model keeps column context for those rows.
-            let hasDataRow = lines.contains { line in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                return isMarkdownTableRow(trimmed) && !isMarkdownTableSeparator(trimmed)
-            }
-            if hasDataRow, let header = lastHeader {
-                var prefixed = [header.header, header.separator]
-                prefixed.append(contentsOf: lines)
-                result.append(RAGChunk(
-                    source: chunk.source,
-                    text: prefixed.joined(separator: "\n"),
-                    url: chunk.url,
-                    pdfPage: chunk.pdfPage
-                ))
-            } else {
-                result.append(RAGChunk(
-                    source: chunk.source,
-                    text: lines.joined(separator: "\n"),
-                    url: chunk.url,
-                    pdfPage: chunk.pdfPage
-                ))
-            }
+            // 4. Update the header cache with every header+separator pair
+            //    visible in this (possibly already-modified) chunk, so the
+            //    next chunk picks up the most recent N-column header.
+            collectHeaders(in: lines, into: &recentHeaders)
+
+            result.append(RAGChunk(
+                source: chunk.source,
+                text: lines.joined(separator: "\n"),
+                url: chunk.url,
+                pdfPage: chunk.pdfPage
+            ))
         }
         return result
+    }
+
+    /// Scans `lines` and returns the position + column count of the first
+    /// non-separator table row, or `(nil, nil)` if there isn't one.
+    private nonisolated static func findFirstDataRow(in lines: [String]) -> (index: Int?, columnCount: Int?) {
+        for (idx, raw) in lines.enumerated() {
+            let trimmed = raw.trimmingCharacters(in: .whitespaces)
+            if isMarkdownTableRow(trimmed), !isMarkdownTableSeparator(trimmed) {
+                return (idx, markdownColumnCount(in: trimmed))
+            }
+        }
+        return (nil, nil)
+    }
+
+    /// Walks `lines` and records every header+separator pair found, keyed
+    /// by column count. Later pairs replace earlier ones at the same key,
+    /// so the cache always reflects the most-recently-seen header for that
+    /// column shape.
+    private nonisolated static func collectHeaders(
+        in lines: [String],
+        into cache: inout [Int: (header: String, separator: String)]
+    ) {
+        guard lines.count >= 2 else { return }
+        var i = 0
+        while i < lines.count - 1 {
+            let line = lines[i].trimmingCharacters(in: .whitespaces)
+            let next = lines[i + 1].trimmingCharacters(in: .whitespaces)
+            if isMarkdownTableRow(line), !isMarkdownTableSeparator(line),
+               isMarkdownTableSeparator(next) {
+                cache[markdownColumnCount(in: line)] = (lines[i], lines[i + 1])
+                i += 2
+            } else {
+                i += 1
+            }
+        }
     }
 
     private nonisolated static func isMarkdownTableRow(_ line: String) -> Bool {
