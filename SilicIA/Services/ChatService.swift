@@ -198,6 +198,12 @@ final class ChatService: ObservableObject {
         }
         finalSelectedContext = finalSelectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
         debugContext("sendMessage contextChars raw=\(selected.selectedContext.count) capped=\(finalSelectedContext.count) tokenCap=\(effectiveMaxContextTokens) topChunks=\(selected.topChunks.count)")
+        #if DEBUG
+        // Full per-chunk dump of what the model is about to see. Guarded by
+        // DEBUG so release builds stay silent; only the chunks that actually
+        // landed in `selectedContext` are printed (i.e. survived budgeting).
+        print(selected.debugDescription(label: "ChatService → chat prompt"))
+        #endif
 
         var streamingAssistantID: UUID?
         do {

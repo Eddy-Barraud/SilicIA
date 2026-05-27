@@ -346,6 +346,11 @@ class AIService: ObservableObject {
             name: "RAG context prep (chunk + select)",
             seconds: Date().timeIntervalSince(contextPrepStart)
         ))
+        // Full per-chunk dump of what the model is about to see for the
+        // search-summary prompt. Only chunks that survived budgeting are
+        // included — the rest of the scraped pages are discarded before
+        // the prompt is built.
+        print(selected.debugDescription(label: "AIService → search summary (profile=\(profile))"))
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails

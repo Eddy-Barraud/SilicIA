@@ -369,6 +369,30 @@ struct RAGSelectionResult {
     var topChunks: [RankedRAGChunk] {
         topChunks(limit: Self.defaultTopChunkCount)
     }
+
+    /// Multi-line human-readable dump of the chunks that actually made it
+    /// into `selectedContext`, intended for `print()` from a debug guard.
+    /// Shows source, page/URL provenance, score, length, and the chunk's
+    /// full text — so you can verify *exactly* what the model was given,
+    /// without having to grep through the prompt itself.
+    func debugDescription(label: String) -> String {
+        var lines: [String] = []
+        lines.append("┏━ \(label): \(selectedChunks.count) chunk(s) sent to model ━━")
+        for (index, ranked) in selectedChunks.enumerated() {
+            var provenance = ranked.chunk.source
+            if let url = ranked.chunk.url { provenance += " | url=\(url)" }
+            if let page = ranked.chunk.pdfPage { provenance += " | page=\(page)" }
+            lines.append("┃")
+            lines.append("┃ [\(index + 1)] score=\(String(format: "%.3f", ranked.relevanceScore)) chars=\(ranked.chunk.text.count)")
+            lines.append("┃     \(provenance)")
+            lines.append("┃ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄")
+            for textLine in ranked.chunk.text.split(separator: "\n", omittingEmptySubsequences: false) {
+                lines.append("┃ \(textLine)")
+            }
+        }
+        lines.append("┗━ end of \(label) ━━")
+        return lines.joined(separator: "\n")
+    }
 }
 
 /// Shared context selection/relevance service for chat and search.
