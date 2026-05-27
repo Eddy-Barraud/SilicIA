@@ -91,7 +91,126 @@ struct RAGChunker {
                 : candidate
         }
 
-        return chunks
+        return Self.preserveTableHeadersAcrossChunks(chunks)
+    }
+
+    /// Post-process chunks so that Markdown table headers survive across
+    /// chunk boundaries. Without this, a table that spans multiple chunks
+    /// loses its column labels in every chunk except the first — the model
+    /// then sees rows like
+    ///
+    ///     | AR00002 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |
+    ///
+    /// with no way to know which column is "unit price" vs "total" vs "TVA".
+    ///
+    /// Two fixes per chunk:
+    ///   1. Drop a leading orphan separator line (`| --- | --- |`) — these
+    ///      appear when the previous chunk's overlap clipped a *different*
+    ///      table's separator into the current chunk. Wrong column count,
+    ///      pure noise for the model.
+    ///   2. If the chunk contains data rows but no header+separator pair,
+    ///      prepend the most recently seen header from earlier chunks.
+    ///      The header column count is tracked so a wider items-table
+    ///      header is preferred over a stale narrow header from a sibling
+    ///      table on the same page.
+    nonisolated static func preserveTableHeadersAcrossChunks(_ chunks: [RAGChunk]) -> [RAGChunk] {
+        guard chunks.count > 1 else { return chunks }
+
+        struct TableHeader { let header: String; let separator: String; let columnCount: Int }
+        var lastHeader: TableHeader? = nil
+        var result: [RAGChunk] = []
+        result.reserveCapacity(chunks.count)
+
+        for chunk in chunks {
+            var lines = chunk.text.components(separatedBy: "\n")
+
+            // 1. Drop leading orphan separator(s) — overlap artifacts from
+            //    a different table whose header isn't in this chunk.
+            while let first = lines.first?.trimmingCharacters(in: .whitespaces),
+                  isMarkdownTableSeparator(first) {
+                lines.removeFirst()
+            }
+
+            // 2. Look for a header+separator pair inside the chunk. If
+            //    found, refresh `lastHeader` and emit as-is.
+            var headerInChunk: TableHeader? = nil
+            if lines.count >= 2 {
+                for i in 0..<(lines.count - 1) {
+                    let line = lines[i].trimmingCharacters(in: .whitespaces)
+                    let next = lines[i + 1].trimmingCharacters(in: .whitespaces)
+                    if isMarkdownTableRow(line), !isMarkdownTableSeparator(line),
+                       isMarkdownTableSeparator(next) {
+                        headerInChunk = TableHeader(
+                            header: lines[i],
+                            separator: lines[i + 1],
+                            columnCount: markdownColumnCount(in: line)
+                        )
+                        break
+                    }
+                }
+            }
+            if let headerInChunk {
+                lastHeader = headerInChunk
+                result.append(RAGChunk(
+                    source: chunk.source,
+                    text: lines.joined(separator: "\n"),
+                    url: chunk.url,
+                    pdfPage: chunk.pdfPage
+                ))
+                continue
+            }
+
+            // 3. No header in chunk. If it carries data rows AND we have a
+            //    cached header from earlier in the document, prepend it so
+            //    the model keeps column context for those rows.
+            let hasDataRow = lines.contains { line in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                return isMarkdownTableRow(trimmed) && !isMarkdownTableSeparator(trimmed)
+            }
+            if hasDataRow, let header = lastHeader {
+                var prefixed = [header.header, header.separator]
+                prefixed.append(contentsOf: lines)
+                result.append(RAGChunk(
+                    source: chunk.source,
+                    text: prefixed.joined(separator: "\n"),
+                    url: chunk.url,
+                    pdfPage: chunk.pdfPage
+                ))
+            } else {
+                result.append(RAGChunk(
+                    source: chunk.source,
+                    text: lines.joined(separator: "\n"),
+                    url: chunk.url,
+                    pdfPage: chunk.pdfPage
+                ))
+            }
+        }
+        return result
+    }
+
+    private nonisolated static func isMarkdownTableRow(_ line: String) -> Bool {
+        line.hasPrefix("|") && line.hasSuffix("|") && line.count >= 3
+    }
+
+    private nonisolated static func isMarkdownTableSeparator(_ line: String) -> Bool {
+        guard isMarkdownTableRow(line) else { return false }
+        let cells = line.split(separator: "|", omittingEmptySubsequences: true)
+        guard !cells.isEmpty else { return false }
+        return cells.allSatisfy { cell in
+            let trimmed = cell.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return false }
+            return trimmed.allSatisfy { $0 == "-" || $0 == ":" }
+        }
+    }
+
+    private nonisolated static func markdownColumnCount(in row: String) -> Int {
+        // A row "| a | b | c |" has 4 pipes — 3 cells. Be defensive about
+        // rows that start or end without a pipe.
+        let pipes = row.filter { $0 == "|" }.count
+        if row.hasPrefix("|"), row.hasSuffix("|") {
+            return max(pipes - 1, 1)
+        }
+        return max(pipes, 1)
     }
 
     /// Detects rows in plain text where columns are aligned by 2+ spaces

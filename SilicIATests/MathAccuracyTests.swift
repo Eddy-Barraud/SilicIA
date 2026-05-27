@@ -321,6 +321,81 @@ final class MathAccuracyTests: XCTestCase {
                       "Header row missing from the same chunk as Amortisseurs row — model loses column context: \(priceChunk?.text ?? "nil")")
     }
 
+    // MARK: - Table header propagation across chunks
+
+    /// A chunk containing only data rows should get the most-recent table
+    /// header prepended, so the model can still tell which column is which.
+    func testHeaderPropagatesToChunkWithOnlyDataRows() {
+        let withHeader = RAGChunk(
+            source: "test", text: """
+            | Code | Description | Qté | P.U. HT | Montant HT | TVA |
+            | --- | --- | --- | --- | --- | --- |
+            | AR1 | Triangles | 2,00 | 63,33 | 126,65 | 20,00 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        let onlyRows = RAGChunk(
+            source: "test", text: """
+            | AR2 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |
+            | AR3 | Coupelles | 2,00 | 33,33 | 66,65 | 20,00 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        let result = RAGChunker.preserveTableHeadersAcrossChunks([withHeader, onlyRows])
+        XCTAssertEqual(result.count, 2)
+        XCTAssertTrue(result[1].text.hasPrefix("| Code | Description | Qté | P.U. HT | Montant HT | TVA |"),
+                      "Header was not prepended to the chunk with only data rows: \n\(result[1].text)")
+        XCTAssertTrue(result[1].text.contains("| AR2 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |"),
+                      "Amortisseurs row missing from propagated chunk: \n\(result[1].text)")
+    }
+
+    /// An orphan separator at the top of a chunk (overlap artifact from a
+    /// different table) must be dropped, not mistaken for a header.
+    func testOrphanLeadingSeparatorIsDropped() {
+        let withHeader = RAGChunk(
+            source: "test", text: """
+            | A | B | C |
+            | --- | --- | --- |
+            | 1 | 2 | 3 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        // The overlap dragged in this 3-col separator, but the rest of the
+        // chunk is from a different 6-col items table that the previous
+        // chunk had the header for.
+        let orphan = RAGChunk(
+            source: "test", text: """
+            | --- | --- | --- |
+            | X | Y | Z | 1 | 2 | 3 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        let result = RAGChunker.preserveTableHeadersAcrossChunks([withHeader, orphan])
+        XCTAssertFalse(result[1].text.hasPrefix("| --- |"),
+                       "Orphan leading separator wasn't stripped: \n\(result[1].text)")
+        XCTAssertTrue(result[1].text.contains("| X | Y | Z | 1 | 2 | 3 |"))
+    }
+
+    /// A chunk with neither header nor data rows is left alone — no
+    /// spurious header inserted into prose.
+    func testProseChunkUnchanged() {
+        let withHeader = RAGChunk(
+            source: "test", text: """
+            | A | B |
+            | --- | --- |
+            | 1 | 2 |
+            """,
+            url: nil, pdfPage: 1
+        )
+        let prose = RAGChunk(
+            source: "test", text: "Just a paragraph of text with no table content.",
+            url: nil, pdfPage: 1
+        )
+        let result = RAGChunker.preserveTableHeadersAcrossChunks([withHeader, prose])
+        XCTAssertEqual(result[1].text, "Just a paragraph of text with no table content.",
+                       "Prose chunk was wrongly modified: \(result[1].text)")
+    }
+
     // MARK: - Column-major PDF detection
 
     /// PDFKit's `page.string` for many invoice templates emits text in draw
