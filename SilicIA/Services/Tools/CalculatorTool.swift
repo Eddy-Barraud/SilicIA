@@ -55,6 +55,9 @@ struct CalculatorTool: Tool {
     }()
 
     func call(arguments: Arguments) async throws -> String {
+        #if DEBUG
+        print("[Tool:calculate] called with expression=\"\(arguments.expression)\"")
+        #endif
         // Accept FR/ES-style decimal commas. Do this BEFORE the allow-list
         // check so `1,5 * 2` validates after `,` → `.` normalisation.
         let normalised = arguments.expression

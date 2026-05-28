@@ -72,12 +72,15 @@ struct RAGSearchTool: Tool {
     private static let toolOutputTokenBudget = 1500
 
     func call(arguments: Arguments) async throws -> String {
+        #if DEBUG
+        print("[Tool:searchContext] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default") corpusSize=\(chunks.count)")
+        #endif
         let trimmed = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return String("Error: empty query")
+            return "Error: empty query"
         }
         guard !chunks.isEmpty else {
-            return String("No documents are attached to this conversation.")
+            return "No documents are attached to this conversation."
         }
 
         let limit = max(1, min(arguments.maxResults ?? Self.defaultMaxResults, 10))
@@ -91,7 +94,7 @@ struct RAGSearchTool: Tool {
 
         let top = Array(result.selectedChunks.prefix(limit))
         guard !top.isEmpty else {
-            return String("No relevant passages found for query: '\(trimmed)'.")
+            return "No relevant passages found for query: '\(trimmed)'."
         }
 
         // Render each chunk with its source header so the model can cite
@@ -104,6 +107,9 @@ struct RAGSearchTool: Tool {
             header += " ---"
             return "\(header)\n\(ranked.chunk.text)"
         }
-        return String(rendered.joined(separator: "\n\n"))
+        #if DEBUG
+        print("[Tool:searchContext] returning \(top.count) chunk(s), totalChars=\(rendered.map(\.count).reduce(0, +))")
+        #endif
+        return rendered.joined(separator: "\n\n")
     }
 }

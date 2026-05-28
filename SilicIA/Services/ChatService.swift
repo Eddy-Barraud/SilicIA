@@ -218,6 +218,7 @@ final class ChatService: ObservableObject {
             // arithmetic mistakes.
             let session: LanguageModelSession
             if useToolCalling {
+                debugContext("sendMessage path=tool-calling tools=[searchContext, calculate] corpusChunks=\(chunks.count)")
                 session = LanguageModelSession(
                     tools: [
                         RAGSearchTool(chunks: chunks),
@@ -226,6 +227,7 @@ final class ChatService: ObservableObject {
                     instructions: instructions
                 )
             } else {
+                debugContext("sendMessage path=prompt-stuffing (tool-calling disabled)")
                 session = LanguageModelSession(instructions: instructions)
             }
             let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)

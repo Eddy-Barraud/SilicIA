@@ -138,6 +138,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
         try container.encode(language, forKey: .language)
+        try container.encode(useToolCalling, forKey: .useToolCalling)
     }
 
     /// Persists settings in UserDefaults for future launches.
