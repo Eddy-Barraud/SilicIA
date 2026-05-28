@@ -464,19 +464,39 @@ struct SearchView: View {
 
                 Spacer()
 
-                Button(action: { performSearch(generationProfile: .fast) }) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .resizable()
-                        .frame(width: 28, height: 28)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(isPrimaryDisabled ? Color.secondary : Color.accentColor)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                // Swap send → stop while any phase is running (web search,
+                // RAG scoring, first-guess, AI summary). Tapping rotates
+                // `activeSearchRequestID`, which every in-flight task
+                // checks before publishing — same mechanism as `goHome()`.
+                let isBusy = searchService.isSearching || aiService.isSummarizing || isGeneratingFirstGuess
+                if isBusy {
+                    Button(action: cancelCurrentSearch) {
+                        Image(systemName: "stop.circle.fill")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.red)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(L.t("search.button.stop", language: settings.language))
+                    .accessibilityLabel(L.t("search.button.stop", language: settings.language))
+                } else {
+                    Button(action: { performSearch(generationProfile: .fast) }) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(isPrimaryDisabled ? Color.secondary : Color.accentColor)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPrimaryDisabled)
+                    .help(L.t("search.button.go", language: settings.language))
+                    .accessibilityLabel(L.t("search.button.go", language: settings.language))
                 }
-                .buttonStyle(.plain)
-                .disabled(isPrimaryDisabled)
-                .help(L.t("search.button.go", language: settings.language))
-                .accessibilityLabel(L.t("search.button.go", language: settings.language))
             }
         }
         .padding(10)
@@ -1455,6 +1475,21 @@ struct SearchView: View {
     }
 
     /// Resets all search and summary state to the initial home screen.
+    /// Cancels every in-flight search phase: rotates the request ID so
+    /// pending RAG / first-guess / summary tasks stop publishing, clears
+    /// the busy flags, and tears down the AIService streaming state so a
+    /// fresh search starts cleanly.
+    private func cancelCurrentSearch() {
+        activeSearchRequestID = UUID()
+        // Flip the published flags so the UI swaps the stop button back to
+        // send immediately. The discarded tasks will see the request-ID
+        // mismatch and exit without touching state.
+        isGeneratingFirstGuess = false
+        aiService.isSummarizing = false
+        searchService.isSearching = false
+        summaryStartTime = nil
+    }
+
     private func goHome() {
         activeSearchRequestID = UUID()
         searchQuery = ""

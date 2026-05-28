@@ -1,0 +1,149 @@
+//
+//  WebSearchTool.swift
+//  SilicIA
+//
+//  Foundation Models tool that exposes DuckDuckGo + Wikipedia search and
+//  page scraping as an on-demand call. When tool-calling mode is enabled
+//  the model crafts the query itself from the user's question and decides
+//  whether the answer requires fresh / external information at all.
+//
+//  Why a tool instead of the existing auto-prefetch path:
+//
+//  - The model knows the question's actual intent, so it can compose a
+//    more focused query than `currentMessage + contextInput`. "Who won
+//    the 2024 Wimbledon final?" → query "2024 Wimbledon final winner",
+//    not the whole user turn verbatim.
+//  - The model decides whether to search at all. "What is 2+2" should
+//    never hit the network.
+//  - Multiple follow-up calls: the model can refine after seeing the
+//    first set of results, e.g. switching from a general topic to a
+//    specific person it discovered.
+//
+
+import Foundation
+import FoundationModels
+
+struct WebSearchTool: Tool {
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The search query — focused keywords, not the user's full question. Strip filler words; keep proper nouns, numbers, dates, and any unit the user mentioned. Examples: '2024 Wimbledon men final winner', 'Apple Foundation Models tool calling API', 'Paris population 2023'.")
+        let query: String
+
+        @Guide(description: "Maximum number of results to return (1–5). Use 1–2 for a quick factual lookup, 3–5 when summarising a topic. Defaults to 3.")
+        let maxResults: Int?
+    }
+
+    let name = "webSearch"
+    let description = """
+    Search the web (DuckDuckGo + Wikipedia) and return the top results' \
+    titles, URLs, and scraped content. Use this whenever the question \
+    requires current information, recent events, or details beyond your \
+    training data — and only when needed; do NOT call this for arithmetic, \
+    definitions, or anything you can answer directly. You may call multiple \
+    times in a single turn with refined queries if the first batch was \
+    incomplete.
+    """
+
+    /// Injected by ChatService so the tool reuses the existing scraping
+    /// + search machinery (rate limits, locale, custom UA, etc.).
+    let webSearchService: WebSearchService
+    let webScraper: WebScrapingService
+    let maxDuckDuckGoResults: Int
+    let maxWikipediaResults: Int
+    let useDuckDuckGo: Bool
+    let useWikipedia: Bool
+    let language: ModelLanguage
+
+    /// Default result cap when the model doesn't supply `maxResults`.
+    /// Three keeps tool output bounded enough to fit in a tool reply
+    /// without truncation by the model's context window.
+    private static let defaultMaxResults = 3
+
+    /// Per-page scrape cap. Total tool output budget ≈ defaultMaxResults
+    /// × this value, plus title/URL overhead.
+    private static let maxCharactersPerPage = 1500
+
+    func call(arguments: Arguments) async throws -> String {
+        #if DEBUG
+        print("[Tool:webSearch] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default")")
+        #endif
+
+        let trimmed = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return "Error: empty query. Provide focused keywords (3–6 words usually works best)."
+        }
+        guard useDuckDuckGo || useWikipedia else {
+            return """
+            Web search is not available in this conversation: both \
+            DuckDuckGo and Wikipedia are disabled in settings. Answer the \
+            user from your own knowledge instead.
+            """
+        }
+
+        let limit = max(1, min(arguments.maxResults ?? Self.defaultMaxResults, 5))
+
+        let results: [SearchResult]
+        do {
+            results = try await webSearchService.search(
+                query: trimmed,
+                maxDuckDuckGoResults: maxDuckDuckGoResults,
+                maxWikipediaResults: maxWikipediaResults,
+                language: language,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia
+            )
+        } catch is CancellationError {
+            // User pressed Stop while the tool was running — re-throw so the
+            // surrounding model session bails out cleanly instead of seeing
+            // a stale tool result.
+            throw CancellationError()
+        } catch {
+            return "Web search failed: \(error.localizedDescription). Answer from your own knowledge instead of retrying."
+        }
+
+        let top = Array(results.prefix(limit))
+        guard !top.isEmpty else {
+            return "No web results found for query: '\(trimmed)'. Refine the query (e.g. add a year or proper noun) or answer from your own knowledge."
+        }
+
+        // Scrape pages that didn't ship full content already (Wikipedia
+        // results typically have `retrievedContent`; DuckDuckGo results
+        // are usually snippet-only and need a scrape).
+        let urlsToScrape = top.compactMap { result -> String? in
+            guard (result.retrievedContent ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
+                return nil
+            }
+            return result.url
+        }
+        let scraped = await webScraper.scrapeMultiplePages(
+            urls: urlsToScrape,
+            limit: limit,
+            maxCharacters: Self.maxCharactersPerPage
+        )
+
+        // Each result block carries enough metadata for the model to cite
+        // it accurately in its final answer.
+        let rendered = top.enumerated().map { idx, result -> String in
+            var lines = ["--- Result \(idx + 1): \(result.title)"]
+            lines.append("URL: \(result.url)")
+            let body: String
+            if let retrieved = result.retrievedContent,
+               !retrieved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                body = String(retrieved.prefix(Self.maxCharactersPerPage))
+            } else if let scrapedBody = scraped[result.url],
+                      !scrapedBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                body = scrapedBody
+            } else {
+                body = result.snippet
+            }
+            lines.append("Content: \(body)")
+            return lines.joined(separator: "\n")
+        }
+
+        #if DEBUG
+        print("[Tool:webSearch] returning \(top.count) result(s)")
+        #endif
+        return rendered.joined(separator: "\n\n")
+    }
+}

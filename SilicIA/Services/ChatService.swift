@@ -208,7 +208,11 @@ final class ChatService: ObservableObject {
 
         var streamingAssistantID: UUID?
         do {
-            let instructions = buildInstructions(for: language, useToolCalling: useToolCalling)
+            let instructions = buildInstructions(
+                for: language,
+                useToolCalling: useToolCalling,
+                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
+            )
             // Tool-calling branch: hand the model `searchContext` over the
             // pre-chunked corpus + `calculate` for exact arithmetic. The
             // prompt is intentionally minimal (just the user message + a
@@ -218,12 +222,29 @@ final class ChatService: ObservableObject {
             // arithmetic mistakes.
             let session: LanguageModelSession
             if useToolCalling {
-                debugContext("sendMessage path=tool-calling tools=[searchContext, calculate] corpusChunks=\(chunks.count)")
+                // Web-search tool joins the kit only when at least one
+                // web source is enabled. In PDFtalkme mode the host sets
+                // both flags to false so the tool stays off.
+                let webSearchAvailable = useDuckDuckGo || useWikipedia
+                var tools: [any Tool] = [
+                    RAGSearchTool(chunks: chunks),
+                    CalculatorTool()
+                ]
+                if webSearchAvailable {
+                    tools.append(WebSearchTool(
+                        webSearchService: webSearchService,
+                        webScraper: webScraper,
+                        maxDuckDuckGoResults: effectiveMaxDDGResults,
+                        maxWikipediaResults: effectiveMaxWikiResults,
+                        useDuckDuckGo: useDuckDuckGo,
+                        useWikipedia: useWikipedia,
+                        language: language
+                    ))
+                }
+                let toolNames = tools.map(\.name).joined(separator: ", ")
+                debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable)")
                 session = LanguageModelSession(
-                    tools: [
-                        RAGSearchTool(chunks: chunks),
-                        CalculatorTool()
-                    ],
+                    tools: tools,
                     instructions: instructions
                 )
             } else {
@@ -276,6 +297,22 @@ final class ChatService: ObservableObject {
             }
 
             persistMessage(role: "assistant", content: finalContent, citations: citations)
+        } catch is CancellationError {
+            // User pressed Stop. Preserve whatever streamed so far — losing
+            // half a useful answer to a cancel click would be worse than
+            // showing it with no postscript. If nothing streamed yet, drop
+            // the empty placeholder so the transcript stays clean.
+            if let streamingAssistantID,
+               let index = messages.firstIndex(where: { $0.id == streamingAssistantID }) {
+                let partial = messages[index].content
+                if partial.isEmpty {
+                    messages.remove(at: index)
+                } else {
+                    let citations = messages[index].citations
+                    persistMessage(role: "assistant", content: partial, citations: citations)
+                }
+            }
+            errorMessage = nil
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             if let streamingAssistantID,
@@ -1030,41 +1067,70 @@ final class ChatService: ObservableObject {
     /// the model to call `searchContext` / `calculate` instead of
     /// answering blind. The base instructions stay the same so the model's
     /// tone and language conventions don't drift between the two modes.
-    private func buildInstructions(for language: ModelLanguage, useToolCalling: Bool = false) -> String {
+    private func buildInstructions(
+        for language: ModelLanguage,
+        useToolCalling: Bool = false,
+        webSearchAvailable: Bool = false
+    ) -> String {
         let base = PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
             ?? fallbackChatInstructions(for: language)
         guard useToolCalling else { return base }
-        return base + "\n\n" + toolCallingInstructionsAppendix(for: language)
+        return base + "\n\n" + toolCallingInstructionsAppendix(
+            for: language,
+            webSearchAvailable: webSearchAvailable
+        )
     }
 
     /// Extra instructions appended when tool calling is enabled. Phrased
     /// per language so it matches the rest of the system prompt's tone.
-    private func toolCallingInstructionsAppendix(for language: ModelLanguage) -> String {
+    /// The web-search entry is included only when `webSearchAvailable` is
+    /// true so the model doesn't try to call a tool that isn't attached.
+    private func toolCallingInstructionsAppendix(
+        for language: ModelLanguage,
+        webSearchAvailable: Bool
+    ) -> String {
         switch language {
         case .french:
-            return """
-            Outils disponibles :
-            - `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.
-            - `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.
+            var sections = [
+                "Outils disponibles :",
+                "- `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.",
+                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
+                )
+            }
+            sections.append("Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.")
+            return sections.joined(separator: "\n")
 
-            Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.
-            """
         case .spanish:
-            return """
-            Herramientas disponibles:
-            - `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.
-            - `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.
+            var sections = [
+                "Herramientas disponibles:",
+                "- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.",
+                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
+                )
+            }
+            sections.append("Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.")
+            return sections.joined(separator: "\n")
 
-            Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.
-            """
         case .english:
-            return """
-            Available tools:
-            - `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.
-            - `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.
-
-            You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.
-            """
+            var sections = [
+                "Available tools:",
+                "- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.",
+                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
+                )
+            }
+            sections.append("You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.")
+            return sections.joined(separator: "\n")
         }
     }
 
