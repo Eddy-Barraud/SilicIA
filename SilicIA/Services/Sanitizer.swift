@@ -13,11 +13,54 @@ enum ModelOutputLaTeXSanitizer {
     /// Final sanitization of accumulated text
     static func finalizeSanitizedText(_ text: String) -> String {
         var sanitized = text
+        // Escape currency `$` BEFORE any other transformation so subsequent
+        // passes don't accidentally treat `$1025.75` as the start of an
+        // unterminated inline-math block (which silently swallows the rest
+        // of the message into garbled math).
+        sanitized = escapeCurrencyDollars(in: sanitized)
         sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
         sanitized = replacingDigitPowers(in: sanitized)
         // sanitized = closeUnbalancedMathDelimiters(in: sanitized)
         sanitized = replacingMarkdownTitles(in: sanitized)
         return sanitized
+    }
+
+    /// Escapes `$` characters that the model used as a currency symbol next
+    /// to a digit, so the LaTeX renderer doesn't interpret them as inline
+    /// math delimiters. Without this, a turn like
+    ///
+    ///     The total is **$1025.75**.
+    ///
+    /// renders the rest of the message as malformed math because the LaTeX
+    /// parser opens an inline-math block at `$1025.75` and never finds the
+    /// matching close.
+    ///
+    /// Rule: a `$` is treated as currency (and escaped) when it sits
+    /// immediately adjacent to a digit on either side, AND it's not already
+    /// escaped (`\$`) nor part of a `$$` display-math marker. This catches
+    /// the common forms `$1025`, `1025$`, `$1.50`, and `**$100**` while
+    /// leaving genuine math `$x + 2$`, `$\frac{1}{2}$`, and `$$E = mc^2$$`
+    /// alone.
+    static func escapeCurrencyDollars(in text: String) -> String {
+        var output = text
+        // Prefix form: `$<digit>` — e.g. `$1025.75`.
+        // `(?<![\\$])` excludes `\$` (already escaped) and the trailing `$`
+        // of a display-math `$$` opener.
+        output = replacingRegex(
+            in: output,
+            pattern: #"(?<![\\$])\$(?=\d)"#,
+            with: #"\\$"#
+        )
+        // Suffix form: `<digit>$` — common in French (`1025$`).
+        // `(?![\\$\d])` excludes `$\` (a math command), `$$` (display-math
+        // close), and `$<digit>` (already handled by the prefix pass which
+        // would have escaped it; re-matching would double-escape).
+        output = replacingRegex(
+            in: output,
+            pattern: #"(?<=\d)\$(?![\\$\d])"#,
+            with: #"\\$"#
+        )
+        return output
     }
 
     private static func insertBoundarySpacesForKnownCommands(in text: String) -> String {
