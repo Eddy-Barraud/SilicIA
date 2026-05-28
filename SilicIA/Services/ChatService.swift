@@ -96,7 +96,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        useToolCalling: Bool = false
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -207,16 +208,46 @@ final class ChatService: ObservableObject {
 
         var streamingAssistantID: UUID?
         do {
-            let instructions = buildInstructions(for: language)
-            let session = LanguageModelSession(instructions: instructions)
+            let instructions = buildInstructions(for: language, useToolCalling: useToolCalling)
+            // Tool-calling branch: hand the model `searchContext` over the
+            // pre-chunked corpus + `calculate` for exact arithmetic. The
+            // prompt is intentionally minimal (just the user message + a
+            // nudge to call the tool first) — the model pulls context on
+            // demand instead of receiving a pre-baked top-K block. The
+            // calculator wipes out an entire class of small-model
+            // arithmetic mistakes.
+            let session: LanguageModelSession
+            if useToolCalling {
+                session = LanguageModelSession(
+                    tools: [
+                        RAGSearchTool(chunks: chunks),
+                        CalculatorTool()
+                    ],
+                    instructions: instructions
+                )
+            } else {
+                session = LanguageModelSession(instructions: instructions)
+            }
             let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
-            let prompt = buildPrompt(
-                for: message,
-                selectedContext: finalSelectedContext,
-                language: language,
-                maxOutputCharacters: maxOutputCharacters,
-                maxOutputTokens: effectiveMaxOutputTokens
-            )
+            let prompt: String
+            if useToolCalling {
+                // No pre-baked context — the model is expected to call
+                // searchContext as needed.
+                prompt = buildToolCallingPrompt(
+                    for: message,
+                    hasAttachedDocuments: !chunks.isEmpty,
+                    language: language,
+                    maxOutputCharacters: maxOutputCharacters
+                )
+            } else {
+                prompt = buildPrompt(
+                    for: message,
+                    selectedContext: finalSelectedContext,
+                    language: language,
+                    maxOutputCharacters: maxOutputCharacters,
+                    maxOutputTokens: effectiveMaxOutputTokens
+                )
+            }
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
 
@@ -993,9 +1024,94 @@ final class ChatService: ObservableObject {
     }
 
     /// Builds dynamic chat instructions matching the user's query language.
-    private func buildInstructions(for language: ModelLanguage) -> String {
-        return PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
+    /// When `useToolCalling` is true, appends an extra paragraph telling
+    /// the model to call `searchContext` / `calculate` instead of
+    /// answering blind. The base instructions stay the same so the model's
+    /// tone and language conventions don't drift between the two modes.
+    private func buildInstructions(for language: ModelLanguage, useToolCalling: Bool = false) -> String {
+        let base = PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
             ?? fallbackChatInstructions(for: language)
+        guard useToolCalling else { return base }
+        return base + "\n\n" + toolCallingInstructionsAppendix(for: language)
+    }
+
+    /// Extra instructions appended when tool calling is enabled. Phrased
+    /// per language so it matches the rest of the system prompt's tone.
+    private func toolCallingInstructionsAppendix(for language: ModelLanguage) -> String {
+        switch language {
+        case .french:
+            return """
+            Outils disponibles :
+            - `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.
+            - `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.
+
+            Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.
+            """
+        case .spanish:
+            return """
+            Herramientas disponibles:
+            - `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.
+            - `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.
+
+            Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.
+            """
+        case .english:
+            return """
+            Available tools:
+            - `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.
+            - `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.
+
+            You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.
+            """
+        }
+    }
+
+    /// Builds the per-turn user prompt for the tool-calling path. Much
+    /// shorter than `buildPrompt` because there's no pre-baked context —
+    /// the model fetches what it needs via `searchContext`. We still
+    /// include conversation history so multi-turn flow stays coherent.
+    private func buildToolCallingPrompt(
+        for userMessage: String,
+        hasAttachedDocuments: Bool,
+        language: ModelLanguage,
+        maxOutputCharacters: Int
+    ) -> String {
+        let historyMessages: [ChatMessage]
+        if let last = messages.last, last.role == .user, last.content == userMessage {
+            historyMessages = Array(messages.dropLast())
+        } else {
+            historyMessages = messages
+        }
+        let history = historyMessages
+            .suffix(Self.historyMessageLimit)
+            .map { $0.role == .assistant ? "Assistant: \($0.content)" : "User: \($0.content)" }
+            .joined(separator: "\n")
+
+        let documentsHint: String
+        switch (language, hasAttachedDocuments) {
+        case (.french, true):
+            documentsHint = "Des documents sont joints à cette conversation : utilise `searchContext` pour les interroger."
+        case (.french, false):
+            documentsHint = "Aucun document joint — réponds depuis tes connaissances."
+        case (.spanish, true):
+            documentsHint = "Hay documentos adjuntos en esta conversación: usa `searchContext` para consultarlos."
+        case (.spanish, false):
+            documentsHint = "No hay documentos adjuntos — responde con tus conocimientos."
+        case (.english, true):
+            documentsHint = "Documents are attached to this conversation: use `searchContext` to query them."
+        case (.english, false):
+            documentsHint = "No documents attached — answer from your own knowledge."
+        }
+
+        return """
+        \(history)
+
+        \(documentsHint)
+
+        User: \(userMessage)
+
+        (Max output: ~\(maxOutputCharacters) characters.)
+        """
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {
