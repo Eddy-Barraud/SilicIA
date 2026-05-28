@@ -122,12 +122,19 @@ final class ChatService: ObservableObject {
             maxOutputTokens: effectiveMaxOutputTokens
         )
 
+        // Tool-calling mode: the model owns the decision to search the web,
+        // via the `webSearch` tool. Suppress the auto-prefetch path so we
+        // don't redundantly fetch + chunk pages the model might not even
+        // care about. The user's "Web" chip in the composer is therefore
+        // a no-op when tool calling is on — the prompt-stuffing baseline
+        // still honours it.
+        let effectiveIncludeWebSearch = useToolCalling ? false : includeWebSearch
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
-            includeWebSearch: includeWebSearch,
-            searchQuerySeed: includeWebSearch ? message : "",
+            includeWebSearch: effectiveIncludeWebSearch,
+            searchQuerySeed: effectiveIncludeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
         )
@@ -149,7 +156,7 @@ final class ChatService: ObservableObject {
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
                 imageURLs: imageURLs,
-                includeWebSearch: includeWebSearch,
+                includeWebSearch: effectiveIncludeWebSearch,
                 currentMessage: message,
                 language: language,
                 maxDuckDuckGoResults: effectiveMaxDDGResults,
@@ -228,7 +235,8 @@ final class ChatService: ObservableObject {
                 let webSearchAvailable = useDuckDuckGo || useWikipedia
                 var tools: [any Tool] = [
                     RAGSearchTool(chunks: chunks),
-                    CalculatorTool()
+                    CalculatorTool(),
+                    DateTimeTool(language: language)
                 ]
                 if webSearchAvailable {
                     tools.append(WebSearchTool(
@@ -1094,7 +1102,8 @@ final class ChatService: ObservableObject {
             var sections = [
                 "Outils disponibles :",
                 "- `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.",
-                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête."
+                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.",
+                "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
             ]
             if webSearchAvailable {
                 sections.append(
@@ -1108,7 +1117,8 @@ final class ChatService: ObservableObject {
             var sections = [
                 "Herramientas disponibles:",
                 "- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.",
-                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria."
+                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.",
+                "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
             ]
             if webSearchAvailable {
                 sections.append(
@@ -1122,7 +1132,8 @@ final class ChatService: ObservableObject {
             var sections = [
                 "Available tools:",
                 "- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.",
-                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head."
+                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.",
+                "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
             ]
             if webSearchAvailable {
                 sections.append(

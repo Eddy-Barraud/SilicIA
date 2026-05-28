@@ -984,6 +984,23 @@ struct SearchView: View {
                 }
                 .pickerStyle(.segmented)
             }
+
+            // Tool-calling toggle — mirrors the ChatView setting on the
+            // same `settings.useToolCalling` field, so the two views stay
+            // in sync. Enables the model to call searchContext / calculate
+            // / currentDateTime / webSearch on demand instead of receiving
+            // a pre-baked context block in the summary prompt.
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $settings.useToolCalling) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tool calling (experimental)")
+                            .font(.subheadline)
+                        Text("Lets the model query the web, search the corpus, calculate, and get the current date on demand instead of relying on the pre-baked search summary.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .padding()
         .background(controlBackgroundColor)
@@ -1439,6 +1456,11 @@ struct SearchView: View {
             language: settings.language,
             profile: generationProfile ?? activeGenerationProfile,
             queries: queries,
+            useToolCalling: settings.useToolCalling,
+            maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+            maxWikipediaResults: settings.maxWikipediaResults,
+            useDuckDuckGo: settings.useDuckDuckGo,
+            useWikipedia: settings.useWikipedia,
             onMatchingScores: { scores in
                 Task { @MainActor in
                     // AIService chunks the full overfetched `fetchedResults`

@@ -35,6 +35,11 @@ class AIService: ObservableObject {
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
+    /// Web search dependency reused by the tool-calling path so the model
+    /// can invoke `webSearch` against the same source mix the prompt-
+    /// stuffing path would have used. Held by AIService (not injected
+    /// from SearchView) so the tool kit stays self-contained.
+    private let webSearchService = WebSearchService()
     private var firstGuessSession: LanguageModelSession
     private var firstGuessSessionLanguage: ModelLanguage
     private var queryExpanderSession: LanguageModelSession
@@ -224,7 +229,7 @@ class AIService: ObservableObject {
     /// - Parameter queries: Full query set (user + derived). When more than one query is provided
     ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
     ///   combined query vector.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
 
@@ -365,6 +370,12 @@ class AIService: ObservableObject {
             maxTokens: maxTokens,
             language: language,
             profile: profile,
+            useToolCalling: useToolCalling,
+            corpusChunks: selected.selectedChunks.map(\.chunk),
+            maxDuckDuckGoResults: maxDuckDuckGoResults,
+            maxWikipediaResults: maxWikipediaResults,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia,
             onPartialUpdate: { [weak self] partial in
                 guard let self else { return }
                 self.summary = partial
@@ -393,9 +404,52 @@ class AIService: ObservableObject {
     }
 
     /// Builds compact instructions for the selected response language.
-    private func buildInstructions(for language: ModelLanguage) -> String {
-        PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
+    /// When `useToolCalling` is true, appends a tool-usage paragraph
+    /// (mirrors ChatService.buildInstructions's tool appendix).
+    private func buildInstructions(for language: ModelLanguage, useToolCalling: Bool = false) -> String {
+        let base = PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
             ?? fallbackSummaryInstructions(for: language)
+        guard useToolCalling else { return base }
+        return base + "\n\n" + Self.searchToolCallingAppendix(for: language)
+    }
+
+    /// Per-language tool-usage instructions for the search-summary path.
+    /// Mirrors the ChatService appendix but tuned for the search context:
+    /// the model is invoked with the user's search query (not a chat
+    /// turn) and is expected to compose a focused webSearch query from it.
+    private static func searchToolCallingAppendix(for language: ModelLanguage) -> String {
+        switch language {
+        case .french:
+            return """
+            Outils disponibles :
+            - `searchContext(query)` : recherche dans le corpus de pages web déjà récupérées et renvoie les passages pertinents avec leur source.
+            - `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules à partir de la question — utile pour compléter le corpus si tu manques d'information.
+            - `calculate(expression)` : évalue une expression arithmétique exactement.
+            - `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient « aujourd'hui », « la semaine prochaine », « bientôt », etc.
+
+            Cite la source des passages utilisés dans ta réponse finale.
+            """
+        case .spanish:
+            return """
+            Herramientas disponibles:
+            - `searchContext(query)`: busca en el corpus de páginas web ya recuperadas y devuelve los pasajes relevantes con su fuente.
+            - `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas — útil para completar el corpus si te falta información.
+            - `calculate(expression)`: evalúa una expresión aritmética exactamente.
+            - `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga 'hoy', 'la próxima semana', 'pronto', etc.
+
+            Cita la fuente de los pasajes utilizados en tu respuesta final.
+            """
+        case .english:
+            return """
+            Available tools:
+            - `searchContext(query)`: search the already-fetched web corpus and return relevant passages with their source.
+            - `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose — useful to extend the corpus when something is missing.
+            - `calculate(expression)`: evaluate an arithmetic expression exactly.
+            - `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question mentions 'today', 'next week', 'soon', etc.
+
+            Cite the source of any passages you used in your final answer.
+            """
+        }
     }
 
     /// Builds instructions for an ultra-short first-guess response.
@@ -600,12 +654,52 @@ class AIService: ObservableObject {
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
-    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, onPartialUpdate: ((String) -> Void)? = nil) async -> String {
+    private func generateSummaryWithFoundationModels(
+        query: String,
+        context: String,
+        results: [SearchResult],
+        temperature: Double = 0.3,
+        maxTokens: Int = 1000,
+        language: ModelLanguage = .french,
+        profile: GenerationProfile = .fast,
+        useToolCalling: Bool = false,
+        corpusChunks: [RAGChunk] = [],
+        maxDuckDuckGoResults: Int = 6,
+        maxWikipediaResults: Int = 2,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true,
+        onPartialUpdate: ((String) -> Void)? = nil
+    ) async -> String {
         do {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
-            let instructions = buildInstructions(for: language)
-            let session = LanguageModelSession(instructions: instructions)
+            let instructions = buildInstructions(for: language, useToolCalling: useToolCalling)
+            let session: LanguageModelSession
+            if useToolCalling {
+                let webSearchAvailable = useDuckDuckGo || useWikipedia
+                var tools: [any Tool] = [
+                    RAGSearchTool(chunks: corpusChunks),
+                    CalculatorTool(),
+                    DateTimeTool(language: language)
+                ]
+                if webSearchAvailable {
+                    tools.append(WebSearchTool(
+                        webSearchService: webSearchService,
+                        webScraper: webScraper,
+                        maxDuckDuckGoResults: maxDuckDuckGoResults,
+                        maxWikipediaResults: maxWikipediaResults,
+                        useDuckDuckGo: useDuckDuckGo,
+                        useWikipedia: useWikipedia,
+                        language: language
+                    ))
+                }
+                #if DEBUG
+                debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable)")
+                #endif
+                session = LanguageModelSession(tools: tools, instructions: instructions)
+            } else {
+                session = LanguageModelSession(instructions: instructions)
+            }
 
             let isDeepProfile = profile == .deep
 
