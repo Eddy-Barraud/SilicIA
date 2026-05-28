@@ -663,37 +663,41 @@ struct ChatView: View {
             // Primary text input. One visible line at rest, expanding
             // up to 5 lines as the user types — keeps the container
             // compact when empty, never crowds the action row.
+            //
+            // macOS uses a custom NSTextView wrapper so we can intercept
+            // Return at the NSResponder level (plain Return → send,
+            // Shift+Return → newline). SwiftUI's TextField + .onKeyPress
+            // approach on axis:.vertical was racing NSTextView's own
+            // keyDown and either inserting newlines or triggering the
+            // AppKit "field commit" select-all instead of submitting.
+            //
+            // iOS keeps the SwiftUI TextField — its keyboard Send button
+            // calls .onSubmit reliably and there's no equivalent
+            // platform-specific footgun.
+            #if os(macOS)
+            MacChatComposerTextEditor(
+                text: $messageInput,
+                placeholder: L.t("chat.composer.placeholder", language: settings.language),
+                onSubmit: submitMessage
+            )
+            .frame(minHeight: 22, maxHeight: 120)
+            .focused($isInputFieldFocused)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+            #else
             TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .focused($isInputFieldFocused)
-                #if canImport(UIKit)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
-                #endif
-                // On macOS, Return sends the message; Shift+Return inserts
-                // a newline. `.onSubmit` never fires on axis:.vertical fields.
-                //
-                // Two important details:
-                //   1. Use the simpler `.onKeyPress(.return)` overload — the
-                //      `keys:` overload (with a KeyPress argument) has lower
-                //      interception priority, and NSTextView swallows Return
-                //      for newline insertion before SwiftUI sees it.
-                //   2. The simpler overload's closure takes no argument, so
-                //      we read shift state from `NSEvent.modifierFlags`
-                //      directly. AppKit is already imported above.
-                #if os(macOS)
-                .onKeyPress(.return) {
-                    if NSEvent.modifierFlags.contains(.shift) {
-                        return .ignored   // Shift+Return → NSTextView inserts newline
-                    }
+                .onSubmit {
                     submitMessage()
-                    return .handled
                 }
-                #endif
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
+            #endif
 
             // Bottom action row: + menu (leading), analyzing progress
             // (centre, when active), send icon (trailing).
