@@ -15,6 +15,13 @@ final class CalculatorToolTests: XCTestCase {
 
     private let tool = CalculatorTool()
 
+    override func setUp() {
+        super.setUp()
+        // Loop-guard state is process-wide static. Wipe it before each test
+        // so a single test never observes another test's counters.
+        CalculatorTool.resetLoopGuardForTesting()
+    }
+
     // MARK: - Basic arithmetic
 
     func testIntegerAddition() async throws {
@@ -84,5 +91,78 @@ final class CalculatorToolTests: XCTestCase {
         // Real invoice math: 77.08 × 2 = 154.16 (decimal precision matters)
         let output = try await tool.call(arguments: .init(expression: "77.08 * 2"))
         XCTAssertEqual(output, "154.16")
+    }
+
+    // MARK: - Factorial
+
+    /// Regression for the loop-bug the user hit: model emitted `5!`, the
+    /// allow-list rejected it as unsupported, and the model just retried
+    /// the same broken input dozens of times. Native factorial support
+    /// short-circuits the loop at its source.
+    func testFactorialOfSmallInteger() async throws {
+        let output = try await tool.call(arguments: .init(expression: "5!"))
+        XCTAssertEqual(output, "120", "5! should evaluate to 120, got \(output)")
+    }
+
+    func testFactorialOfZeroIsOne() async throws {
+        let output = try await tool.call(arguments: .init(expression: "0!"))
+        XCTAssertEqual(output, "1", "0! should evaluate to 1, got \(output)")
+    }
+
+    func testFactorialEmbeddedInExpression() async throws {
+        // 3! + 4! = 6 + 24 = 30
+        let output = try await tool.call(arguments: .init(expression: "3! + 4!"))
+        XCTAssertEqual(output, "30")
+    }
+
+    func testFactorialOfFifteenMaxSupported() async throws {
+        // 15! = 1_307_674_368_000 — largest n whose value fits in Double's
+        // 2^53 exact-integer range, so the result prints as a clean integer
+        // instead of falling back to scientific notation.
+        let output = try await tool.call(arguments: .init(expression: "15!"))
+        XCTAssertEqual(output, "1307674368000")
+    }
+
+    /// 16! crosses the precision boundary; the tool should reject the
+    /// expression with a recoverable error rather than silently lose
+    /// trailing digits to Double rounding.
+    func testFactorialAboveCapRejected() async throws {
+        let output = try await tool.call(arguments: .init(expression: "16!"))
+        XCTAssertTrue(output.hasPrefix("Error"),
+                      "16! should be rejected (above the precision cap), got: \(output)")
+    }
+
+    // MARK: - Loop guard
+
+    /// Identical expression called more than the threshold times in the
+    /// window must trigger the stop-directive so the model breaks out of
+    /// a tool-call loop instead of retrying forever.
+    func testLoopGuardTriggersOnRepeatedIdenticalCalls() async throws {
+        // Use an expression the allow-list rejects so each call would
+        // otherwise return the same Error message — perfect feedstock for
+        // the model's retry loop.
+        let badExpression = "abc!"
+        var sawStop = false
+        for _ in 0..<6 {
+            let output = try await tool.call(arguments: .init(expression: badExpression))
+            if output.contains("STOP CALLING THIS TOOL") {
+                sawStop = true
+                break
+            }
+        }
+        XCTAssertTrue(sawStop,
+                      "Loop guard did not engage after repeated identical calls")
+    }
+
+    /// Different expressions in a row must NOT trigger the loop guard —
+    /// otherwise legitimate sequences (e.g. multiple steps of a long
+    /// calculation) would be incorrectly blocked.
+    func testLoopGuardDoesNotTriggerOnDifferentExpressions() async throws {
+        let expressions = ["1+1", "2+2", "3+3", "4+4", "5+5", "6+6", "7+7"]
+        for expr in expressions {
+            let output = try await tool.call(arguments: .init(expression: expr))
+            XCTAssertFalse(output.contains("STOP CALLING THIS TOOL"),
+                           "Loop guard wrongly fired on distinct expression \(expr): \(output)")
+        }
     }
 }

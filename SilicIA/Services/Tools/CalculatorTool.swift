@@ -58,6 +58,22 @@ struct CalculatorTool: Tool {
         #if DEBUG
         print("[Tool:calculate] called with expression=\"\(arguments.expression)\"")
         #endif
+
+        // Loop guard: small models sometimes get stuck calling a tool over
+        // and over with the same broken input. Track recent calls; once we
+        // cross the threshold for an identical expression, return an
+        // explicit "stop" directive so the model breaks out of the loop.
+        let callCount = Self.registerCallAndCheckLoop(arguments.expression)
+        if callCount > Self.loopThreshold {
+            return """
+            STOP CALLING THIS TOOL. You have called `calculate` with the \
+            expression "\(arguments.expression)" \(callCount) times — the \
+            result will not change. Do not call this tool again with the \
+            same input. Answer the user directly using your own arithmetic \
+            knowledge (e.g. 5! = 5 × 4 × 3 × 2 × 1 = 120).
+            """
+        }
+
         // Accept FR/ES-style decimal commas. Do this BEFORE the allow-list
         // check so `1,5 * 2` validates after `,` → `.` normalisation.
         let normalised = arguments.expression
@@ -65,25 +81,124 @@ struct CalculatorTool: Tool {
             .replacingOccurrences(of: ",", with: ".")
 
         guard !normalised.isEmpty else {
-            return "Error: empty expression"
+            return "Error: empty expression. Pass an arithmetic expression like '64.24 * 2' or '(1 + 2) * 3'."
         }
-        guard normalised.unicodeScalars.allSatisfy({ Self.allowedCharacters.contains($0) }) else {
-            return "Error: expression contains unsupported characters (allowed: digits, + - * / parentheses)"
+
+        // Expand factorial syntax `n!` into the equivalent product, so the
+        // allow-list (which intentionally excludes `!`) still works and so
+        // NSExpression sees a plain arithmetic expression. Capped at 20! to
+        // stay inside Int64 range.
+        let expanded = Self.expandFactorials(in: normalised)
+
+        guard expanded.unicodeScalars.allSatisfy({ Self.allowedCharacters.contains($0) }) else {
+            return """
+            Error: '\(arguments.expression)' contains characters this tool \
+            doesn't support. Only digits, decimal points, + - * /, and \
+            parentheses are allowed. Convert powers, percents, and other \
+            operations into equivalent arithmetic before calling — e.g. \
+            '15% of 200' → '200 * 0.15', '2^10' → '2 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2 * 2'. \
+            If the conversion is impractical, answer the user from your own \
+            knowledge instead of retrying this tool.
+            """
         }
 
         // Promote bare integer literals to doubles so NSExpression doesn't
         // perform integer division — `10 / 4` would otherwise evaluate to
         // 2; forcing `10.0 / 4.0` yields 2.5 as expected.
-        let doublified = Self.promoteIntegersToDoubles(normalised)
+        let doublified = Self.promoteIntegersToDoubles(expanded)
 
         guard let value = Self.evaluate(doublified) else {
-            return "Error: could not evaluate '\(arguments.expression)'"
+            return """
+            Error: could not evaluate '\(arguments.expression)'. The expression \
+            may be syntactically invalid (e.g. unmatched parentheses, two \
+            operators in a row). Try rewriting it, or answer the user \
+            without the calculator.
+            """
         }
 
         // Format: trim a trailing ".0" so integer results read as integers.
         // Keep enough precision (up to 10 significant digits) so financial
         // values like 77.08 don't get rounded.
         return Self.format(value)
+    }
+
+    // MARK: - Factorial expansion
+
+    /// Cached regex matching `<digits>!` — the factorial-of-integer form
+    /// the model is likely to emit when it sees factorial notation.
+    private static let factorialRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"(\d+)!"#,
+        options: []
+    )
+
+    /// Largest `n` we'll expand. 15! = 1,307,674,368,000 sits comfortably
+    /// below Double's 2^53 exact-integer boundary (~9 × 10¹⁵), so the
+    /// result round-trips through NSExpression's Double arithmetic without
+    /// precision loss. 16!–20! technically fit in Int64 but lose digits
+    /// when promoted to Double, producing garbled output. For n above the
+    /// cap we leave the `!` in place so the allow-list rejects it and the
+    /// model knows to reformulate.
+    private static let maxFactorialN = 15
+
+    /// Replaces each `n!` occurrence in `expression` with its evaluated
+    /// integer product wrapped in parens (so `2 * 5!` becomes `2 * (120)`).
+    /// Leaves `n!` for n > 20 alone — those will be rejected downstream.
+    private static func expandFactorials(in expression: String) -> String {
+        guard let regex = factorialRegex else { return expression }
+        let nsRange = NSRange(expression.startIndex..., in: expression)
+        let matches = regex.matches(in: expression, options: [], range: nsRange)
+        guard !matches.isEmpty else { return expression }
+
+        var result = expression
+        // Walk back-to-front so each replacement doesn't invalidate earlier
+        // string indices.
+        for match in matches.reversed() {
+            guard let fullRange = Range(match.range, in: result),
+                  let digitsRange = Range(match.range(at: 1), in: result),
+                  let n = Int(result[digitsRange]),
+                  n >= 0, n <= Self.maxFactorialN else {
+                continue
+            }
+            let factorial: Int = n == 0 ? 1 : (1...n).reduce(1, *)
+            result.replaceSubrange(fullRange, with: "(\(factorial))")
+        }
+        return result
+    }
+
+    // MARK: - Loop guard
+
+    /// Static counters of recent identical expressions. A tool is a value
+    /// type, but the model may instantiate many sessions over a short
+    /// window — keeping the cache here means every CalculatorTool instance
+    /// in the process shares the same loop view.
+    private static let recentCallsLock = NSLock()
+    private static var recentCalls: [String: (count: Int, lastSeen: Date)] = [:]
+
+    /// Identical expressions called more than this many times in
+    /// `loopWindow` trigger the stop-directive response.
+    private static let loopThreshold = 3
+    private static let loopWindow: TimeInterval = 10
+
+    /// Records this call, evicts stale entries, returns the running count
+    /// of identical calls inside the window.
+    private static func registerCallAndCheckLoop(_ expression: String) -> Int {
+        recentCallsLock.lock()
+        defer { recentCallsLock.unlock() }
+        let now = Date()
+        for (key, value) in recentCalls where now.timeIntervalSince(value.lastSeen) >= loopWindow {
+            recentCalls.removeValue(forKey: key)
+        }
+        let previous = recentCalls[expression]?.count ?? 0
+        let updated = previous + 1
+        recentCalls[expression] = (count: updated, lastSeen: now)
+        return updated
+    }
+
+    /// Test-only hook to wipe loop-guard state between cases.
+    static func resetLoopGuardForTesting() {
+        recentCallsLock.lock()
+        defer { recentCallsLock.unlock() }
+        recentCalls.removeAll()
     }
 
     /// Cached regex matching contiguous integer literals that are NOT
