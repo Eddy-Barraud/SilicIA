@@ -63,14 +63,20 @@ struct WebSearchTool: Tool {
     /// the model received as the tool reply.
     var onResults: (@Sendable ([SearchResult]) -> Void)? = nil
 
+    /// Token budget for the entire tool reply (titles + URLs + scraped
+    /// content). Caller-supplied so it scales with the conversation's
+    /// response cap. Divided by `defaultMaxResults` to derive the
+    /// per-page character cap.
+    var tokenBudget: Int = 1500
+
     /// Default result cap when the model doesn't supply `maxResults`.
     /// Three keeps tool output bounded enough to fit in a tool reply
     /// without truncation by the model's context window.
     private static let defaultMaxResults = 3
 
-    /// Per-page scrape cap. Total tool output budget ≈ defaultMaxResults
-    /// × this value, plus title/URL overhead.
-    private static let maxCharactersPerPage = 1500
+    /// Overhead per result block (title + URL + headers). Roughly
+    /// estimated so the derived per-page char budget leaves space for it.
+    private static let overheadCharsPerResult = 120
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -90,6 +96,18 @@ struct WebSearchTool: Tool {
         }
 
         let limit = max(1, min(arguments.maxResults ?? Self.defaultMaxResults, 5))
+
+        // Derive per-page char cap from the total token budget. We split
+        // the budget evenly across the model-requested result count,
+        // then subtract a small per-result overhead for the title/URL
+        // headers we emit. Token → char conversion uses the shared
+        // avgCharsPerToken so this scales coherently with the rest of
+        // the context-token accounting.
+        let totalChars = max(0, tokenBudget) * TokenBudgeting.avgCharsPerToken
+        let perResultCharBudget = max(
+            300,
+            (totalChars / max(1, limit)) - Self.overheadCharsPerResult
+        )
 
         let results: [SearchResult]
         do {
@@ -127,7 +145,7 @@ struct WebSearchTool: Tool {
         let scraped = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: limit,
-            maxCharacters: Self.maxCharactersPerPage
+            maxCharacters: perResultCharBudget
         )
 
         // Each result block carries enough metadata for the model to cite
@@ -138,7 +156,7 @@ struct WebSearchTool: Tool {
             let body: String
             if let retrieved = result.retrievedContent,
                !retrieved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                body = String(retrieved.prefix(Self.maxCharactersPerPage))
+                body = String(retrieved.prefix(perResultCharBudget))
             } else if let scrapedBody = scraped[result.url],
                       !scrapedBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 body = scrapedBody

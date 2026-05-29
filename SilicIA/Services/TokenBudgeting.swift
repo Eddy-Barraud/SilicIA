@@ -81,6 +81,26 @@ enum TokenBudgeting {
         max(tokens, 0) * avgCharsPerToken
     }
 
+    /// Token cap allocated to each `Tool.call` reply when tool calling is
+    /// active. Scales with the effective response budget so verbose
+    /// profiles ("deep") give tools room to return richer payloads and
+    /// terse profiles ("fast") keep tool output tight. Clamped on both
+    /// ends so a single tool reply can never blow the context window
+    /// (`toolOutputTokenBudgetCeiling`) and so very small response caps
+    /// don't starve a tool of useful payload (`toolOutputTokenBudgetFloor`).
+    ///
+    /// The 2x multiplier reflects how tool outputs tend to be referenced
+    /// once and discarded — the model rewrites/summarises the relevant
+    /// bits into its final answer — so a tool reply roughly twice the
+    /// response cap is a reasonable working capacity without dominating
+    /// the context window.
+    static let toolOutputTokenBudgetFloor = 500
+    static let toolOutputTokenBudgetCeiling = 3000
+    static func toolOutputTokenBudget(forResponseTokens responseTokens: Int) -> Int {
+        let scaled = responseTokens * 2
+        return min(toolOutputTokenBudgetCeiling, max(toolOutputTokenBudgetFloor, scaled))
+    }
+
     static func estimatedContextWords(forTokens tokens: Int) -> Int {
         max(1, estimatedContextCharacters(forTokens: tokens) / avgCharsPerWord)
     }

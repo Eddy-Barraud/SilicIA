@@ -236,8 +236,13 @@ final class ChatService: ObservableObject {
                 // Both must be true for the tool to be attached. PDFtalkme
                 // forces the chip off so the tool stays off in that host.
                 let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
+                // Per-tool reply budget scales with the response cap so
+                // verbose profiles give tools more room and terse profiles
+                // keep them tight. See TokenBudgeting.toolOutputTokenBudget
+                // for the exact formula.
+                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: effectiveMaxOutputTokens)
                 var tools: [any Tool] = [
-                    RAGSearchTool(chunks: chunks),
+                    RAGSearchTool(chunks: chunks, tokenBudget: toolBudget),
                     CalculatorTool(),
                     DateTimeTool(language: language)
                 ]
@@ -249,11 +254,12 @@ final class ChatService: ObservableObject {
                         maxWikipediaResults: effectiveMaxWikiResults,
                         useDuckDuckGo: useDuckDuckGo,
                         useWikipedia: useWikipedia,
-                        language: language
+                        language: language,
+                        tokenBudget: toolBudget
                     ))
                 }
                 let toolNames = tools.map(\.name).joined(separator: ", ")
-                debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable)")
+                debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 session = LanguageModelSession(
                     tools: tools,
                     instructions: instructions

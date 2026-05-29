@@ -831,8 +831,20 @@ class AIService: ObservableObject {
             let session: LanguageModelSession
             if useToolCalling {
                 let webSearchAvailable = useDuckDuckGo || useWikipedia
+                // Per-tool reply budget scales with the response cap. The
+                // effective output budget is computed below as
+                // `effectiveMaxTokens`, but we need the tool budget here
+                // (session construction precedes the prompt step), so
+                // recompute from `maxTokens` via the same clamp.
+                let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
+                    requestedMaxTokens: maxTokens,
+                    instructionTokens: TokenBudgeting.instructionTokens,
+                    promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+                    minContextTokens: TokenBudgeting.minContextTokens
+                )
+                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: clampedOutputTokens)
                 var tools: [any Tool] = [
-                    RAGSearchTool(chunks: corpusChunks),
+                    RAGSearchTool(chunks: corpusChunks, tokenBudget: toolBudget),
                     CalculatorTool(),
                     DateTimeTool(language: language)
                 ]
@@ -844,7 +856,8 @@ class AIService: ObservableObject {
                         maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo,
                         useWikipedia: useWikipedia,
-                        language: language
+                        language: language,
+                        tokenBudget: toolBudget
                     )
                     // Mirror every webSearch reply into the published
                     // `toolFetchedResults` so SearchView can surface them as
@@ -858,7 +871,7 @@ class AIService: ObservableObject {
                     tools.append(webTool)
                 }
                 #if DEBUG
-                debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable)")
+                debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 #endif
                 session = LanguageModelSession(tools: tools, instructions: instructions)
             } else {

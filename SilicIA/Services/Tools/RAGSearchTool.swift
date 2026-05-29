@@ -60,16 +60,18 @@ struct RAGSearchTool: Tool {
 
     let chunks: [RAGChunk]
 
+    /// Token budget for the chunks returned to the model on a single call.
+    /// Caller-supplied so it scales with the conversation's response cap
+    /// (see `TokenBudgeting.toolOutputTokenBudget(forResponseTokens:)`).
+    /// Falls back to a sensible default when constructed via the
+    /// memberwise init without a budget — useful for tests.
+    var tokenBudget: Int = 1500
+
     /// Default cap when the model doesn't supply `maxResults`. Three is
     /// a good baseline: enough to surface the right row + its header +
     /// some neighbouring context, but not so many that the tool reply
     /// overruns the model's context window.
     private static let defaultMaxResults = 3
-
-    /// Tokens budgeted for the chunks returned to the model. Keeps tool
-    /// output predictable; the model can request more in a follow-up call
-    /// if needed.
-    private static let toolOutputTokenBudget = 1500
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -89,7 +91,7 @@ struct RAGSearchTool: Tool {
         let result = await service.selectContext(
             chunks: chunks,
             query: trimmed,
-            maxOutputTokens: Self.toolOutputTokenBudget
+            maxOutputTokens: tokenBudget
         )
 
         let top = Array(result.selectedChunks.prefix(limit))
