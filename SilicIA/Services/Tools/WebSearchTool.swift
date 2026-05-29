@@ -69,10 +69,20 @@ struct WebSearchTool: Tool {
     /// per-page character cap.
     var tokenBudget: Int = 1500
 
-    /// Default result cap when the model doesn't supply `maxResults`.
-    /// Three keeps tool output bounded enough to fit in a tool reply
-    /// without truncation by the model's context window.
+    /// Default result count when the model doesn't supply `maxResults`.
+    /// Five gives SearchView a useful range of cards to display and lets
+    /// the model triangulate across sources when summarising.
     private static let defaultMaxResults = 5
+
+    /// Hard floor on the result count regardless of what the model asks
+    /// for. Models routinely pick `maxResults=1` because their training
+    /// labels low counts as "quick lookup"; for SearchView's card UX
+    /// that produces a single-source list the user reads as broken.
+    /// Three is the smallest count that conveys "we surveyed sources".
+    private static let minResults = 3
+    /// Hard ceiling so a model that asks for 10 doesn't blow the
+    /// per-call token budget.
+    private static let maxResultsCap = 5
 
     /// Overhead per result block (title + URL + headers). Roughly
     /// estimated so the derived per-page char budget leaves space for it.
@@ -95,7 +105,7 @@ struct WebSearchTool: Tool {
             """
         }
 
-        let limit = max(3, min(arguments.maxResults ?? Self.defaultMaxResults, 5))
+        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, Self.maxResultsCap))
 
         // Derive per-page char cap from the total token budget. We split
         // the budget evenly across the model-requested result count,
