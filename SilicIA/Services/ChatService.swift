@@ -218,7 +218,7 @@ final class ChatService: ObservableObject {
             let instructions = buildInstructions(
                 for: language,
                 useToolCalling: useToolCalling,
-                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
+                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch
             )
             // Tool-calling branch: hand the model `searchContext` over the
             // pre-chunked corpus + `calculate` for exact arithmetic. The
@@ -229,10 +229,13 @@ final class ChatService: ObservableObject {
             // arithmetic mistakes.
             let session: LanguageModelSession
             if useToolCalling {
-                // Web-search tool joins the kit only when at least one
-                // web source is enabled. In PDFtalkme mode the host sets
-                // both flags to false so the tool stays off.
-                let webSearchAvailable = useDuckDuckGo || useWikipedia
+                // Web-search tool joins the kit only when (a) at least one
+                // source is enabled AND (b) the user has the "Web" chip on
+                // in the composer. The chip is the per-conversation switch;
+                // the source flags are the global "what to query" config.
+                // Both must be true for the tool to be attached. PDFtalkme
+                // forces the chip off so the tool stays off in that host.
+                let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
                 var tools: [any Tool] = [
                     RAGSearchTool(chunks: chunks),
                     CalculatorTool(),

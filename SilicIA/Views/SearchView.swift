@@ -1372,6 +1372,31 @@ struct SearchView: View {
         
         Task {
             do {
+                // Tool-calling mode: skip the auto web search entirely.
+                // The model owns the decision to query the web via its
+                // `webSearch` tool. Otherwise we end up handing it both a
+                // pre-fetched corpus AND the tools, and it just calls
+                // `searchContext` over the corpus — `webSearch` never
+                // fires. Result cards stay empty in this mode; the
+                // summary card carries the model's tool-driven answer.
+                if settings.useToolCalling && !noAIOnly {
+                    guard activeSearchRequestID == requestID else { return }
+                    searchResults = []
+                    errorMessage = nil
+                    showingSummary = true
+                    await generateSummary(
+                        maxScrapingResults: resultsCount,
+                        maxScrapingChars: scrapingChars,
+                        summaryResults: [],
+                        generationProfile: generationProfile,
+                        queries: nil
+                    )
+                    if activeSearchRequestID == requestID {
+                        isGeneratingFirstGuess = false
+                    }
+                    return
+                }
+
                 let fetchedResults: [SearchResult]
                 var allQueries: [String] = [trimmedQuery]
 
