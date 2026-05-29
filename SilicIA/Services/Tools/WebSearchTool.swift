@@ -109,6 +109,21 @@ struct WebSearchTool: Tool {
             (totalChars / max(1, limit)) - Self.overheadCharsPerResult
         )
 
+        // Suppress Wikipedia when the model asked for current/recent
+        // information. Wikipedia's keyword search dutifully returns the
+        // closest encyclopedic article ("Crise des subprimes" for
+        // "actualité des marchés cette semaine"), which is exactly the
+        // wrong content for a time-sensitive query — DDG already covers
+        // current news in the same call. Only kicks in when the model's
+        // query carries temporal cues; definitional queries unaffected.
+        let temporal = RAGContextService.hasTemporalIntent(trimmed)
+        let effectiveUseWikipedia = useWikipedia && !temporal
+        #if DEBUG
+        if useWikipedia && !effectiveUseWikipedia {
+            print("[Tool:webSearch] suppressing Wikipedia for temporal query: \"\(trimmed)\"")
+        }
+        #endif
+
         let results: [SearchResult]
         do {
             results = try await webSearchService.search(
@@ -117,7 +132,7 @@ struct WebSearchTool: Tool {
                 maxWikipediaResults: maxWikipediaResults,
                 language: language,
                 useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: useWikipedia
+                useWikipedia: effectiveUseWikipedia
             )
         } catch is CancellationError {
             // User pressed Stop while the tool was running — re-throw so the

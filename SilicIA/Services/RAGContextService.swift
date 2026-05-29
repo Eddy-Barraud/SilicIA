@@ -840,6 +840,35 @@ actor RAGContextService {
         return false
     }
 
+    /// Heuristic: does the query look like it needs *recent / current*
+    /// information rather than encyclopedic background? Detects EN/FR/ES
+    /// cues for "today", "this week", "current", "news", "trending", etc.
+    /// — Wikipedia almost never has useful content for these so callers
+    /// can skip it. Keep the list tight; widening it would mis-flag
+    /// definitional queries that happen to mention a date.
+    nonisolated static func hasTemporalIntent(_ query: String) -> Bool {
+        let lowered = query.lowercased()
+        let cues = [
+            // English
+            "today", "now", "this week", "this month", "this year",
+            "recent", "latest", "current", "currently", "breaking",
+            "news", "yesterday", "tomorrow", "trending", "live",
+            // French
+            "aujourd'hui", "aujourd hui", "actualité", "actualités",
+            "récent", "récente", "récemment", "dernière", "dernières",
+            "cette semaine", "ce mois", "cette année", "hier",
+            "demain", "tendance", "tendances", "en direct", "live",
+            // Spanish
+            "hoy", "actualidad", "noticias", "reciente", "última",
+            "últimas", "esta semana", "este mes", "este año", "ayer",
+            "mañana", "tendencia", "en vivo"
+        ]
+        for cue in cues where lowered.contains(cue) {
+            return true
+        }
+        return false
+    }
+
     nonisolated static func textContainsAnyNumber(_ text: String) -> Bool {
         guard let regex = anyDigitRegex else { return false }
         let nsRange = NSRange(text.startIndex..., in: text)

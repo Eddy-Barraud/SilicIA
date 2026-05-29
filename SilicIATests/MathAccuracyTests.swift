@@ -193,6 +193,32 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertEqual(boost, 0, accuracy: 0.0001)
     }
 
+    // MARK: - Temporal intent detection
+
+    /// "actualité ... cette semaine" / "today" / "este mes" must flag so
+    /// the WebSearchTool knows to suppress Wikipedia for the call —
+    /// Wikipedia would happily return historical / encyclopedic content
+    /// (e.g. "Crise des subprimes") for a query about "this week" because
+    /// of bag-of-words keyword overlap.
+    func testTemporalIntentDetectedAcrossLanguages() {
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("what's the latest news"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("breaking story today"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("actualité des marchés financiers cette semaine"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("dernières tendances IA"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("noticias de hoy sobre el clima"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("últimas tendencias en moda"))
+    }
+
+    /// Pure definitional queries (Wikipedia's sweet spot) must NOT trip
+    /// the temporal heuristic, otherwise we'd suppress Wikipedia on
+    /// content it's actually well-suited for.
+    func testDefinitionalQueriesAreNotTemporal() {
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("what is photosynthesis"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("qu'est-ce qu'un masque chirurgical"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("definición de macroeconomía"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("how does an internal combustion engine work"))
+    }
+
     /// `hasNumericalIntent` should fire on EN/FR/ES quantity cues so the
     /// boost works across the supported languages.
     func testNumericalIntentDetectionMultilingual() {
