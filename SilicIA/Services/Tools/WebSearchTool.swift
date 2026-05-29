@@ -183,9 +183,15 @@ struct WebSearchTool: Tool {
         }
 
         #if DEBUG
-        print("[Tool:webSearch] returning \(top.count) result(s)")
+        print("[Tool:webSearch] returning \(top.count) result(s) to model, \(results.count) to cards")
         #endif
-        onResults?(top)
+        // Send EVERY fetched result to the UI sink, not just the slice the
+        // model received. The model's reply (`rendered`) is still bounded
+        // by its requested `maxResults`, so the model's context isn't
+        // affected — but the user gets to see all the sources the tool
+        // actually surfaced, the same way the prompt-stuffing path's
+        // search-result cards do.
+        onResults?(results)
         return rendered.joined(separator: "\n\n")
     }
 }
