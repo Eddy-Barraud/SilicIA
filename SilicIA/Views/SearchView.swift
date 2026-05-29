@@ -57,6 +57,18 @@ struct SearchView: View {
         isNoAIMode || !matchingScoresByURL.isEmpty
     }
 
+    /// True when tool calling is on AND the user has run a search and the
+    /// model is either still generating a tool-driven summary or has just
+    /// finished one. Used by the body-level branch to keep the resultsView
+    /// visible (and therefore the summary card) even though
+    /// `searchResults` is intentionally empty in this mode.
+    private var hasToolDrivenSummary: Bool {
+        guard settings.useToolCalling else { return false }
+        guard hasAttemptedSearch else { return false }
+        return aiService.isSummarizing
+            || !aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Filters raw per-URL relevance scores to only those URLs actually
     /// displayed as cards, renormalizes so the values sum to 100, then
     /// applies largest-remainder (Hamilton) rounding so the integer values
@@ -259,6 +271,14 @@ struct SearchView: View {
                     if searchService.isSearching {
                         loadingView
                     } else if !searchResults.isEmpty {
+                        resultsView
+                    } else if hasToolDrivenSummary {
+                        // Tool-calling mode skips the auto web search, so
+                        // searchResults stays empty even after a successful
+                        // run. The model still produces a summary via the
+                        // tool kit — surface it through the same resultsView
+                        // (which only renders the summary card when no
+                        // search-result cards exist).
                         resultsView
                     } else if !hasAttemptedSearch {
                         welcomeView
