@@ -122,6 +122,25 @@ final class MathAccuracyTests: XCTestCase {
                       "Double newline between paragraphs should survive normalization")
     }
 
+    /// HTML scraping leaves `\n   \n   \n` patterns when `<br>` translates
+    /// to a space — each blank-looking line survived as its own newline and
+    /// silently burned tokens. `normalizeWhitespace` must collapse them to
+    /// a single paragraph break.
+    func testNormalizeWhitespaceCollapsesBlankWhitespaceLines() {
+        let input = "line A\n \n \n \nline B"
+        let normalized = RAGChunker.normalizeWhitespace(input)
+        XCTAssertEqual(normalized, "line A\n\nline B",
+                       "Blank lines containing only whitespace should collapse to a single paragraph break, got: \(normalized.debugDescription)")
+    }
+
+    /// A single intentional blank line (paragraph break) must SURVIVE so
+    /// the chunker keeps it as a high-quality boundary candidate.
+    func testNormalizeWhitespacePreservesSingleParagraphBreak() {
+        let input = "para 1\n\npara 2"
+        let normalized = RAGChunker.normalizeWhitespace(input)
+        XCTAssertEqual(normalized, "para 1\n\npara 2")
+    }
+
     /// Runs of horizontal whitespace are still collapsed to a single space.
     func testNormalizeWhitespaceCollapsesHorizontalRuns() {
         let input = "lots\t  of    \t spaces"

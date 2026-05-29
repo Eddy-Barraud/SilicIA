@@ -44,6 +44,22 @@ struct RAGChunker {
         pattern: "\n{3,}",
         options: []
     )
+    /// Cached regex matching blank-with-whitespace lines — `\n   \n   \n`
+    /// patterns left behind when HTML scraping replaces `<br>` runs with
+    /// single spaces. Without this collapse, a typical news article reaches
+    /// the chunker with dozens of newline-space-newline-space sequences
+    /// that each survive as their own line and silently burn tokens.
+    private static let blankLineRunRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "(\\n[ \t]*){2,}\\n",
+        options: []
+    )
+    /// Cached regex stripping a single trailing horizontal-whitespace run
+    /// from each line. Combined with `blankLineRunRegex`, lines that
+    /// contained only whitespace become genuinely empty.
+    private static let trailingLineWhitespaceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "[ \t]+\n",
+        options: []
+    )
 
     /// Chunks text with overlap while preserving non-empty slices.
     func chunk(
@@ -351,6 +367,20 @@ struct RAGChunker {
         if let regex = horizontalWhitespaceRegex {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: " ")
+        }
+        // Strip horizontal whitespace immediately before a newline so lines
+        // that contained only whitespace become genuinely empty.
+        if let regex = trailingLineWhitespaceRegex {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "\n")
+        }
+        // Collapse `\n   \n   \n` blank-line runs to a single paragraph
+        // break. HTML scraping leaves these all over the place because
+        // `<br>` translates to a space, then between two real text lines
+        // we end up with one newline → space → newline → space → newline.
+        if let regex = blankLineRunRegex {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "\n\n")
         }
         if let regex = verticalWhitespaceRegex {
             let range = NSRange(result.startIndex..., in: result)
