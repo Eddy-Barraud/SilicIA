@@ -30,7 +30,7 @@ struct WebSearchTool: Tool {
         @Guide(description: "The search query — focused keywords, not the user's full question. Strip filler words; keep proper nouns, numbers, dates, and any unit the user mentioned. Examples: '2024 Wimbledon men final winner', 'Apple Foundation Models tool calling API', 'Paris population 2023'.")
         let query: String
 
-        @Guide(description: "Maximum number of results to return (1–5). Use 1–2 for a quick factual lookup, 3–5 when summarising a topic. Defaults to 3.")
+        @Guide(description: "Number of results to return (3–5). Prefer 4 by default so the user gets a range of sources and your answer can triangulate; use 5 for broader topic surveys. The minimum 3 ensures the user always sees several perspectives.")
         let maxResults: Int?
     }
 
@@ -72,7 +72,7 @@ struct WebSearchTool: Tool {
     /// Default result cap when the model doesn't supply `maxResults`.
     /// Three keeps tool output bounded enough to fit in a tool reply
     /// without truncation by the model's context window.
-    private static let defaultMaxResults = 3
+    private static let defaultMaxResults = 5
 
     /// Overhead per result block (title + URL + headers). Roughly
     /// estimated so the derived per-page char budget leaves space for it.
@@ -95,7 +95,7 @@ struct WebSearchTool: Tool {
             """
         }
 
-        let limit = max(1, min(arguments.maxResults ?? Self.defaultMaxResults, 5))
+        let limit = max(3, min(arguments.maxResults ?? Self.defaultMaxResults, 5))
 
         // Derive per-page char cap from the total token budget. We split
         // the budget evenly across the model-requested result count,
