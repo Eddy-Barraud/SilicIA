@@ -506,6 +506,16 @@ struct SearchView: View {
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
         .cornerRadius(12)
+        // Whole rounded surface is the tap target for focusing the field —
+        // previously only the placeholder text caught taps which made the
+        // hit area a thin sliver in a tall container. Buttons inside (Chat,
+        // Extensive, send/stop) still consume their own taps first because
+        // SwiftUI prioritises Button.action gestures above ancestor
+        // `.onTapGesture`. Match the ChatView composer convention.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isSearchFieldFocused = true
+        }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }

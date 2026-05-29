@@ -750,6 +750,19 @@ struct ChatView: View {
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
         .cornerRadius(12)
+        // Treat the whole composer surface as a tap target for focusing
+        // the input — previously only the placeholder text itself
+        // received taps, which gave a single-line-tall hit area in an
+        // otherwise spacious container. `.contentShape(Rectangle())`
+        // makes the rounded background hit-testable; the tap gesture
+        // promotes the text field to first responder. Buttons inside
+        // (attachment menu, send/stop) still consume their own taps
+        // first because SwiftUI prioritises Button.action gestures
+        // above ancestor `.onTapGesture`.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isInputFieldFocused = true
+        }
     }
 
     /// Single "+" menu that gathers every attach-or-toggle action that

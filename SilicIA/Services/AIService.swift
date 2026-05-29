@@ -413,6 +413,91 @@ class AIService: ObservableObject {
         return base + "\n\n" + Self.searchToolCallingAppendix(for: language)
     }
 
+    /// Per-language user-turn prompt for the search-summary tool-calling
+    /// path. Differs from the prompt-stuffing template in two key ways:
+    ///   1. NO pre-baked context block — the model is expected to call
+    ///      `searchContext` / `webSearch` / `currentDateTime` as needed.
+    ///   2. Explicitly nudges the model to use the tools that match the
+    ///      query shape (time-relative → currentDateTime first;
+    ///      factual lookup → searchContext + webSearch; arithmetic →
+    ///      calculate). Without this, the model often just answers from
+    ///      memory and the tools sit unused.
+    private static func toolCallingSearchPrompt(
+        query: String,
+        corpusChunkCount: Int,
+        webSearchAvailable: Bool,
+        language: ModelLanguage,
+        isDeepProfile: Bool,
+        maxOutputTokens: Int
+    ) -> String {
+        let keyPoints = isDeepProfile ? (language == .french ? "4 à 6" : "4 to 6") : (language == .french ? "1 à 3" : "1 to 3")
+        let corpusHint: String
+        if corpusChunkCount > 0 {
+            switch language {
+            case .french: corpusHint = "\(corpusChunkCount) extraits de pages web ont déjà été récupérés pour cette requête : interroge-les via `searchContext` AVANT de tomber sur le web ouvert."
+            case .spanish: corpusHint = "\(corpusChunkCount) fragmentos de páginas web ya se han recuperado para esta consulta: consúltalos con `searchContext` ANTES de recurrir a la web abierta."
+            case .english: corpusHint = "\(corpusChunkCount) web-page chunks have already been fetched for this query — query them via `searchContext` BEFORE falling back to the open web."
+            }
+        } else {
+            switch language {
+            case .french: corpusHint = webSearchAvailable
+                ? "Aucun extrait n'a été pré-récupéré. Utilise `webSearch` pour obtenir l'information."
+                : "Aucun extrait n'a été pré-récupéré et la recherche web est désactivée. Réponds depuis tes connaissances."
+            case .spanish: corpusHint = webSearchAvailable
+                ? "No hay fragmentos pre-recuperados. Usa `webSearch` para obtener la información."
+                : "No hay fragmentos pre-recuperados y la búsqueda web está desactivada. Responde con tus conocimientos."
+            case .english: corpusHint = webSearchAvailable
+                ? "No chunks were pre-fetched. Use `webSearch` to get the information."
+                : "No chunks were pre-fetched and web search is disabled. Answer from your own knowledge."
+            }
+        }
+
+        switch language {
+        case .french:
+            return """
+            Question : \(query)
+
+            \(corpusHint)
+            Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
+            Si la question nécessite un calcul, utilise `calculate`.
+
+            Réponds avec :
+            1. Une réponse directe.
+            2. \(keyPoints) points clés.
+            Limite : \(maxOutputTokens) tokens.
+            Format de sortie requis : LaTeX.
+            """
+        case .spanish:
+            return """
+            Pregunta: \(query)
+
+            \(corpusHint)
+            Si la pregunta es temporalmente relativa ('hoy', 'pronto', 'próximo'), llama a `currentDateTime` ANTES de cualquier otra tarea.
+            Si la pregunta requiere un cálculo, usa `calculate`.
+
+            Responde con:
+            1. Una respuesta directa.
+            2. \(keyPoints) puntos clave.
+            Límite: \(maxOutputTokens) tokens.
+            Formato de salida requerido: LaTeX.
+            """
+        case .english:
+            return """
+            Question: \(query)
+
+            \(corpusHint)
+            If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
+            If the question requires a calculation, use `calculate`.
+
+            Respond with:
+            1. A direct answer.
+            2. \(keyPoints) key points.
+            Limit: \(maxOutputTokens) tokens.
+            Required output format: LaTeX.
+            """
+        }
+    }
+
     /// Per-language tool-usage instructions for the search-summary path.
     /// Mirrors the ChatService appendix but tuned for the search context:
     /// the model is invoked with the user's search query (not a chat
@@ -741,24 +826,44 @@ class AIService: ObservableObject {
                 }
             }
 
-            let prompt = PromptLoader.loadPrompt(
-                mode: "normal",
-                feature: "search",
-                language: language,
-                replacements: [
-                    "query": query,
-                    "context": selectedContext,
-                    "maxOutputTokens": "\(effectiveMaxTokens)",
-                    "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
-                    "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
-                ]
-            ) ?? fallbackSummaryPrompt(
-                query: query,
-                context: selectedContext,
-                language: language,
-                isDeepProfile: isDeepProfile,
-                maxOutputTokens: effectiveMaxTokens
-            )
+            // Build the prompt. In tool-calling mode we use a tool-aware
+            // prompt that does NOT include the pre-baked scraped context;
+            // if we hand the model both a context block AND the tools, it
+            // satisfies the request from the block alone and never calls
+            // `webSearch` / `currentDateTime`. The scraped chunks are
+            // still reachable through `searchContext` as a tool. In the
+            // prompt-stuffing baseline we keep the existing template so
+            // the output remains identical when tool calling is off.
+            let prompt: String
+            if useToolCalling {
+                prompt = Self.toolCallingSearchPrompt(
+                    query: query,
+                    corpusChunkCount: corpusChunks.count,
+                    webSearchAvailable: useDuckDuckGo || useWikipedia,
+                    language: language,
+                    isDeepProfile: isDeepProfile,
+                    maxOutputTokens: effectiveMaxTokens
+                )
+            } else {
+                prompt = PromptLoader.loadPrompt(
+                    mode: "normal",
+                    feature: "search",
+                    language: language,
+                    replacements: [
+                        "query": query,
+                        "context": selectedContext,
+                        "maxOutputTokens": "\(effectiveMaxTokens)",
+                        "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
+                        "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+                    ]
+                ) ?? fallbackSummaryPrompt(
+                    query: query,
+                    context: selectedContext,
+                    language: language,
+                    isDeepProfile: isDeepProfile,
+                    maxOutputTokens: effectiveMaxTokens
+                )
+            }
 
             #if DEBUG
             debugNotes.append(
