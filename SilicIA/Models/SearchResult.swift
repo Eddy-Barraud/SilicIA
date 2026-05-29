@@ -8,7 +8,7 @@
 import Foundation
 
 /// Represents one web search result returned by the search provider.
-struct SearchResult: Identifiable, Codable {
+struct SearchResult: Identifiable, Codable, Equatable {
     let id: UUID
     let title: String
     let url: String

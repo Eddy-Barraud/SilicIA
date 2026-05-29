@@ -300,6 +300,17 @@ struct SearchView: View {
         .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers)
         }
+        // Mirror the AIService's tool-call accumulator into the local
+        // searchResults state whenever it changes — this is how the cards
+        // get populated in tool-calling mode (the auto web search is
+        // skipped, so the model's webSearch invocations are the only
+        // source of URLs). Filtered to current request only by also
+        // checking hasAttemptedSearch so a stale post-cancel notification
+        // doesn't repopulate the cards on the welcome screen.
+        .onChange(of: aiService.toolFetchedResults) { _, newResults in
+            guard settings.useToolCalling, hasAttemptedSearch else { return }
+            searchResults = newResults
+        }
         .onAppear {
             settings = AppSettings.load()
             consumeInitialQueryIfNeeded()

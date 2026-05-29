@@ -55,6 +55,14 @@ struct WebSearchTool: Tool {
     let useWikipedia: Bool
     let language: ModelLanguage
 
+    /// Optional sink that receives the URLs / titles / scraped content the
+    /// model has actually consulted. SearchView wires this into AIService
+    /// so the results can be surfaced as cards in the UI with RAG match
+    /// scores, mirroring the prompt-stuffing path's card behavior. Fires
+    /// once per tool invocation with the slice of `[SearchResult]` that
+    /// the model received as the tool reply.
+    var onResults: (@Sendable ([SearchResult]) -> Void)? = nil
+
     /// Default result cap when the model doesn't supply `maxResults`.
     /// Three keeps tool output bounded enough to fit in a tool reply
     /// without truncation by the model's context window.
@@ -144,6 +152,7 @@ struct WebSearchTool: Tool {
         #if DEBUG
         print("[Tool:webSearch] returning \(top.count) result(s)")
         #endif
+        onResults?(top)
         return rendered.joined(separator: "\n\n")
     }
 }

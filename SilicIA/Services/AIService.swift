@@ -19,6 +19,12 @@ class AIService: ObservableObject {
 
     @Published var isSummarizing = false
     @Published var summary: String = ""
+    /// Results the `webSearch` tool has fetched during the current
+    /// `summarize` call. Reset at the start of every `summarize` and
+    /// appended to whenever the model invokes the tool. SearchView mirrors
+    /// this into `searchResults` so the user sees cards even when tool
+    /// calling skips the auto web search.
+    @Published var toolFetchedResults: [SearchResult] = []
     @Published var citations: String = ""
 
     #if DEBUG
@@ -232,6 +238,10 @@ class AIService: ObservableObject {
     func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
+        // Reset the tool-results accumulator at the start of every
+        // summarize call so previous turns don't bleed into the new one.
+        // Tool-calling mode appends to this as the model invokes webSearch.
+        toolFetchedResults = []
 
         #if DEBUG
         debugTimings = []
@@ -383,6 +393,26 @@ class AIService: ObservableObject {
             }
         )
 
+        // Tool-calling mode: now that the model has finished, the
+        // `toolFetchedResults` accumulator holds every URL the model
+        // actually consulted via webSearch. Chunk + score them through the
+        // same RAG pipeline the prompt-stuffing path uses so the cards
+        // render with match-score badges instead of bare 0% rings.
+        if useToolCalling, !toolFetchedResults.isEmpty, let onMatchingScores {
+            let toolChunks = chunkResultsForRAG(toolFetchedResults)
+            if !toolChunks.isEmpty {
+                let toolSelected = await ragContextService.selectContext(
+                    chunks: toolChunks,
+                    query: query,
+                    maxOutputTokens: effectiveMaxTokens,
+                    contextUtilizationFactor: contextUtilizationFactor,
+                    queries: queries
+                )
+                let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
+                onMatchingScores(scores)
+            }
+        }
+
         #if DEBUG
         debugTimings.append(TimingMetric(
             name: "generateSummaryWithFoundationModels",
@@ -401,6 +431,45 @@ class AIService: ObservableObject {
         self.summary = summary
         self.citations = citations
         return (summary: summary, citations: citations)
+    }
+
+    /// Appends `incoming` to `toolFetchedResults`, skipping any URL we've
+    /// already seen so multiple webSearch calls don't produce duplicate
+    /// cards. Order-preserving — newer URLs append at the tail.
+    @MainActor
+    private func appendUniqueResults(_ incoming: [SearchResult]) {
+        let existing = Set(toolFetchedResults.map(\.url))
+        let novel = incoming.filter { !existing.contains($0.url) }
+        guard !novel.isEmpty else { return }
+        toolFetchedResults.append(contentsOf: novel)
+    }
+
+    /// Chunks a list of `SearchResult`s for RAG scoring in tool-calling
+    /// mode. Mirrors the chunking the prompt-stuffing path applies to
+    /// `summarize`'s `results` parameter — same source field, same chunk
+    /// size, same fallback ladder (retrieved content → snippet) so the
+    /// resulting per-URL scores are comparable across the two modes.
+    private func chunkResultsForRAG(_ results: [SearchResult]) -> [RAGChunk] {
+        var chunks: [RAGChunk] = []
+        for result in results {
+            let text: String
+            if let retrieved = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !retrieved.isEmpty {
+                text = retrieved
+            } else {
+                text = result.snippet
+            }
+            guard !text.isEmpty else { continue }
+            let chunked = ragChunker.chunk(
+                text: text,
+                source: result.title,
+                maxChunkTokens: Self.webChunkMaxTokens,
+                overlapTokens: Self.webChunkOverlapTokens,
+                url: result.url
+            )
+            chunks.append(contentsOf: chunked)
+        }
+        return chunks
     }
 
     /// Builds compact instructions for the selected response language.
@@ -768,7 +837,7 @@ class AIService: ObservableObject {
                     DateTimeTool(language: language)
                 ]
                 if webSearchAvailable {
-                    tools.append(WebSearchTool(
+                    var webTool = WebSearchTool(
                         webSearchService: webSearchService,
                         webScraper: webScraper,
                         maxDuckDuckGoResults: maxDuckDuckGoResults,
@@ -776,7 +845,17 @@ class AIService: ObservableObject {
                         useDuckDuckGo: useDuckDuckGo,
                         useWikipedia: useWikipedia,
                         language: language
-                    ))
+                    )
+                    // Mirror every webSearch reply into the published
+                    // `toolFetchedResults` so SearchView can surface them as
+                    // cards with RAG match scores once the model finishes.
+                    // Deduped on the published side via `appendUniqueResults`.
+                    webTool.onResults = { [weak self] results in
+                        Task { @MainActor in
+                            self?.appendUniqueResults(results)
+                        }
+                    }
+                    tools.append(webTool)
                 }
                 #if DEBUG
                 debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable)")
