@@ -1,6 +1,7 @@
 {
   "search.placeholder": "Buscar en la web...",
   "search.button.go": "Buscar",
+  "search.button.stop": "Detener búsqueda",
   "search.button.deep": "Extensa",
   "search.button.chat": "Chat",
   "search.button.chatMore": "Continuar",

@@ -85,6 +85,10 @@ struct ChatView: View {
     /// same view is a SwiftUI footgun where only the last applied modifier
     /// is wired, silently breaking the other.
     @State private var activeFilePicker: FilePickerKind? = nil
+    /// In-flight model task. Held so the stop button can cancel it,
+    /// which propagates `CancellationError` through every `await` inside
+    /// `ChatService.sendMessage` (including the model's stream).
+    @State private var submitTask: Task<Void, Never>? = nil
     /// User-attached context. Stays empty by default — the previous design
     /// always carried a phantom empty URL placeholder so the user could
     /// type into it, but that exposed an alien blank row at all times.
@@ -474,6 +478,22 @@ struct ChatView: View {
                 }
                 .pickerStyle(.segmented)
             }
+
+            // Tool-calling toggle — experimental path where the model
+            // pulls context via `searchContext` and `calculate` instead
+            // of receiving pre-baked RAG chunks in the prompt. Off by
+            // default while behaviour matures.
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $settings.useToolCalling) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tool calling (experimental)")
+                            .font(.subheadline)
+                        Text("Lets the model search documents and call a calculator on demand instead of receiving a pre-baked context block.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .padding()
         .background(controlBackgroundColor)
@@ -626,8 +646,12 @@ struct ChatView: View {
     /// input surface reads as a single focal point — the layout pattern
     /// Claude / ChatGPT / Gemini converged on.
     private var composerView: some View {
-        let isSendDisabled = messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || chatService.isResponding
+        let isInputEmpty = messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let isResponding = chatService.isResponding
+        // Send button is disabled only when there's nothing to send AND
+        // the model isn't responding. While responding, the button is
+        // replaced by a Stop button entirely (handled below).
+        let isSendDisabled = isInputEmpty
 
         return VStack(alignment: .leading, spacing: 8) {
             // Attached-source list. Hidden when nothing has been added.
@@ -644,38 +668,25 @@ struct ChatView: View {
                 }
             }
 
-            // Primary text input. One visible line at rest, expanding
-            // up to 5 lines as the user types — keeps the container
-            // compact when empty, never crowds the action row.
+            // Primary text input. Same pattern as SearchView's search
+            // field: axis:.vertical with line-limit growth, .submitLabel
+            // for the iOS keyboard's affordance, and .onSubmit hooked to
+            // the send action. SearchView proves this combination fires
+            // .onSubmit on macOS Return AND iOS keyboard-Send without
+            // platform-specific glue — no NSTextView wrapper needed.
             TextField(L.t("chat.composer.placeholder", language: settings.language), text: $messageInput, axis: .vertical)
                 .lineLimit(1...5)
                 .textFieldStyle(.plain)
                 .font(.body)
                 .focused($isInputFieldFocused)
+                .submitLabel(.send)
                 #if canImport(UIKit)
                 .textInputAutocapitalization(.sentences)
                 .autocorrectionDisabled(false)
                 #endif
-                // On macOS, Return sends the message; Shift+Return inserts
-                // a newline. `.onSubmit` never fires on axis:.vertical fields.
-                //
-                // Two important details:
-                //   1. Use the simpler `.onKeyPress(.return)` overload — the
-                //      `keys:` overload (with a KeyPress argument) has lower
-                //      interception priority, and NSTextView swallows Return
-                //      for newline insertion before SwiftUI sees it.
-                //   2. The simpler overload's closure takes no argument, so
-                //      we read shift state from `NSEvent.modifierFlags`
-                //      directly. AppKit is already imported above.
-                #if os(macOS)
-                .onKeyPress(.return) {
-                    if NSEvent.modifierFlags.contains(.shift) {
-                        return .ignored   // Shift+Return → NSTextView inserts newline
-                    }
+                .onSubmit {
                     submitMessage()
-                    return .handled
                 }
-                #endif
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
 
@@ -699,19 +710,37 @@ struct ChatView: View {
 
                 Spacer()
 
-                Button(action: submitMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .resizable()
-                        .frame(width: 32, height: 32)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(isSendDisabled ? Color.secondary : Color.accentColor)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                // Swap send → stop while the model is generating, so
+                // the user can interrupt long answers (or runaway tool
+                // loops) without waiting it out.
+                if isResponding {
+                    Button(action: cancelCurrentResponse) {
+                        Image(systemName: "stop.circle.fill")
+                            .resizable()
+                            .frame(width: 32, height: 32)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.red)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(L.t("chat.composer.stop", language: settings.language))
+                    .accessibilityLabel(L.t("chat.composer.stop", language: settings.language))
+                } else {
+                    Button(action: submitMessage) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .resizable()
+                            .frame(width: 32, height: 32)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(isSendDisabled ? Color.secondary : Color.accentColor)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSendDisabled)
+                    .help(L.t("chat.composer.send", language: settings.language))
+                    .accessibilityLabel(L.t("chat.composer.send", language: settings.language))
                 }
-                .buttonStyle(.plain)
-                .disabled(isSendDisabled)
-                .help(L.t("chat.composer.send", language: settings.language))
-                .accessibilityLabel(L.t("chat.composer.send", language: settings.language))
             }
         }
         .padding(8)
@@ -721,6 +750,19 @@ struct ChatView: View {
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
         .cornerRadius(12)
+        // Treat the whole composer surface as a tap target for focusing
+        // the input — previously only the placeholder text itself
+        // received taps, which gave a single-line-tall hit area in an
+        // otherwise spacious container. `.contentShape(Rectangle())`
+        // makes the rounded background hit-testable; the tap gesture
+        // promotes the text field to first responder. Buttons inside
+        // (attachment menu, send/stop) still consume their own taps
+        // first because SwiftUI prioritises Button.action gestures
+        // above ancestor `.onTapGesture`.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isInputFieldFocused = true
+        }
     }
 
     /// Single "+" menu that gathers every attach-or-toggle action that
@@ -869,6 +911,16 @@ struct ChatView: View {
         }
     }
 
+    /// Cancels the in-flight model task. Triggered by the Stop button that
+    /// replaces the send arrow while `chatService.isResponding` is true.
+    /// Propagates `CancellationError` through every `await` in
+    /// `ChatService.sendMessage`, which handles it gracefully (keeps any
+    /// partial streamed content, doesn't surface a generic error).
+    private func cancelCurrentResponse() {
+        submitTask?.cancel()
+        submitTask = nil
+    }
+
     /// Validates and dispatches the current text input to the chat service.
     private func submitMessage() {
         #if canImport(UIKit)
@@ -884,7 +936,11 @@ struct ChatView: View {
         let message = trimmed
         messageInput = ""
 
-        Task {
+        // Capture the task so the Stop button can cancel it. Replaces
+        // any previously-running task (shouldn't happen since the UI
+        // hides the send button while responding, but guard anyway).
+        submitTask?.cancel()
+        submitTask = Task {
             await chatService.sendMessage(
                 message,
                 contextInput: currentContextInputString(),
@@ -898,7 +954,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                useToolCalling: settings.useToolCalling
             )
         }
     }

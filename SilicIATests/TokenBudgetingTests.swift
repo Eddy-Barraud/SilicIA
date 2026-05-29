@@ -84,4 +84,40 @@ final class TokenBudgetingTests: XCTestCase {
     func testEstimatedContextWordsZero() {
         XCTAssertGreaterThanOrEqual(TokenBudgeting.estimatedContextWords(forTokens: 0), 1)
     }
+
+    // MARK: - Tool output token budget
+
+    /// Default response cap (500t) should give tools a 1000-token reply
+    /// budget per call — twice the response cap, well within the
+    /// ceiling.
+    func testToolBudgetScalesAtTwoxAtDefault() {
+        XCTAssertEqual(TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 500), 1000)
+    }
+
+    /// Tiny response cap (50t) must hit the floor so a tool reply isn't
+    /// starved to nothing.
+    func testToolBudgetClampedAtFloor() {
+        XCTAssertEqual(
+            TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 50),
+            TokenBudgeting.toolOutputTokenBudgetFloor
+        )
+    }
+
+    /// Very large response cap (5000t) must hit the ceiling so a tool
+    /// reply can't single-handedly fill the context window.
+    func testToolBudgetClampedAtCeiling() {
+        XCTAssertEqual(
+            TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 5000),
+            TokenBudgeting.toolOutputTokenBudgetCeiling
+        )
+    }
+
+    /// Floor < ceiling — sanity check that the constants are wired the
+    /// right way round.
+    func testToolBudgetConstantsAreOrdered() {
+        XCTAssertLessThan(
+            TokenBudgeting.toolOutputTokenBudgetFloor,
+            TokenBudgeting.toolOutputTokenBudgetCeiling
+        )
+    }
 }

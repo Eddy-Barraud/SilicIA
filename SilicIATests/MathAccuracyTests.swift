@@ -122,6 +122,25 @@ final class MathAccuracyTests: XCTestCase {
                       "Double newline between paragraphs should survive normalization")
     }
 
+    /// HTML scraping leaves `\n   \n   \n` patterns when `<br>` translates
+    /// to a space — each blank-looking line survived as its own newline and
+    /// silently burned tokens. `normalizeWhitespace` must collapse them to
+    /// a single paragraph break.
+    func testNormalizeWhitespaceCollapsesBlankWhitespaceLines() {
+        let input = "line A\n \n \n \nline B"
+        let normalized = RAGChunker.normalizeWhitespace(input)
+        XCTAssertEqual(normalized, "line A\n\nline B",
+                       "Blank lines containing only whitespace should collapse to a single paragraph break, got: \(normalized.debugDescription)")
+    }
+
+    /// A single intentional blank line (paragraph break) must SURVIVE so
+    /// the chunker keeps it as a high-quality boundary candidate.
+    func testNormalizeWhitespacePreservesSingleParagraphBreak() {
+        let input = "para 1\n\npara 2"
+        let normalized = RAGChunker.normalizeWhitespace(input)
+        XCTAssertEqual(normalized, "para 1\n\npara 2")
+    }
+
     /// Runs of horizontal whitespace are still collapsed to a single space.
     func testNormalizeWhitespaceCollapsesHorizontalRuns() {
         let input = "lots\t  of    \t spaces"
@@ -172,6 +191,32 @@ final class MathAccuracyTests: XCTestCase {
         let options = RAGSelectionOptions.default
         let boost = RAGContextService.numericRelevanceBoost(text: text, query: query, options: options)
         XCTAssertEqual(boost, 0, accuracy: 0.0001)
+    }
+
+    // MARK: - Temporal intent detection
+
+    /// "actualité ... cette semaine" / "today" / "este mes" must flag so
+    /// the WebSearchTool knows to suppress Wikipedia for the call —
+    /// Wikipedia would happily return historical / encyclopedic content
+    /// (e.g. "Crise des subprimes") for a query about "this week" because
+    /// of bag-of-words keyword overlap.
+    func testTemporalIntentDetectedAcrossLanguages() {
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("what's the latest news"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("breaking story today"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("actualité des marchés financiers cette semaine"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("dernières tendances IA"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("noticias de hoy sobre el clima"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("últimas tendencias en moda"))
+    }
+
+    /// Pure definitional queries (Wikipedia's sweet spot) must NOT trip
+    /// the temporal heuristic, otherwise we'd suppress Wikipedia on
+    /// content it's actually well-suited for.
+    func testDefinitionalQueriesAreNotTemporal() {
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("what is photosynthesis"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("qu'est-ce qu'un masque chirurgical"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("definición de macroeconomía"))
+        XCTAssertFalse(RAGContextService.hasTemporalIntent("how does an internal combustion engine work"))
     }
 
     /// `hasNumericalIntent` should fire on EN/FR/ES quantity cues so the

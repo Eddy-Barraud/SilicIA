@@ -96,7 +96,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        useToolCalling: Bool = false
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -121,12 +122,19 @@ final class ChatService: ObservableObject {
             maxOutputTokens: effectiveMaxOutputTokens
         )
 
+        // Tool-calling mode: the model owns the decision to search the web,
+        // via the `webSearch` tool. Suppress the auto-prefetch path so we
+        // don't redundantly fetch + chunk pages the model might not even
+        // care about. The user's "Web" chip in the composer is therefore
+        // a no-op when tool calling is on — the prompt-stuffing baseline
+        // still honours it.
+        let effectiveIncludeWebSearch = useToolCalling ? false : includeWebSearch
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
-            includeWebSearch: includeWebSearch,
-            searchQuerySeed: includeWebSearch ? message : "",
+            includeWebSearch: effectiveIncludeWebSearch,
+            searchQuerySeed: effectiveIncludeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
         )
@@ -148,7 +156,7 @@ final class ChatService: ObservableObject {
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
                 imageURLs: imageURLs,
-                includeWebSearch: includeWebSearch,
+                includeWebSearch: effectiveIncludeWebSearch,
                 currentMessage: message,
                 language: language,
                 maxDuckDuckGoResults: effectiveMaxDDGResults,
@@ -207,16 +215,79 @@ final class ChatService: ObservableObject {
 
         var streamingAssistantID: UUID?
         do {
-            let instructions = buildInstructions(for: language)
-            let session = LanguageModelSession(instructions: instructions)
-            let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
-            let prompt = buildPrompt(
-                for: message,
-                selectedContext: finalSelectedContext,
-                language: language,
-                maxOutputCharacters: maxOutputCharacters,
-                maxOutputTokens: effectiveMaxOutputTokens
+            let instructions = buildInstructions(
+                for: language,
+                useToolCalling: useToolCalling,
+                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch
             )
+            // Tool-calling branch: hand the model `searchContext` over the
+            // pre-chunked corpus + `calculate` for exact arithmetic. The
+            // prompt is intentionally minimal (just the user message + a
+            // nudge to call the tool first) — the model pulls context on
+            // demand instead of receiving a pre-baked top-K block. The
+            // calculator wipes out an entire class of small-model
+            // arithmetic mistakes.
+            let session: LanguageModelSession
+            if useToolCalling {
+                // Web-search tool joins the kit only when (a) at least one
+                // source is enabled AND (b) the user has the "Web" chip on
+                // in the composer. The chip is the per-conversation switch;
+                // the source flags are the global "what to query" config.
+                // Both must be true for the tool to be attached. PDFtalkme
+                // forces the chip off so the tool stays off in that host.
+                let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
+                // Per-tool reply budget scales with the response cap so
+                // verbose profiles give tools more room and terse profiles
+                // keep them tight. See TokenBudgeting.toolOutputTokenBudget
+                // for the exact formula.
+                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: effectiveMaxOutputTokens)
+                var tools: [any Tool] = [
+                    RAGSearchTool(chunks: chunks, tokenBudget: toolBudget),
+                    CalculatorTool(),
+                    DateTimeTool(language: language)
+                ]
+                if webSearchAvailable {
+                    tools.append(WebSearchTool(
+                        webSearchService: webSearchService,
+                        webScraper: webScraper,
+                        maxDuckDuckGoResults: effectiveMaxDDGResults,
+                        maxWikipediaResults: effectiveMaxWikiResults,
+                        useDuckDuckGo: useDuckDuckGo,
+                        useWikipedia: useWikipedia,
+                        language: language,
+                        tokenBudget: toolBudget
+                    ))
+                }
+                let toolNames = tools.map(\.name).joined(separator: ", ")
+                debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
+                session = LanguageModelSession(
+                    tools: tools,
+                    instructions: instructions
+                )
+            } else {
+                debugContext("sendMessage path=prompt-stuffing (tool-calling disabled)")
+                session = LanguageModelSession(instructions: instructions)
+            }
+            let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
+            let prompt: String
+            if useToolCalling {
+                // No pre-baked context — the model is expected to call
+                // searchContext as needed.
+                prompt = buildToolCallingPrompt(
+                    for: message,
+                    hasAttachedDocuments: !chunks.isEmpty,
+                    language: language,
+                    maxOutputCharacters: maxOutputCharacters
+                )
+            } else {
+                prompt = buildPrompt(
+                    for: message,
+                    selectedContext: finalSelectedContext,
+                    language: language,
+                    maxOutputCharacters: maxOutputCharacters,
+                    maxOutputTokens: effectiveMaxOutputTokens
+                )
+            }
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
 
@@ -243,6 +314,22 @@ final class ChatService: ObservableObject {
             }
 
             persistMessage(role: "assistant", content: finalContent, citations: citations)
+        } catch is CancellationError {
+            // User pressed Stop. Preserve whatever streamed so far — losing
+            // half a useful answer to a cancel click would be worse than
+            // showing it with no postscript. If nothing streamed yet, drop
+            // the empty placeholder so the transcript stays clean.
+            if let streamingAssistantID,
+               let index = messages.firstIndex(where: { $0.id == streamingAssistantID }) {
+                let partial = messages[index].content
+                if partial.isEmpty {
+                    messages.remove(at: index)
+                } else {
+                    let citations = messages[index].citations
+                    persistMessage(role: "assistant", content: partial, citations: citations)
+                }
+            }
+            errorMessage = nil
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             if let streamingAssistantID,
@@ -993,9 +1080,126 @@ final class ChatService: ObservableObject {
     }
 
     /// Builds dynamic chat instructions matching the user's query language.
-    private func buildInstructions(for language: ModelLanguage) -> String {
-        return PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
+    /// When `useToolCalling` is true, appends an extra paragraph telling
+    /// the model to call `searchContext` / `calculate` instead of
+    /// answering blind. The base instructions stay the same so the model's
+    /// tone and language conventions don't drift between the two modes.
+    private func buildInstructions(
+        for language: ModelLanguage,
+        useToolCalling: Bool = false,
+        webSearchAvailable: Bool = false
+    ) -> String {
+        let base = PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
             ?? fallbackChatInstructions(for: language)
+        guard useToolCalling else { return base }
+        return base + "\n\n" + toolCallingInstructionsAppendix(
+            for: language,
+            webSearchAvailable: webSearchAvailable
+        )
+    }
+
+    /// Extra instructions appended when tool calling is enabled. Phrased
+    /// per language so it matches the rest of the system prompt's tone.
+    /// The web-search entry is included only when `webSearchAvailable` is
+    /// true so the model doesn't try to call a tool that isn't attached.
+    private func toolCallingInstructionsAppendix(
+        for language: ModelLanguage,
+        webSearchAvailable: Bool
+    ) -> String {
+        switch language {
+        case .french:
+            var sections = [
+                "Outils disponibles :",
+                "- `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.",
+                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.",
+                "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
+                )
+            }
+            sections.append("Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.")
+            return sections.joined(separator: "\n")
+
+        case .spanish:
+            var sections = [
+                "Herramientas disponibles:",
+                "- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.",
+                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.",
+                "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
+                )
+            }
+            sections.append("Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.")
+            return sections.joined(separator: "\n")
+
+        case .english:
+            var sections = [
+                "Available tools:",
+                "- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.",
+                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.",
+                "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
+            ]
+            if webSearchAvailable {
+                sections.append(
+                    "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
+                )
+            }
+            sections.append("You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.")
+            return sections.joined(separator: "\n")
+        }
+    }
+
+    /// Builds the per-turn user prompt for the tool-calling path. Much
+    /// shorter than `buildPrompt` because there's no pre-baked context —
+    /// the model fetches what it needs via `searchContext`. We still
+    /// include conversation history so multi-turn flow stays coherent.
+    private func buildToolCallingPrompt(
+        for userMessage: String,
+        hasAttachedDocuments: Bool,
+        language: ModelLanguage,
+        maxOutputCharacters: Int
+    ) -> String {
+        let historyMessages: [ChatMessage]
+        if let last = messages.last, last.role == .user, last.content == userMessage {
+            historyMessages = Array(messages.dropLast())
+        } else {
+            historyMessages = messages
+        }
+        let history = historyMessages
+            .suffix(Self.historyMessageLimit)
+            .map { $0.role == .assistant ? "Assistant: \($0.content)" : "User: \($0.content)" }
+            .joined(separator: "\n")
+
+        let documentsHint: String
+        switch (language, hasAttachedDocuments) {
+        case (.french, true):
+            documentsHint = "Des documents sont joints à cette conversation : utilise `searchContext` pour les interroger."
+        case (.french, false):
+            documentsHint = "Aucun document joint — réponds depuis tes connaissances."
+        case (.spanish, true):
+            documentsHint = "Hay documentos adjuntos en esta conversación: usa `searchContext` para consultarlos."
+        case (.spanish, false):
+            documentsHint = "No hay documentos adjuntos — responde con tus conocimientos."
+        case (.english, true):
+            documentsHint = "Documents are attached to this conversation: use `searchContext` to query them."
+        case (.english, false):
+            documentsHint = "No documents attached — answer from your own knowledge."
+        }
+
+        return """
+        \(history)
+
+        \(documentsHint)
+
+        User: \(userMessage)
+
+        (Max output: ~\(maxOutputCharacters) characters.)
+        """
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {

@@ -44,6 +44,22 @@ struct RAGChunker {
         pattern: "\n{3,}",
         options: []
     )
+    /// Cached regex matching blank-with-whitespace lines — `\n   \n   \n`
+    /// patterns left behind when HTML scraping replaces `<br>` runs with
+    /// single spaces. Without this collapse, a typical news article reaches
+    /// the chunker with dozens of newline-space-newline-space sequences
+    /// that each survive as their own line and silently burn tokens.
+    private static let blankLineRunRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "(\\n[ \t]*){2,}\\n",
+        options: []
+    )
+    /// Cached regex stripping a single trailing horizontal-whitespace run
+    /// from each line. Combined with `blankLineRunRegex`, lines that
+    /// contained only whitespace become genuinely empty.
+    private static let trailingLineWhitespaceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "[ \t]+\n",
+        options: []
+    )
 
     /// Chunks text with overlap while preserving non-empty slices.
     func chunk(
@@ -351,6 +367,20 @@ struct RAGChunker {
         if let regex = horizontalWhitespaceRegex {
             let range = NSRange(result.startIndex..., in: result)
             result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: " ")
+        }
+        // Strip horizontal whitespace immediately before a newline so lines
+        // that contained only whitespace become genuinely empty.
+        if let regex = trailingLineWhitespaceRegex {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "\n")
+        }
+        // Collapse `\n   \n   \n` blank-line runs to a single paragraph
+        // break. HTML scraping leaves these all over the place because
+        // `<br>` translates to a space, then between two real text lines
+        // we end up with one newline → space → newline → space → newline.
+        if let regex = blankLineRunRegex {
+            let range = NSRange(result.startIndex..., in: result)
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: "\n\n")
         }
         if let regex = verticalWhitespaceRegex {
             let range = NSRange(result.startIndex..., in: result)
@@ -803,6 +833,35 @@ actor RAGContextService {
             "more than", "less than", "at least", "at most", "between",
             "combien", "pourcent", "moyenne", "ratio", "plus de", "moins de",
             "cuánto", "cuántos", "cuántas", "promedio", "porcentaje", "más de", "menos de"
+        ]
+        for cue in cues where lowered.contains(cue) {
+            return true
+        }
+        return false
+    }
+
+    /// Heuristic: does the query look like it needs *recent / current*
+    /// information rather than encyclopedic background? Detects EN/FR/ES
+    /// cues for "today", "this week", "current", "news", "trending", etc.
+    /// — Wikipedia almost never has useful content for these so callers
+    /// can skip it. Keep the list tight; widening it would mis-flag
+    /// definitional queries that happen to mention a date.
+    nonisolated static func hasTemporalIntent(_ query: String) -> Bool {
+        let lowered = query.lowercased()
+        let cues = [
+            // English
+            "today", "now", "this week", "this month", "this year",
+            "recent", "latest", "current", "currently", "breaking",
+            "news", "yesterday", "tomorrow", "trending", "live",
+            // French
+            "aujourd'hui", "aujourd hui", "actualité", "actualités",
+            "récent", "récente", "récemment", "dernière", "dernières",
+            "cette semaine", "ce mois", "cette année", "hier",
+            "demain", "tendance", "tendances", "en direct", "live",
+            // Spanish
+            "hoy", "actualidad", "noticias", "reciente", "última",
+            "últimas", "esta semana", "este mes", "este año", "ayer",
+            "mañana", "tendencia", "en vivo"
         ]
         for cue in cues where lowered.contains(cue) {
             return true

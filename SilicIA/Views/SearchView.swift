@@ -57,6 +57,18 @@ struct SearchView: View {
         isNoAIMode || !matchingScoresByURL.isEmpty
     }
 
+    /// True when tool calling is on AND the user has run a search and the
+    /// model is either still generating a tool-driven summary or has just
+    /// finished one. Used by the body-level branch to keep the resultsView
+    /// visible (and therefore the summary card) even though
+    /// `searchResults` is intentionally empty in this mode.
+    private var hasToolDrivenSummary: Bool {
+        guard settings.useToolCalling else { return false }
+        guard hasAttemptedSearch else { return false }
+        return aiService.isSummarizing
+            || !aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// Filters raw per-URL relevance scores to only those URLs actually
     /// displayed as cards, renormalizes so the values sum to 100, then
     /// applies largest-remainder (Hamilton) rounding so the integer values
@@ -260,6 +272,14 @@ struct SearchView: View {
                         loadingView
                     } else if !searchResults.isEmpty {
                         resultsView
+                    } else if hasToolDrivenSummary {
+                        // Tool-calling mode skips the auto web search, so
+                        // searchResults stays empty even after a successful
+                        // run. The model still produces a summary via the
+                        // tool kit — surface it through the same resultsView
+                        // (which only renders the summary card when no
+                        // search-result cards exist).
+                        resultsView
                     } else if !hasAttemptedSearch {
                         welcomeView
                     } else {
@@ -279,6 +299,17 @@ struct SearchView: View {
         .contentShape(Rectangle())
         .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers)
+        }
+        // Mirror the AIService's tool-call accumulator into the local
+        // searchResults state whenever it changes — this is how the cards
+        // get populated in tool-calling mode (the auto web search is
+        // skipped, so the model's webSearch invocations are the only
+        // source of URLs). Filtered to current request only by also
+        // checking hasAttemptedSearch so a stale post-cancel notification
+        // doesn't repopulate the cards on the welcome screen.
+        .onChange(of: aiService.toolFetchedResults) { _, newResults in
+            guard settings.useToolCalling, hasAttemptedSearch else { return }
+            searchResults = newResults
         }
         .onAppear {
             settings = AppSettings.load()
@@ -464,19 +495,39 @@ struct SearchView: View {
 
                 Spacer()
 
-                Button(action: { performSearch(generationProfile: .fast) }) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .resizable()
-                        .frame(width: 28, height: 28)
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(isPrimaryDisabled ? Color.secondary : Color.accentColor)
-                        .frame(minWidth: 44, minHeight: 44)
-                        .contentShape(Rectangle())
+                // Swap send → stop while any phase is running (web search,
+                // RAG scoring, first-guess, AI summary). Tapping rotates
+                // `activeSearchRequestID`, which every in-flight task
+                // checks before publishing — same mechanism as `goHome()`.
+                let isBusy = searchService.isSearching || aiService.isSummarizing || isGeneratingFirstGuess
+                if isBusy {
+                    Button(action: cancelCurrentSearch) {
+                        Image(systemName: "stop.circle.fill")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(Color.red)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(L.t("search.button.stop", language: settings.language))
+                    .accessibilityLabel(L.t("search.button.stop", language: settings.language))
+                } else {
+                    Button(action: { performSearch(generationProfile: .fast) }) {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .resizable()
+                            .frame(width: 28, height: 28)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(isPrimaryDisabled ? Color.secondary : Color.accentColor)
+                            .frame(minWidth: 44, minHeight: 44)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isPrimaryDisabled)
+                    .help(L.t("search.button.go", language: settings.language))
+                    .accessibilityLabel(L.t("search.button.go", language: settings.language))
                 }
-                .buttonStyle(.plain)
-                .disabled(isPrimaryDisabled)
-                .help(L.t("search.button.go", language: settings.language))
-                .accessibilityLabel(L.t("search.button.go", language: settings.language))
             }
         }
         .padding(10)
@@ -486,6 +537,16 @@ struct SearchView: View {
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
         )
         .cornerRadius(12)
+        // Whole rounded surface is the tap target for focusing the field —
+        // previously only the placeholder text caught taps which made the
+        // hit area a thin sliver in a tall container. Buttons inside (Chat,
+        // Extensive, send/stop) still consume their own taps first because
+        // SwiftUI prioritises Button.action gestures above ancestor
+        // `.onTapGesture`. Match the ChatView composer convention.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            isSearchFieldFocused = true
+        }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
     }
@@ -964,6 +1025,23 @@ struct SearchView: View {
                 }
                 .pickerStyle(.segmented)
             }
+
+            // Tool-calling toggle — mirrors the ChatView setting on the
+            // same `settings.useToolCalling` field, so the two views stay
+            // in sync. Enables the model to call searchContext / calculate
+            // / currentDateTime / webSearch on demand instead of receiving
+            // a pre-baked context block in the summary prompt.
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $settings.useToolCalling) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Tool calling (experimental)")
+                            .font(.subheadline)
+                        Text("Lets the model query the web, search the corpus, calculate, and get the current date on demand instead of relying on the pre-baked search summary.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
         }
         .padding()
         .background(controlBackgroundColor)
@@ -1325,6 +1403,31 @@ struct SearchView: View {
         
         Task {
             do {
+                // Tool-calling mode: skip the auto web search entirely.
+                // The model owns the decision to query the web via its
+                // `webSearch` tool. Otherwise we end up handing it both a
+                // pre-fetched corpus AND the tools, and it just calls
+                // `searchContext` over the corpus — `webSearch` never
+                // fires. Result cards stay empty in this mode; the
+                // summary card carries the model's tool-driven answer.
+                if settings.useToolCalling && !noAIOnly {
+                    guard activeSearchRequestID == requestID else { return }
+                    searchResults = []
+                    errorMessage = nil
+                    showingSummary = true
+                    await generateSummary(
+                        maxScrapingResults: resultsCount,
+                        maxScrapingChars: scrapingChars,
+                        summaryResults: [],
+                        generationProfile: generationProfile,
+                        queries: nil
+                    )
+                    if activeSearchRequestID == requestID {
+                        isGeneratingFirstGuess = false
+                    }
+                    return
+                }
+
                 let fetchedResults: [SearchResult]
                 var allQueries: [String] = [trimmedQuery]
 
@@ -1419,6 +1522,11 @@ struct SearchView: View {
             language: settings.language,
             profile: generationProfile ?? activeGenerationProfile,
             queries: queries,
+            useToolCalling: settings.useToolCalling,
+            maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+            maxWikipediaResults: settings.maxWikipediaResults,
+            useDuckDuckGo: settings.useDuckDuckGo,
+            useWikipedia: settings.useWikipedia,
             onMatchingScores: { scores in
                 Task { @MainActor in
                     // AIService chunks the full overfetched `fetchedResults`
@@ -1455,6 +1563,21 @@ struct SearchView: View {
     }
 
     /// Resets all search and summary state to the initial home screen.
+    /// Cancels every in-flight search phase: rotates the request ID so
+    /// pending RAG / first-guess / summary tasks stop publishing, clears
+    /// the busy flags, and tears down the AIService streaming state so a
+    /// fresh search starts cleanly.
+    private func cancelCurrentSearch() {
+        activeSearchRequestID = UUID()
+        // Flip the published flags so the UI swaps the stop button back to
+        // send immediately. The discarded tasks will see the request-ID
+        // mismatch and exit without touching state.
+        isGeneratingFirstGuess = false
+        aiService.isSummarizing = false
+        searchService.isSearching = false
+        summaryStartTime = nil
+    }
+
     private func goHome() {
         activeSearchRequestID = UUID()
         searchQuery = ""

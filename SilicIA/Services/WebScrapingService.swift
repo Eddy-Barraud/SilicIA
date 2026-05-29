@@ -336,7 +336,11 @@ class WebScrapingService: ObservableObject {
                 guard let cellRange = Range(cellMatch.range(at: 2), in: rowText) else { continue }
                 cells.append(sanitizeCellText(String(rowText[cellRange])))
             }
-            if !cells.isEmpty {
+            // Skip rows where every cell is empty — common in layout tables
+            // used as spacers, and they generate "| | | | |" lines that
+            // burn tokens without conveying anything.
+            let hasAnyContent = cells.contains { !$0.isEmpty }
+            if hasAnyContent {
                 rows.append(cells)
             }
         }

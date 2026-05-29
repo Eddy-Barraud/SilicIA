@@ -2,6 +2,7 @@
   "chat.startConversation": "Commencez une conversation de chat avec le modèle.",
   "chat.composer.placeholder": "Tapez un message",
   "chat.composer.send": "Envoyer",
+  "chat.composer.stop": "Arrêter la génération",
   "chat.message.regenerate": "Régénérer",
   "chat.context.title": "Sources de contexte",
   "chat.context.addURL": "Ajouter une URL",
