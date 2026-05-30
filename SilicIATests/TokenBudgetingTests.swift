@@ -88,8 +88,8 @@ final class TokenBudgetingTests: XCTestCase {
     // MARK: - Tool output token budget
 
     /// Default response cap (500t) should give tools a 1000-token reply
-    /// budget per call — twice the response cap, well within the
-    /// ceiling.
+    /// budget per call — twice the response cap, comfortably under the
+    /// window-aware ceiling.
     func testToolBudgetScalesAtTwoxAtDefault() {
         XCTAssertEqual(TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 500), 1000)
     }
@@ -103,21 +103,57 @@ final class TokenBudgetingTests: XCTestCase {
         )
     }
 
-    /// Very large response cap (5000t) must hit the ceiling so a tool
-    /// reply can't single-handedly fill the context window.
-    func testToolBudgetClampedAtCeiling() {
-        XCTAssertEqual(
-            TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 5000),
-            TokenBudgeting.toolOutputTokenBudgetCeiling
-        )
+    /// The critical safety property: instructions + prompt overhead + the
+    /// response + a single tool reply must never exceed the 4096-token
+    /// window. Verified across the whole response-cap range, including the
+    /// deep-profile cap that exposed the old hardcoded-ceiling overflow.
+    func testToolBudgetNeverOverflowsWindowWithResponseAndInstructions() {
+        for responseCap in [250, 500, 750, 1000, 1500, 3000, 5000] {
+            let effectiveResponse = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: responseCap)
+            let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap)
+            let oneToolTurn = TokenBudgeting.instructionTokens
+                + TokenBudgeting.promptOverheadTokens
+                + effectiveResponse
+                + toolBudget
+            XCTAssertLessThanOrEqual(
+                oneToolTurn,
+                TokenBudgeting.contextWindowLimit,
+                "A single tool reply at responseCap=\(responseCap) overflows the window: \(oneToolTurn) > \(TokenBudgeting.contextWindowLimit)"
+            )
+        }
     }
 
-    /// Floor < ceiling — sanity check that the constants are wired the
-    /// right way round.
-    func testToolBudgetConstantsAreOrdered() {
-        XCTAssertLessThan(
-            TokenBudgeting.toolOutputTokenBudgetFloor,
-            TokenBudgeting.toolOutputTokenBudgetCeiling
-        )
+    /// Two tool replies (e.g. currentDateTime + webSearch) plus the
+    /// response and instructions should also fit — the budget divides the
+    /// available room by `assumedConcurrentToolReplies = 2`.
+    func testToolBudgetSurvivesTwoConcurrentReplies() {
+        for responseCap in [500, 1000, 1500] {
+            let effectiveResponse = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: responseCap)
+            let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap)
+            let twoToolTurn = TokenBudgeting.instructionTokens
+                + TokenBudgeting.promptOverheadTokens
+                + effectiveResponse
+                + (toolBudget * 2)
+            XCTAssertLessThanOrEqual(
+                twoToolTurn,
+                TokenBudgeting.contextWindowLimit,
+                "Two tool replies at responseCap=\(responseCap) overflow the window: \(twoToolTurn)"
+            )
+        }
+    }
+
+    /// Budget honours the floor for all realistic response caps (the app's
+    /// slider never reaches the degenerate range where the response alone
+    /// eats the window). Window-safety still takes precedence over the
+    /// floor — that's covered by the overflow test above — but in normal
+    /// operation the floor always holds.
+    func testToolBudgetHonoursFloorForRealisticCaps() {
+        for responseCap in [1, 50, 500, 1000, 1500] {
+            XCTAssertGreaterThanOrEqual(
+                TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap),
+                TokenBudgeting.toolOutputTokenBudgetFloor,
+                "Floor not honoured at realistic responseCap=\(responseCap)"
+            )
+        }
     }
 }
