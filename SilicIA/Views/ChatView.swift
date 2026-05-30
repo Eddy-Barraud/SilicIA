@@ -9,7 +9,6 @@ import SwiftUI
 import SwiftData
 import Combine
 import UniformTypeIdentifiers
-import LaTeXSwiftUI
 #if os(macOS)
 import AppKit
 #elseif canImport(UIKit)
@@ -46,7 +45,6 @@ struct ChatView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var sharedImages: [URL]
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.modelContext) private var modelContext
 
     let chatService: ChatService
@@ -105,22 +103,6 @@ struct ChatView: View {
     @State private var copiedMessageID: ChatMessage.ID?
     @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
     @State private var loggedAssistantSnapshots: [ChatMessage.ID: String] = [:]
-
-    private var controlBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.controlBackgroundColor)
-        #else
-        return Color(UIColor.secondarySystemBackground)
-        #endif
-    }
-
-    private var textBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.textBackgroundColor)
-        #else
-        return Color(UIColor.systemBackground)
-        #endif
-    }
 
     private var estimatedMaxOutputCharacters: Int {
         TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
@@ -316,7 +298,7 @@ struct ChatView: View {
                 Spacer()
             }
             .padding()
-            .background(controlBackgroundColor)
+            .background(Color.platformControlBackground)
 
             ScrollView {
                 chatSettingsPanel
@@ -324,7 +306,7 @@ struct ChatView: View {
             }
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(textBackgroundColor)
+            .background(Color.platformTextBackground)
         }
         .onAppear {
             settings = AppSettings.load()
@@ -496,7 +478,7 @@ struct ChatView: View {
             }
         }
         .padding()
-        .background(controlBackgroundColor)
+        .background(Color.platformControlBackground)
         .cornerRadius(12)
     }
 
@@ -522,7 +504,7 @@ struct ChatView: View {
 
                             if message.role == .assistant {
                                 Button {
-                                    copyPlainTextToClipboard(message.content)
+                                    PlatformClipboard.copyPlainText(message.content)
                                     copiedMessageID = message.id
                                     Task {
                                         try? await Task.sleep(for: .seconds(1.2))
@@ -557,7 +539,7 @@ struct ChatView: View {
                     .background(
                         message.role == .user
                         ? Color.accentColor.opacity(0.15)
-                        : controlBackgroundColor
+                        : Color.platformControlBackground
                     )
                     .cornerRadius(10)
                     .frame(
@@ -579,7 +561,7 @@ struct ChatView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(textBackgroundColor)
+        .background(Color.platformTextBackground)
         .cornerRadius(10)
     }
 
@@ -588,7 +570,7 @@ struct ChatView: View {
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
             VStack(alignment: .leading, spacing: 8) {
-                progressiveLaTeXText(message.content, isStreaming: isStreamingAssistantMessage(message))
+                ProgressiveLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
 
                 if let citations = message.citations,
                    !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -618,25 +600,6 @@ struct ChatView: View {
     private func isStreamingAssistantMessage(_ message: ChatMessage) -> Bool {
         guard chatService.isResponding, message.role == .assistant else { return false }
         return chatService.messages.last?.id == message.id
-    }
-    
-
-    @ViewBuilder
-    private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
-        if isStreaming {
-            Text(text)
-                .font(.body)
-                .foregroundColor(colorScheme == .dark ? .white : .black)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(text))
-                .font(.body)
-                .foregroundColor(colorScheme == .dark ? .white : .black)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                #if DEBUG
-                .errorMode(.error)
-                #endif
-        }
     }
     
 
@@ -744,7 +707,7 @@ struct ChatView: View {
             }
         }
         .padding(8)
-        .background(textBackgroundColor)
+        .background(Color.platformTextBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
@@ -900,7 +863,7 @@ struct ChatView: View {
             .accessibilityLabel(L.t("common.delete", language: settings.language))
         }
         .padding(8)
-        .background(textBackgroundColor)
+        .background(Color.platformTextBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
@@ -1276,15 +1239,6 @@ struct ChatView: View {
     private func debugDrop(_ message: @autoclosure () -> String) {
         #if DEBUG
         print("[ChatView][PDFDrop] \(message())")
-        #endif
-    }
-
-    private func copyPlainTextToClipboard(_ text: String) {
-        #if os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        #elseif canImport(UIKit)
-        UIPasteboard.general.string = text
         #endif
     }
 
