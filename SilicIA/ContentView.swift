@@ -49,15 +49,19 @@ struct ContentView: View {
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
         VStack(spacing: 0) {
+            // Liquid Glass tab switcher: the segmented control floats on a
+            // glass capsule so it reads as a control layered above the
+            // screen content rather than a bar welded to the top edge. The
+            // divider is gone — the glass material provides the separation.
             Picker("Application", selection: selectedTabBinding) {
                 Text(AppTab.searchAssist.displayName(language: language)).tag(AppTab.searchAssist)
                 Text(AppTab.chat.displayName(language: language)).tag(AppTab.chat)
             }
             .pickerStyle(.segmented)
+            .padding(6)
+            .glassEffect(.regular, in: .capsule)
             .padding([.horizontal, .top])
             .padding(.bottom, 8)
-
-            Divider()
 
             Group {
                 switch selectedTab {

@@ -174,7 +174,6 @@ struct SearchView: View {
         self.onAttachmentsDropped = onAttachmentsDropped
     }
     
-
     private var estimatedMaxOutputCharacters: Int {
         TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
     }
@@ -364,7 +363,8 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(Color.platformControlBackground)
+        // Transparent header — floats over the content in the Liquid
+        // Glass style rather than sitting on an opaque bar.
     }
 
     /// 44pt-tap-target icon button used in the top bar. Matches the
@@ -434,8 +434,8 @@ struct SearchView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.platformControlBackground)
-            .cornerRadius(12)
+            // No inner fill — the field sits directly on the glass island
+            // (avoids glass-on-glass) and matches the ChatView composer.
 
             if let errorMessage,
                !errorMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -506,12 +506,10 @@ struct SearchView: View {
             }
         }
         .padding(10)
-        .background(Color.platformTextBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-        )
-        .cornerRadius(12)
+        // Liquid Glass search island — mirrors the ChatView composer so
+        // the two screens share one input-surface look. The system
+        // material refracts the results / welcome content behind it.
+        .glassCard(cornerRadius: 16)
         // Whole rounded surface is the tap target for focusing the field —
         // previously only the placeholder text caught taps which made the
         // hit area a thin sliver in a tall container. Buttons inside (Chat,
@@ -713,8 +711,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(Color.accentColor.opacity(0.1))
-        .cornerRadius(12)
+        .glassAccentCard(cornerRadius: 16)
     }
 
     // MARK: - Loading View
@@ -742,8 +739,7 @@ struct SearchView: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color.accentColor.opacity(0.08))
-                    .cornerRadius(12)
+                    .glassAccentCard(cornerRadius: 12)
                 }
             }
             .padding()
@@ -831,8 +827,7 @@ struct SearchView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .background(Color.platformControlBackground)
-                    .cornerRadius(10)
+                    .glassTile(cornerRadius: 10)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(example)
@@ -1019,8 +1014,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(Color.platformControlBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 16)
     }
 
     // MARK: - Web Page Summary Overlay
@@ -1091,8 +1085,7 @@ struct SearchView: View {
             }
             .padding()
             .frame(maxWidth: 650, maxHeight: 460)
-            .background(Color.platformControlBackground)
-            .cornerRadius(12)
+            .glassCard(cornerRadius: 16)
             .shadow(radius: 12)
             .padding()
         }
@@ -1726,8 +1719,7 @@ struct SearchResultCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(Color.platformControlBackground)
-        .cornerRadius(8)
+        .glassTile(cornerRadius: 12)
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
             MatchScoreBadge(percent: matchingScore, language: accessibilityLanguage)

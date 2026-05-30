@@ -293,12 +293,11 @@ struct ChatView: View {
                             .fontWeight(.medium)
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.glass)
 
                 Spacer()
             }
             .padding()
-            .background(Color.platformControlBackground)
 
             ScrollView {
                 chatSettingsPanel
@@ -306,7 +305,6 @@ struct ChatView: View {
             }
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.platformTextBackground)
         }
         .onAppear {
             settings = AppSettings.load()
@@ -478,8 +476,7 @@ struct ChatView: View {
             }
         }
         .padding()
-        .background(Color.platformControlBackground)
-        .cornerRadius(12)
+        .glassCard(cornerRadius: 16)
     }
 
     /// Renders message history and in-progress state.
@@ -535,13 +532,11 @@ struct ChatView: View {
                         renderedMessageContent(message)
                             .textSelection(.enabled)
                     }
-                    .padding(10)
-                    .background(
-                        message.role == .user
-                        ? Color.accentColor.opacity(0.15)
-                        : Color.platformControlBackground
-                    )
-                    .cornerRadius(10)
+                    .padding(12)
+                    // User turns get accent-tinted glass; assistant turns
+                    // get the neutral glass material. Both refract the
+                    // scroll content behind them in the Liquid Glass style.
+                    .modifier(MessageBubbleGlass(isUser: message.role == .user))
                     .frame(
                         maxWidth: .infinity,
                         alignment: message.role == .assistant ? .leading : .trailing
@@ -561,8 +556,9 @@ struct ChatView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.platformTextBackground)
-        .cornerRadius(10)
+        // No solid fill: the transcript scrolls on the system background
+        // so the glass message bubbles and the glass composer below have
+        // real content to refract.
     }
 
     /// Renders assistant replies with LaTeX-aware text and keeps plaintext for user turns.
@@ -707,12 +703,11 @@ struct ChatView: View {
             }
         }
         .padding(8)
-        .background(Color.platformTextBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-        )
-        .cornerRadius(12)
+        // Liquid Glass input island. Replaces the former solid fill +
+        // hairline stroke; the system material supplies the border,
+        // shadow, and light/dark adaptation, and refracts the message
+        // list scrolling behind it.
+        .glassCard(cornerRadius: 16)
         // Treat the whole composer surface as a tap target for focusing
         // the input — previously only the placeholder text itself
         // received taps, which gave a single-line-tall hit area in an
@@ -791,12 +786,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.accentColor.opacity(0.10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.accentColor.opacity(0.25), lineWidth: 1)
-        )
-        .cornerRadius(8)
+        .glassAccentCard(cornerRadius: 10)
     }
 
     /// Appends a fresh empty URL row to `contextSources` and focuses
@@ -863,12 +853,7 @@ struct ChatView: View {
             .accessibilityLabel(L.t("common.delete", language: settings.language))
         }
         .padding(8)
-        .background(Color.platformTextBackground)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-        )
-        .cornerRadius(8)
+        .glassTile(cornerRadius: 10)
         .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers, rowIndex: index)
         }
