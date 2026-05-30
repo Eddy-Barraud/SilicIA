@@ -49,19 +49,29 @@ struct ContentView: View {
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
         VStack(spacing: 0) {
-            // Liquid Glass tab switcher: the segmented control floats on a
-            // glass capsule so it reads as a control layered above the
-            // screen content rather than a bar welded to the top edge. The
-            // divider is gone — the glass material provides the separation.
-            Picker("Application", selection: selectedTabBinding) {
-                Text(AppTab.searchAssist.displayName(language: language)).tag(AppTab.searchAssist)
-                Text(AppTab.chat.displayName(language: language)).tag(AppTab.chat)
+            // Finder-style toolbar: a full-width bar with an ultra-thin
+            // material background (same visual layer as macOS window chrome)
+            // anchored to the top edge. The Divider below it plays the role
+            // of Finder's pane separator — it makes the toolbar read as a
+            // distinct layer sitting above the content, not a floating island
+            // inside it. The segmented picker sits centred inside the bar,
+            // width-capped so it doesn't stretch edge-to-edge on large
+            // windows (Finder's toolbar icons are also centred, not
+            // full-width).
+            HStack {
+                Picker("Application", selection: selectedTabBinding) {
+                    Text(AppTab.searchAssist.displayName(language: language)).tag(AppTab.searchAssist)
+                    Text(AppTab.chat.displayName(language: language)).tag(AppTab.chat)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 360)
             }
-            .pickerStyle(.segmented)
-            .padding(6)
-            .glassEffect(.regular, in: .capsule)
-            .padding([.horizontal, .top])
-            .padding(.bottom, 8)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial)
+
+            Divider()
 
             Group {
                 switch selectedTab {

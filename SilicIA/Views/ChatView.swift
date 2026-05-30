@@ -556,9 +556,11 @@ struct ChatView: View {
             .frame(maxWidth: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // No solid fill: the transcript scrolls on the system background
-        // so the glass message bubbles and the glass composer below have
-        // real content to refract.
+        // Restore the pre-glass system text-background fill + corner radius
+        // so the messages area reads as a distinct light surface, matching
+        // the look users preferred before the Liquid Glass migration.
+        .background(PlatformColors.textBackground)
+        .cornerRadius(10)
     }
 
     /// Renders assistant replies with LaTeX-aware text and keeps plaintext for user turns.
@@ -786,7 +788,7 @@ struct ChatView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .glassAccentCard(cornerRadius: 10)
+        .subtleAccentChip(cornerRadius: 10)
     }
 
     /// Appends a fresh empty URL row to `contextSources` and focuses
@@ -853,7 +855,7 @@ struct ChatView: View {
             .accessibilityLabel(L.t("common.delete", language: settings.language))
         }
         .padding(8)
-        .glassTile(cornerRadius: 10)
+        .subtleTile(cornerRadius: 10)
         .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers, rowIndex: index)
         }

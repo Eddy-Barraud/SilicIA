@@ -711,7 +711,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .glassAccentCard(cornerRadius: 16)
+        .subtleAccentCard(cornerRadius: 16)
     }
 
     // MARK: - Loading View
@@ -739,7 +739,7 @@ struct SearchView: View {
                     }
                     .padding()
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassAccentCard(cornerRadius: 12)
+                    .subtleAccentCard(cornerRadius: 12)
                 }
             }
             .padding()
@@ -827,7 +827,7 @@ struct SearchView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .glassTile(cornerRadius: 10)
+                    .subtleTile(cornerRadius: 10)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(example)
@@ -1719,7 +1719,7 @@ struct SearchResultCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .glassTile(cornerRadius: 12)
+        .subtleTile(cornerRadius: 12)
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
             MatchScoreBadge(percent: matchingScore, language: accessibilityLanguage)
