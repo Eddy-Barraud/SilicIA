@@ -53,8 +53,23 @@ class AIService: ObservableObject {
 
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
-    private static let fastSummaryContextUtilizationFactor = 0.50
-    private static let deepSummaryContextUtilizationFactor = 0.65
+    // Fraction of the *available* context window (after instructions +
+    // overhead + output are reserved) that the search-summary path fills
+    // with retrieved context. Higher = the model sees more sources per
+    // answer, using more of the 4096-token budget.
+    //
+    // These sit alongside a second, implicit safety margin: char↔token
+    // conversion uses `avgCharsPerToken = 3`, but real-world English is
+    // closer to 4 chars/token, so a budget computed in "3-char tokens"
+    // already underfills the real tokenizer by ~25%. The factors below
+    // are tuned on top of that headroom.
+    //
+    // Deep search matches the chat path's `RAGSelectionOptions.default`
+    // (0.8) so a thorough search uses the window as fully as a chat turn
+    // does; fast search stays a notch lower to keep its first-answer
+    // latency down without leaving half the window empty (was 0.50).
+    private static let fastSummaryContextUtilizationFactor = 0.65
+    private static let deepSummaryContextUtilizationFactor = 0.80
     private static let fastSummaryScrapingResultCap = 6
     private static let fastSummaryScrapingCharacterCap = 4500
 
@@ -473,13 +488,23 @@ class AIService: ObservableObject {
     }
 
     /// Builds compact instructions for the selected response language.
-    /// When `useToolCalling` is true, appends a tool-usage paragraph
-    /// (mirrors ChatService.buildInstructions's tool appendix).
-    private func buildInstructions(for language: ModelLanguage, useToolCalling: Bool = false) -> String {
+    /// When `useToolCalling` is true, appends a tool-usage paragraph via
+    /// the shared `ToolKit` (search tone). The `webSearchAvailable` flag
+    /// gates the `webSearch` description so the model isn't told to call
+    /// a tool that isn't attached.
+    private func buildInstructions(
+        for language: ModelLanguage,
+        useToolCalling: Bool = false,
+        webSearchAvailable: Bool = true
+    ) -> String {
         let base = PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
             ?? fallbackSummaryInstructions(for: language)
         guard useToolCalling else { return base }
-        return base + "\n\n" + Self.searchToolCallingAppendix(for: language)
+        return base + "\n\n" + ToolKit.instructionsAppendix(
+            for: language,
+            tone: .search,
+            webSearchAvailable: webSearchAvailable
+        )
     }
 
     /// Per-language user-turn prompt for the search-summary tool-calling
@@ -563,45 +588,6 @@ class AIService: ObservableObject {
             2. \(keyPoints) key points.
             Limit: \(maxOutputTokens) tokens.
             Required output format: LaTeX.
-            """
-        }
-    }
-
-    /// Per-language tool-usage instructions for the search-summary path.
-    /// Mirrors the ChatService appendix but tuned for the search context:
-    /// the model is invoked with the user's search query (not a chat
-    /// turn) and is expected to compose a focused webSearch query from it.
-    private static func searchToolCallingAppendix(for language: ModelLanguage) -> String {
-        switch language {
-        case .french:
-            return """
-            Outils disponibles :
-            - `searchContext(query)` : recherche dans le corpus de pages web déjà récupérées et renvoie les passages pertinents avec leur source.
-            - `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules à partir de la question — utile pour compléter le corpus si tu manques d'information.
-            - `calculate(expression)` : évalue une expression arithmétique exactement.
-            - `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient « aujourd'hui », « la semaine prochaine », « bientôt », etc.
-
-            Cite la source des passages utilisés dans ta réponse finale.
-            """
-        case .spanish:
-            return """
-            Herramientas disponibles:
-            - `searchContext(query)`: busca en el corpus de páginas web ya recuperadas y devuelve los pasajes relevantes con su fuente.
-            - `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas — útil para completar el corpus si te falta información.
-            - `calculate(expression)`: evalúa una expresión aritmética exactamente.
-            - `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga 'hoy', 'la próxima semana', 'pronto', etc.
-
-            Cita la fuente de los pasajes utilizados en tu respuesta final.
-            """
-        case .english:
-            return """
-            Available tools:
-            - `searchContext(query)`: search the already-fetched web corpus and return relevant passages with their source.
-            - `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose — useful to extend the corpus when something is missing.
-            - `calculate(expression)`: evaluate an arithmetic expression exactly.
-            - `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question mentions 'today', 'next week', 'soon', etc.
-
-            Cite the source of any passages you used in your final answer.
             """
         }
     }
@@ -827,49 +813,47 @@ class AIService: ObservableObject {
         do {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
-            let instructions = buildInstructions(for: language, useToolCalling: useToolCalling)
+            let instructions = buildInstructions(
+                for: language,
+                useToolCalling: useToolCalling,
+                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
+            )
             let session: LanguageModelSession
             if useToolCalling {
                 let webSearchAvailable = useDuckDuckGo || useWikipedia
-                // Per-tool reply budget scales with the response cap. The
-                // effective output budget is computed below as
-                // `effectiveMaxTokens`, but we need the tool budget here
-                // (session construction precedes the prompt step), so
-                // recompute from `maxTokens` via the same clamp.
+                // Tool budget is sized from the clamped response cap. We
+                // recompute it here (rather than reuse the `effectiveMaxTokens`
+                // computed below) because session construction precedes the
+                // prompt step — same clamp, same inputs, so the value matches.
                 let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
                     requestedMaxTokens: maxTokens,
                     instructionTokens: TokenBudgeting.instructionTokens,
                     promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
                     minContextTokens: TokenBudgeting.minContextTokens
                 )
-                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: clampedOutputTokens)
-                var tools: [any Tool] = [
-                    RAGSearchTool(chunks: corpusChunks, tokenBudget: toolBudget),
-                    CalculatorTool(),
-                    DateTimeTool(language: language)
-                ]
-                if webSearchAvailable {
-                    var webTool = WebSearchTool(
+                let (tools, toolBudget) = ToolKit.assemble(
+                    config: ToolKit.Configuration(
+                        language: language,
+                        corpusChunks: corpusChunks,
+                        webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
                         maxDuckDuckGoResults: maxDuckDuckGoResults,
                         maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo,
                         useWikipedia: useWikipedia,
-                        language: language,
-                        tokenBudget: toolBudget
-                    )
-                    // Mirror every webSearch reply into the published
-                    // `toolFetchedResults` so SearchView can surface them as
-                    // cards with RAG match scores once the model finishes.
-                    // Deduped on the published side via `appendUniqueResults`.
-                    webTool.onResults = { [weak self] results in
-                        Task { @MainActor in
-                            self?.appendUniqueResults(results)
+                        // Mirror every webSearch reply into `toolFetchedResults`
+                        // so SearchView can surface the sources as cards with
+                        // RAG match scores once the model finishes. Deduped on
+                        // the published side via `appendUniqueResults`.
+                        onWebResults: { [weak self] results in
+                            Task { @MainActor in
+                                self?.appendUniqueResults(results)
+                            }
                         }
-                    }
-                    tools.append(webTool)
-                }
+                    ),
+                    responseTokens: clampedOutputTokens
+                )
                 #if DEBUG
                 debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 #endif

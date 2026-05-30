@@ -236,28 +236,22 @@ final class ChatService: ObservableObject {
                 // Both must be true for the tool to be attached. PDFtalkme
                 // forces the chip off so the tool stays off in that host.
                 let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
-                // Per-tool reply budget scales with the response cap so
-                // verbose profiles give tools more room and terse profiles
-                // keep them tight. See TokenBudgeting.toolOutputTokenBudget
-                // for the exact formula.
-                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: effectiveMaxOutputTokens)
-                var tools: [any Tool] = [
-                    RAGSearchTool(chunks: chunks, tokenBudget: toolBudget),
-                    CalculatorTool(),
-                    DateTimeTool(language: language)
-                ]
-                if webSearchAvailable {
-                    tools.append(WebSearchTool(
+                let (tools, toolBudget) = ToolKit.assemble(
+                    config: ToolKit.Configuration(
+                        language: language,
+                        corpusChunks: chunks,
+                        webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
                         maxDuckDuckGoResults: effectiveMaxDDGResults,
                         maxWikipediaResults: effectiveMaxWikiResults,
                         useDuckDuckGo: useDuckDuckGo,
-                        useWikipedia: useWikipedia,
-                        language: language,
-                        tokenBudget: toolBudget
-                    ))
-                }
+                        useWikipedia: useWikipedia
+                        // Chat path doesn't subscribe to webSearch results
+                        // — there are no search cards in ChatView.
+                    ),
+                    responseTokens: effectiveMaxOutputTokens
+                )
                 let toolNames = tools.map(\.name).joined(separator: ", ")
                 debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 session = LanguageModelSession(
@@ -273,12 +267,7 @@ final class ChatService: ObservableObject {
             if useToolCalling {
                 // No pre-baked context — the model is expected to call
                 // searchContext as needed.
-                prompt = buildToolCallingPrompt(
-                    for: message,
-                    hasAttachedDocuments: !chunks.isEmpty,
-                    language: language,
-                    maxOutputCharacters: maxOutputCharacters
-                )
+                prompt = buildToolCallingPrompt(for: message, language: language)
             } else {
                 prompt = buildPrompt(
                     for: message,
@@ -1098,107 +1087,88 @@ final class ChatService: ObservableObject {
         )
     }
 
-    /// Extra instructions appended when tool calling is enabled. Phrased
-    /// per language so it matches the rest of the system prompt's tone.
-    /// The web-search entry is included only when `webSearchAvailable` is
-    /// true so the model doesn't try to call a tool that isn't attached.
+    /// Per-language paragraph appended onto the chat system instructions
+    /// when tool calling is enabled. Delegates to `ToolKit` so the chat
+    /// and search paths stay in lock-step on tool descriptions.
     private func toolCallingInstructionsAppendix(
         for language: ModelLanguage,
         webSearchAvailable: Bool
     ) -> String {
-        switch language {
-        case .french:
-            var sections = [
-                "Outils disponibles :",
-                "- `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.",
-                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.",
-                "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
-                )
-            }
-            sections.append("Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.")
-            return sections.joined(separator: "\n")
-
-        case .spanish:
-            var sections = [
-                "Herramientas disponibles:",
-                "- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.",
-                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.",
-                "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
-                )
-            }
-            sections.append("Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.")
-            return sections.joined(separator: "\n")
-
-        case .english:
-            var sections = [
-                "Available tools:",
-                "- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.",
-                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.",
-                "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
-                )
-            }
-            sections.append("You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.")
-            return sections.joined(separator: "\n")
-        }
+        ToolKit.instructionsAppendix(
+            for: language,
+            tone: .chat,
+            webSearchAvailable: webSearchAvailable
+        )
     }
 
-    /// Builds the per-turn user prompt for the tool-calling path. Much
-    /// shorter than `buildPrompt` because there's no pre-baked context —
-    /// the model fetches what it needs via `searchContext`. We still
-    /// include conversation history so multi-turn flow stays coherent.
-    private func buildToolCallingPrompt(
-        for userMessage: String,
-        hasAttachedDocuments: Bool,
-        language: ModelLanguage,
-        maxOutputCharacters: Int
-    ) -> String {
-        let historyMessages: [ChatMessage]
-        if let last = messages.last, last.role == .user, last.content == userMessage {
-            historyMessages = Array(messages.dropLast())
-        } else {
-            historyMessages = messages
-        }
-        let history = historyMessages
+    /// Builds the per-turn user prompt for the tool-calling path.
+    ///
+    /// Critically, this does NOT replay prior assistant answers. With a
+    /// fresh `LanguageModelSession` per turn, the old approach stuffed the
+    /// whole "User:/Assistant:" transcript into the prompt — and the small
+    /// on-device model "continued" that transcript by echoing the previous
+    /// answer verbatim (and even the trailing scaffolding) instead of
+    /// answering the new question. See the multi-turn PDF-chat regression
+    /// where every answer began by repeating the prior one.
+    ///
+    /// Instead we include only the recent *user questions* as lightweight
+    /// topical context (so follow-ups like "and the osmotic pressure?"
+    /// resolve), then end with a direct imperative carrying the current
+    /// question. Each answer is re-grounded from scratch via the
+    /// `searchContext` tool, so dropping prior answers costs nothing.
+    ///
+    /// Output-length and tool-usage guidance live in the session
+    /// instructions (and `GenerationOptions.maximumResponseTokens`), never
+    /// in the user prompt — putting them here is what leaked
+    /// "(Max output: …)" into the rendered answer.
+    private func buildToolCallingPrompt(for userMessage: String, language: ModelLanguage) -> String {
+        // Prior user turns only (exclude the just-appended current message
+        // and every assistant answer).
+        let priorQuestions = messages
+            .filter { $0.role == .user && $0.content != userMessage }
             .suffix(Self.historyMessageLimit)
-            .map { $0.role == .assistant ? "Assistant: \($0.content)" : "User: \($0.content)" }
-            .joined(separator: "\n")
+            .map(\.content)
+        return Self.assembleToolCallingPrompt(
+            currentQuestion: userMessage,
+            priorUserQuestions: Array(priorQuestions),
+            language: language
+        )
+    }
 
-        let documentsHint: String
-        switch (language, hasAttachedDocuments) {
-        case (.french, true):
-            documentsHint = "Des documents sont joints à cette conversation : utilise `searchContext` pour les interroger."
-        case (.french, false):
-            documentsHint = "Aucun document joint — réponds depuis tes connaissances."
-        case (.spanish, true):
-            documentsHint = "Hay documentos adjuntos en esta conversación: usa `searchContext` para consultarlos."
-        case (.spanish, false):
-            documentsHint = "No hay documentos adjuntos — responde con tus conocimientos."
-        case (.english, true):
-            documentsHint = "Documents are attached to this conversation: use `searchContext` to query them."
-        case (.english, false):
-            documentsHint = "No documents attached — answer from your own knowledge."
+    /// Pure assembly of the tool-calling prompt — separated from `messages`
+    /// state so it can be regression-tested directly. Guarantees the two
+    /// properties that broke multi-turn PDF chat: no assistant answers are
+    /// replayed (the model can't echo what it isn't shown) and no
+    /// length/tool scaffolding appears (that leaked into rendered answers).
+    nonisolated static func assembleToolCallingPrompt(
+        currentQuestion: String,
+        priorUserQuestions: [String],
+        language: ModelLanguage
+    ) -> String {
+        let answerImperative: String
+        let earlierLabel: String
+        switch language {
+        case .french:
+            answerImperative = "Réponds à la question suivante en t'appuyant sur les outils disponibles :"
+            earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+        case .spanish:
+            answerImperative = "Responde a la siguiente pregunta apoyándote en las herramientas disponibles:"
+            earlierLabel = "Preguntas anteriores del usuario (contexto):"
+        case .english:
+            answerImperative = "Answer the following question using the available tools:"
+            earlierLabel = "Earlier user questions (context):"
         }
 
+        guard !priorUserQuestions.isEmpty else {
+            return "\(answerImperative)\n\(currentQuestion)"
+        }
+        let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
         return """
-        \(history)
+        \(earlierLabel)
+        \(contextBlock)
 
-        \(documentsHint)
-
-        User: \(userMessage)
-
-        (Max output: ~\(maxOutputCharacters) characters.)
+        \(answerImperative)
+        \(currentQuestion)
         """
     }
 

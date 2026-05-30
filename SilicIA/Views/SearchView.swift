@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import LaTeXSwiftUI
 import UniformTypeIdentifiers
 #if canImport(SwiftData)
 import SwiftData
@@ -23,7 +22,6 @@ struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
     private static let firstGuessTokenCap = 220
     private static let deepSearchDerivedQueryCount = 3
-    @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
@@ -176,29 +174,6 @@ struct SearchView: View {
         self.onAttachmentsDropped = onAttachmentsDropped
     }
     
-    private var windowBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.windowBackgroundColor)
-        #else
-        return Color(UIColor.systemBackground)
-        #endif
-    }
-
-    private var controlBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.controlBackgroundColor)
-        #else
-        return Color(UIColor.secondarySystemBackground)
-        #endif
-    }
-
-    private var textBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.textBackgroundColor)
-        #else
-        return Color(UIColor.tertiarySystemBackground)
-        #endif
-    }
 
     private var estimatedMaxOutputCharacters: Int {
         TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
@@ -295,7 +270,7 @@ struct SearchView: View {
                 webPageSummaryOverlay
             }
         }
-        .background(windowBackgroundColor)
+        .background(Color.platformWindowBackground)
         .contentShape(Rectangle())
         .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers)
@@ -389,7 +364,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(controlBackgroundColor)
+        .background(Color.platformControlBackground)
     }
 
     /// 44pt-tap-target icon button used in the top bar. Matches the
@@ -459,7 +434,7 @@ struct SearchView: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(controlBackgroundColor)
+            .background(Color.platformControlBackground)
             .cornerRadius(12)
 
             if let errorMessage,
@@ -531,7 +506,7 @@ struct SearchView: View {
             }
         }
         .padding(10)
-        .background(textBackgroundColor)
+        .background(Color.platformTextBackground)
         .overlay(
             RoundedRectangle(cornerRadius: 12)
                 .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
@@ -624,7 +599,7 @@ struct SearchView: View {
                 Button {
                     let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
                     guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    copyPlainTextToClipboard(textToCopy)
+                    PlatformClipboard.copyPlainText(textToCopy)
                     didCopySummary = true
                     Task {
                         try? await Task.sleep(for: .seconds(1.2))
@@ -655,7 +630,7 @@ struct SearchView: View {
                             .foregroundColor(.secondary)
                             .italic()
                     } else if !firstGuessText.isEmpty {
-                        progressiveLaTeXText(firstGuessText, isStreaming: isGeneratingFirstGuess)
+                        ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
                     } else {
                         Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
                             .foregroundColor(.secondary)
@@ -678,7 +653,7 @@ struct SearchView: View {
                 }
 
                 if !aiService.summary.isEmpty {
-                    progressiveLaTeXText(aiService.summary, isStreaming: aiService.isSummarizing)
+                    ProgressiveLaTeXText(text: aiService.summary, isStreaming: aiService.isSummarizing)
 
                     if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Divider()
@@ -762,7 +737,7 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            progressiveLaTeXText(firstGuessText, isStreaming: isGeneratingFirstGuess)
+                            ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
                         }
                     }
                     .padding()
@@ -856,7 +831,7 @@ struct SearchView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
-                    .background(controlBackgroundColor)
+                    .background(Color.platformControlBackground)
                     .cornerRadius(10)
                 }
                 .buttonStyle(.plain)
@@ -1044,7 +1019,7 @@ struct SearchView: View {
             }
         }
         .padding()
-        .background(controlBackgroundColor)
+        .background(Color.platformControlBackground)
         .cornerRadius(12)
     }
 
@@ -1116,7 +1091,7 @@ struct SearchView: View {
             }
             .padding()
             .frame(maxWidth: 650, maxHeight: 460)
-            .background(controlBackgroundColor)
+            .background(Color.platformControlBackground)
             .cornerRadius(12)
             .shadow(radius: 12)
             .padding()
@@ -1194,15 +1169,6 @@ struct SearchView: View {
         }
     }
     #endif
-
-    private func copyPlainTextToClipboard(_ text: String) {
-        #if os(macOS)
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        #elseif canImport(UIKit)
-        UIPasteboard.general.string = text
-        #endif
-    }
 
     #if canImport(UIKit)
     @ViewBuilder
@@ -1303,23 +1269,6 @@ struct SearchView: View {
         #endif
     }
 
-    @ViewBuilder
-    private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
-        if isStreaming {
-            Text(text)
-                .font(.body)
-                .foregroundColor(colorScheme == .dark ? .white : .black)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(text))
-                .font(.body)
-                .foregroundColor(colorScheme == .dark ? .white : .black)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                #if DEBUG
-                .errorMode(.error)
-                #endif
-        }
-    }
     // MARK: - Empty State View
     private var emptyStateView: some View {
         VStack(spacing: 16) {
@@ -1777,7 +1726,7 @@ struct SearchResultCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(platformControlBackgroundColor)
+        .background(Color.platformControlBackground)
         .cornerRadius(8)
         .contentShape(Rectangle())
         .overlay(alignment: .topTrailing) {
@@ -1787,14 +1736,6 @@ struct SearchResultCard: View {
         .onTapGesture {
             handleTitleTap()
         }
-    }
-
-    private var platformControlBackgroundColor: Color {
-        #if os(macOS)
-        return Color(NSColor.controlBackgroundColor)
-        #else
-        return Color(UIColor.secondarySystemBackground)
-        #endif
     }
 
     /// Extracts a readable host from a URL string.

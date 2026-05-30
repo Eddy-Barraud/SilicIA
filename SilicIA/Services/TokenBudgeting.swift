@@ -81,24 +81,61 @@ enum TokenBudgeting {
         max(tokens, 0) * avgCharsPerToken
     }
 
-    /// Token cap allocated to each `Tool.call` reply when tool calling is
-    /// active. Scales with the effective response budget so verbose
-    /// profiles ("deep") give tools room to return richer payloads and
-    /// terse profiles ("fast") keep tool output tight. Clamped on both
-    /// ends so a single tool reply can never blow the context window
-    /// (`toolOutputTokenBudgetCeiling`) and so very small response caps
-    /// don't starve a tool of useful payload (`toolOutputTokenBudgetFloor`).
-    ///
-    /// The 2x multiplier reflects how tool outputs tend to be referenced
-    /// once and discarded — the model rewrites/summarises the relevant
-    /// bits into its final answer — so a tool reply roughly twice the
-    /// response cap is a reasonable working capacity without dominating
-    /// the context window.
+    /// Smallest tool reply we'll allow. Below this a tool call returns so
+    /// little it's not worth the round-trip (a single search result with
+    /// no room for surrounding context).
     static let toolOutputTokenBudgetFloor = 500
-    static let toolOutputTokenBudgetCeiling = 3000
+
+    /// During a tool-calling turn the `LanguageModelSession` transcript
+    /// accumulates: instructions + prompt + every tool call + every tool
+    /// reply + the final response — and the whole thing must fit in the
+    /// 4096-token window. The model may call several tools in one turn,
+    /// so we size a *single* reply to leave room for a few of them plus
+    /// the response. This divisor is "how many tool replies we assume can
+    /// coexist in the transcript"; 2 is conservative enough to survive a
+    /// two-tool turn (e.g. currentDateTime + webSearch) without overflow
+    /// while still letting each reply be substantial.
+    private static let assumedConcurrentToolReplies = 2
+
+    /// Token cap allocated to each `Tool.call` reply when tool calling is
+    /// active.
+    ///
+    /// Two forces balanced here:
+    ///   - Use the window: scale with the response budget (verbose "deep"
+    ///     profiles let tools return richer payloads; terse "fast"
+    ///     profiles keep them tight) via a 2x multiplier — tool output is
+    ///     referenced once and summarised into the answer, so ~twice the
+    ///     response cap is a sensible working size.
+    ///   - Respect the window: the result is capped by what's actually
+    ///     left after instructions + prompt overhead + the response are
+    ///     reserved, divided by `assumedConcurrentToolReplies`. This is
+    ///     the fix for a latent overflow — a hardcoded ceiling (formerly
+    ///     3000) plus a 1500-token deep response plus instructions
+    ///     exceeded 4096 on a *single* tool call.
     static func toolOutputTokenBudget(forResponseTokens responseTokens: Int) -> Int {
-        let scaled = responseTokens * 2
-        return min(toolOutputTokenBudgetCeiling, max(toolOutputTokenBudgetFloor, scaled))
+        let effectiveResponseTokens = clampedOutputTokens(requestedMaxTokens: responseTokens)
+        // Tokens left for the entire tool transcript once instructions,
+        // overhead, and the model's own response are accounted for.
+        let availableForTools = max(
+            contextWindowLimit - instructionTokens - promptOverheadTokens - effectiveResponseTokens,
+            0
+        )
+        // Window-safe cap for ONE reply: dividing by the assumed
+        // concurrent-reply count guarantees that even
+        // `assumedConcurrentToolReplies` replies of this size plus the
+        // response and instructions stay under the window.
+        let perReplyRoom = availableForTools / assumedConcurrentToolReplies
+
+        // Preferred size: 2x the response cap, but at least the floor.
+        let desired = max(toolOutputTokenBudgetFloor, effectiveResponseTokens * 2)
+
+        // The window cap wins unconditionally. In the normal case
+        // `perReplyRoom` is well above `desired`, so we get `desired`. In
+        // the degenerate case where a huge response has eaten the window,
+        // `perReplyRoom` drops below the floor and the floor yields — a
+        // smaller-than-ideal tool reply is acceptable; overflowing the
+        // window (which makes the model error out entirely) is not.
+        return min(desired, perReplyRoom)
     }
 
     static func estimatedContextWords(forTokens tokens: Int) -> Int {
