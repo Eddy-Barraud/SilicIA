@@ -267,12 +267,7 @@ final class ChatService: ObservableObject {
             if useToolCalling {
                 // No pre-baked context — the model is expected to call
                 // searchContext as needed.
-                prompt = buildToolCallingPrompt(
-                    for: message,
-                    hasAttachedDocuments: !chunks.isEmpty,
-                    language: language,
-                    maxOutputCharacters: maxOutputCharacters
-                )
+                prompt = buildToolCallingPrompt(for: message, language: language)
             } else {
                 prompt = buildPrompt(
                     for: message,
@@ -1106,51 +1101,74 @@ final class ChatService: ObservableObject {
         )
     }
 
-    /// Builds the per-turn user prompt for the tool-calling path. Much
-    /// shorter than `buildPrompt` because there's no pre-baked context —
-    /// the model fetches what it needs via `searchContext`. We still
-    /// include conversation history so multi-turn flow stays coherent.
-    private func buildToolCallingPrompt(
-        for userMessage: String,
-        hasAttachedDocuments: Bool,
-        language: ModelLanguage,
-        maxOutputCharacters: Int
-    ) -> String {
-        let historyMessages: [ChatMessage]
-        if let last = messages.last, last.role == .user, last.content == userMessage {
-            historyMessages = Array(messages.dropLast())
-        } else {
-            historyMessages = messages
-        }
-        let history = historyMessages
+    /// Builds the per-turn user prompt for the tool-calling path.
+    ///
+    /// Critically, this does NOT replay prior assistant answers. With a
+    /// fresh `LanguageModelSession` per turn, the old approach stuffed the
+    /// whole "User:/Assistant:" transcript into the prompt — and the small
+    /// on-device model "continued" that transcript by echoing the previous
+    /// answer verbatim (and even the trailing scaffolding) instead of
+    /// answering the new question. See the multi-turn PDF-chat regression
+    /// where every answer began by repeating the prior one.
+    ///
+    /// Instead we include only the recent *user questions* as lightweight
+    /// topical context (so follow-ups like "and the osmotic pressure?"
+    /// resolve), then end with a direct imperative carrying the current
+    /// question. Each answer is re-grounded from scratch via the
+    /// `searchContext` tool, so dropping prior answers costs nothing.
+    ///
+    /// Output-length and tool-usage guidance live in the session
+    /// instructions (and `GenerationOptions.maximumResponseTokens`), never
+    /// in the user prompt — putting them here is what leaked
+    /// "(Max output: …)" into the rendered answer.
+    private func buildToolCallingPrompt(for userMessage: String, language: ModelLanguage) -> String {
+        // Prior user turns only (exclude the just-appended current message
+        // and every assistant answer).
+        let priorQuestions = messages
+            .filter { $0.role == .user && $0.content != userMessage }
             .suffix(Self.historyMessageLimit)
-            .map { $0.role == .assistant ? "Assistant: \($0.content)" : "User: \($0.content)" }
-            .joined(separator: "\n")
+            .map(\.content)
+        return Self.assembleToolCallingPrompt(
+            currentQuestion: userMessage,
+            priorUserQuestions: Array(priorQuestions),
+            language: language
+        )
+    }
 
-        let documentsHint: String
-        switch (language, hasAttachedDocuments) {
-        case (.french, true):
-            documentsHint = "Des documents sont joints à cette conversation : utilise `searchContext` pour les interroger."
-        case (.french, false):
-            documentsHint = "Aucun document joint — réponds depuis tes connaissances."
-        case (.spanish, true):
-            documentsHint = "Hay documentos adjuntos en esta conversación: usa `searchContext` para consultarlos."
-        case (.spanish, false):
-            documentsHint = "No hay documentos adjuntos — responde con tus conocimientos."
-        case (.english, true):
-            documentsHint = "Documents are attached to this conversation: use `searchContext` to query them."
-        case (.english, false):
-            documentsHint = "No documents attached — answer from your own knowledge."
+    /// Pure assembly of the tool-calling prompt — separated from `messages`
+    /// state so it can be regression-tested directly. Guarantees the two
+    /// properties that broke multi-turn PDF chat: no assistant answers are
+    /// replayed (the model can't echo what it isn't shown) and no
+    /// length/tool scaffolding appears (that leaked into rendered answers).
+    nonisolated static func assembleToolCallingPrompt(
+        currentQuestion: String,
+        priorUserQuestions: [String],
+        language: ModelLanguage
+    ) -> String {
+        let answerImperative: String
+        let earlierLabel: String
+        switch language {
+        case .french:
+            answerImperative = "Réponds à la question suivante en t'appuyant sur les outils disponibles :"
+            earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+        case .spanish:
+            answerImperative = "Responde a la siguiente pregunta apoyándote en las herramientas disponibles:"
+            earlierLabel = "Preguntas anteriores del usuario (contexto):"
+        case .english:
+            answerImperative = "Answer the following question using the available tools:"
+            earlierLabel = "Earlier user questions (context):"
         }
 
+        guard !priorUserQuestions.isEmpty else {
+            return "\(answerImperative)\n\(currentQuestion)"
+        }
+        let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
         return """
-        \(history)
+        \(earlierLabel)
+        \(contextBlock)
 
-        \(documentsHint)
-
-        User: \(userMessage)
-
-        (Max output: ~\(maxOutputCharacters) characters.)
+        \(answerImperative)
+        \(currentQuestion)
         """
     }
 
