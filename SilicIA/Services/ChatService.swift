@@ -236,28 +236,22 @@ final class ChatService: ObservableObject {
                 // Both must be true for the tool to be attached. PDFtalkme
                 // forces the chip off so the tool stays off in that host.
                 let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
-                // Per-tool reply budget scales with the response cap so
-                // verbose profiles give tools more room and terse profiles
-                // keep them tight. See TokenBudgeting.toolOutputTokenBudget
-                // for the exact formula.
-                let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: effectiveMaxOutputTokens)
-                var tools: [any Tool] = [
-                    RAGSearchTool(chunks: chunks, tokenBudget: toolBudget),
-                    CalculatorTool(),
-                    DateTimeTool(language: language)
-                ]
-                if webSearchAvailable {
-                    tools.append(WebSearchTool(
+                let (tools, toolBudget) = ToolKit.assemble(
+                    config: ToolKit.Configuration(
+                        language: language,
+                        corpusChunks: chunks,
+                        webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
                         maxDuckDuckGoResults: effectiveMaxDDGResults,
                         maxWikipediaResults: effectiveMaxWikiResults,
                         useDuckDuckGo: useDuckDuckGo,
-                        useWikipedia: useWikipedia,
-                        language: language,
-                        tokenBudget: toolBudget
-                    ))
-                }
+                        useWikipedia: useWikipedia
+                        // Chat path doesn't subscribe to webSearch results
+                        // — there are no search cards in ChatView.
+                    ),
+                    responseTokens: effectiveMaxOutputTokens
+                )
                 let toolNames = tools.map(\.name).joined(separator: ", ")
                 debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 session = LanguageModelSession(
@@ -1098,60 +1092,18 @@ final class ChatService: ObservableObject {
         )
     }
 
-    /// Extra instructions appended when tool calling is enabled. Phrased
-    /// per language so it matches the rest of the system prompt's tone.
-    /// The web-search entry is included only when `webSearchAvailable` is
-    /// true so the model doesn't try to call a tool that isn't attached.
+    /// Per-language paragraph appended onto the chat system instructions
+    /// when tool calling is enabled. Delegates to `ToolKit` so the chat
+    /// and search paths stay in lock-step on tool descriptions.
     private func toolCallingInstructionsAppendix(
         for language: ModelLanguage,
         webSearchAvailable: Bool
     ) -> String {
-        switch language {
-        case .french:
-            var sections = [
-                "Outils disponibles :",
-                "- `searchContext(query)` : recherche dans les documents joints (PDF, images, pages web) et renvoie les passages pertinents avec leur source. Utilise-le AVANT de répondre dès que la question dépend des documents — n'invente jamais un chiffre, une date ou un nom propre qui pourrait y figurer.",
-                "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête.",
-                "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
-                )
-            }
-            sections.append("Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale.")
-            return sections.joined(separator: "\n")
-
-        case .spanish:
-            var sections = [
-                "Herramientas disponibles:",
-                "- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.",
-                "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.",
-                "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
-                )
-            }
-            sections.append("Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final.")
-            return sections.joined(separator: "\n")
-
-        case .english:
-            var sections = [
-                "Available tools:",
-                "- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.",
-                "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.",
-                "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
-            ]
-            if webSearchAvailable {
-                sections.append(
-                    "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
-                )
-            }
-            sections.append("You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer.")
-            return sections.joined(separator: "\n")
-        }
+        ToolKit.instructionsAppendix(
+            for: language,
+            tone: .chat,
+            webSearchAvailable: webSearchAvailable
+        )
     }
 
     /// Builds the per-turn user prompt for the tool-calling path. Much
