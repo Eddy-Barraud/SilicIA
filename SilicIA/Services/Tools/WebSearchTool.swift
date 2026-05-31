@@ -69,6 +69,12 @@ struct WebSearchTool: Tool {
     /// per-page character cap.
     var tokenBudget: Int = 1500
 
+    /// Shared per-generation loop breaker. webSearch is the most important
+    /// tool to govern: its replies are the largest, so a runaway loop here
+    /// is what overflows the context window. Optional so existing callers /
+    /// tests that construct the tool directly are unaffected.
+    var governor: ToolCallGovernor?
+
     /// Default result count when the model doesn't supply `maxResults`.
     /// Five gives SearchView a useful range of cards to display and lets
     /// the model triangulate across sources when summarising.
@@ -92,6 +98,13 @@ struct WebSearchTool: Tool {
         #if DEBUG
         print("[Tool:webSearch] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default")")
         #endif
+
+        // Loop breaker: refuse duplicate / over-budget calls before doing
+        // any network work, so a runaway model can't overflow the window.
+        if let governor,
+           let refusal = await governor.evaluate(tool: name, arguments: arguments.query).refusalMessage {
+            return refusal
+        }
 
         let trimmed = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {

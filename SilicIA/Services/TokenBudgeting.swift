@@ -112,6 +112,25 @@ enum TokenBudgeting {
     /// no room for surrounding context).
     static let toolOutputTokenBudgetFloor = 500
 
+    /// Ceiling on a single `webSearch` reply, applied ON TOP of the shared
+    /// `toolOutputTokenBudget`. webSearch is by far the largest tool reply —
+    /// it packs several scraped pages — so it dominates the tool-calling
+    /// transcript and was the main driver of context-window overflow.
+    ///
+    /// Now that `ToolCallGovernor` caps the NUMBER of distinct webSearch
+    /// calls per turn (`maxExpensiveToolCalls`), we can afford a richer
+    /// per-reply budget again: the window-safety guarantee is
+    ///   `webSearchReplyTokenCap × maxExpensiveToolCalls + overhead ≤ 4096`.
+    /// At 1000t × 2 calls = 2000t, plus ~700t real instructions/tool schemas
+    /// + ~120t prompt + 500t response ≈ 3320t — comfortably inside 4096.
+    /// This pairing mirrors `assumedConcurrentToolReplies = 2`.
+    ///
+    /// IMPORTANT: if you raise this, lower `ToolCallGovernor`'s
+    /// `maxExpensiveToolCalls` (and vice-versa) so the product stays within
+    /// the window. The other tools (searchContext, calculate,
+    /// currentDateTime) keep the full shared budget.
+    static let webSearchReplyTokenCap = 1000
+
     /// During a tool-calling turn the `LanguageModelSession` transcript
     /// accumulates: instructions + prompt + every tool call + every tool
     /// reply + the final response — and the whole thing must fit in the
