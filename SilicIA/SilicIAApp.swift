@@ -16,6 +16,16 @@ import AppKit
 struct SilicIAApp: App {
     init() {
         _ = LocalizationService.shared
+        // Capture founding-user status on the very first launch, before any
+        // UI appears, so everyone who arrives during the free era is
+        // grandfathered. Idempotent on later launches. See FoundingUserStore.
+        FoundingUserStore.registerLaunchIfNeeded()
+        // Build the (currently dormant) monetization objects. Entitlements
+        // observes the purchase manager, so they're constructed together and
+        // injected into the environment for any future paywall / gating UI.
+        let purchaseManager = PurchaseManager()
+        _purchaseManager = StateObject(wrappedValue: purchaseManager)
+        _entitlements = StateObject(wrappedValue: Entitlements(purchaseManager: purchaseManager))
         // Decide *before* the window appears whether to render the
         // blocking screen, so the user never sees a flash of the main
         // UI on devices where Apple Intelligence isn't available.
@@ -32,6 +42,11 @@ struct SilicIAApp: App {
     @State private var sharedPDFs: [URL] = []
     @State private var sharedImages: [URL] = []
     @State private var pendingSearchQuery: String?
+    /// Dormant monetization plumbing. Wired into the environment now so a
+    /// future paywall / gating UI can read them, but nothing consumes them
+    /// while `Entitlements.paywallActive` is false.
+    @StateObject private var purchaseManager: PurchaseManager
+    @StateObject private var entitlements: Entitlements
     /// When non-nil, the entire window is replaced by the blocking
     /// `ModelUnavailableView` — Apple Intelligence isn't available on
     /// this device and the app has no NLP fallback.
@@ -56,6 +71,15 @@ struct SilicIAApp: App {
                     sharedImages: $sharedImages,
                     pendingSearchQuery: $pendingSearchQuery
                 )
+                    .environmentObject(purchaseManager)
+                    .environmentObject(entitlements)
+                    // Dormant: only fetch product metadata once the paywall
+                    // is actually switched on, so v1 makes no StoreKit calls.
+                    .task {
+                        if Entitlements.paywallActive {
+                            await purchaseManager.loadProduct()
+                        }
+                    }
                     .onOpenURL { url in
                         handleIncomingURL(url)
                     }
