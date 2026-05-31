@@ -76,11 +76,19 @@ enum ToolKit {
         // the exact clamp.
         let tokenBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseTokens)
 
-        var tools: [any Tool] = [
-            RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget),
-            CalculatorTool(),
-            DateTimeTool(language: config.language)
-        ]
+        // One loop breaker shared across every tool in this turn, so it sees
+        // the whole call stream and can refuse duplicate / runaway calls
+        // before they overflow the 4096-token window.
+        let governor = ToolCallGovernor()
+
+        var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
+        ragTool.governor = governor
+        var calcTool = CalculatorTool()
+        calcTool.governor = governor
+        var dateTool = DateTimeTool(language: config.language)
+        dateTool.governor = governor
+
+        var tools: [any Tool] = [ragTool, calcTool, dateTool]
         if config.webSearchAvailable {
             // webSearch gets a TIGHTER budget than the other tools: its
             // reply (several scraped pages) is the dominant transcript
@@ -99,6 +107,7 @@ enum ToolKit {
                 tokenBudget: webSearchBudget
             )
             webTool.onResults = config.onWebResults
+            webTool.governor = governor
             tools.append(webTool)
         }
         return (tools, tokenBudget)

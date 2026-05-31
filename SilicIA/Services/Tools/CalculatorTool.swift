@@ -54,10 +54,22 @@ struct CalculatorTool: Tool {
         return set
     }()
 
+    /// Shared per-generation loop breaker (cross-tool + total-call ceiling).
+    /// Complements the process-wide static guard below: the governor stops
+    /// the model burning its whole turn on tools, the static guard is a
+    /// per-expression backstop. Optional so direct callers / tests are
+    /// unaffected.
+    var governor: ToolCallGovernor?
+
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
         print("[Tool:calculate] called with expression=\"\(arguments.expression)\"")
         #endif
+
+        if let governor,
+           let refusal = await governor.evaluate(tool: name, arguments: arguments.expression).refusalMessage {
+            return refusal
+        }
 
         // Loop guard: small models sometimes get stuck calling a tool over
         // and over with the same broken input. Track recent calls; once we

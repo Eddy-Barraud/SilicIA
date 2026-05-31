@@ -67,6 +67,10 @@ struct RAGSearchTool: Tool {
     /// memberwise init without a budget — useful for tests.
     var tokenBudget: Int = 1500
 
+    /// Shared per-generation loop breaker. Refuses duplicate / over-budget
+    /// calls. Optional so direct callers / tests are unaffected.
+    var governor: ToolCallGovernor?
+
     /// Default cap when the model doesn't supply `maxResults`. Three is
     /// a good baseline: enough to surface the right row + its header +
     /// some neighbouring context, but not so many that the tool reply
@@ -77,6 +81,12 @@ struct RAGSearchTool: Tool {
         #if DEBUG
         print("[Tool:searchContext] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default") corpusSize=\(chunks.count)")
         #endif
+
+        if let governor,
+           let refusal = await governor.evaluate(tool: name, arguments: arguments.query).refusalMessage {
+            return refusal
+        }
+
         let trimmed = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             return "Error: empty query"

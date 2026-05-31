@@ -39,10 +39,19 @@ struct DateTimeTool: Tool {
     /// `internal` and only invoked from CalculatorTool-style test helpers.
     var dateProvider: @Sendable () -> Date = { Date() }
 
+    /// Shared per-generation loop breaker. Optional so direct callers /
+    /// tests are unaffected.
+    var governor: ToolCallGovernor?
+
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
         print("[Tool:currentDateTime] called with format=\(arguments.format ?? "default")")
         #endif
+
+        if let governor,
+           let refusal = await governor.evaluate(tool: name, arguments: arguments.format ?? "default").refusalMessage {
+            return refusal
+        }
 
         let now = dateProvider()
         let format = (arguments.format ?? "datetime").lowercased()
