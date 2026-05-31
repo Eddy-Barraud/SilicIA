@@ -265,9 +265,40 @@ final class ChatService: ObservableObject {
             let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
             let prompt: String
             if useToolCalling {
-                // No pre-baked context — the model is expected to call
-                // searchContext as needed.
-                prompt = buildToolCallingPrompt(for: message, language: language)
+                // Hybrid grounding: pre-bake the RAG-selected passages into
+                // the prompt (like the classical path) so broad questions on
+                // attached PDFs/images get reliable context up-front, while
+                // `searchContext` stays available for follow-up drill-downs.
+                // The grounding text is re-capped to a tool-aware budget that
+                // reserves room for the tool schemas + appendix the framework
+                // injects, so prompt + tools + response still fit the window.
+                let toolGroundingContext: String
+                if finalSelectedContext.isEmpty {
+                    toolGroundingContext = ""
+                } else {
+                    let toolGroundingCharCap = TokenBudgeting.maxToolGroundingCharacters(
+                        maxOutputTokens: effectiveMaxOutputTokens
+                    )
+                    let toolGroundingTokenCap = min(
+                        effectiveMaxContextTokens,
+                        TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
+                    )
+                    let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
+                    var grounded = TokenBudgeting.truncateToApproxWordCount(
+                        finalSelectedContext,
+                        maxWords: toolGroundingWords
+                    )
+                    if grounded.count > toolGroundingCharCap {
+                        grounded = String(grounded.prefix(toolGroundingCharCap))
+                    }
+                    toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                debugContext("sendMessage tool-calling groundingChars=\(toolGroundingContext.count)")
+                prompt = buildToolCallingPrompt(
+                    for: message,
+                    language: language,
+                    groundingContext: toolGroundingContext
+                )
             } else {
                 prompt = buildPrompt(
                     for: message,
@@ -1114,14 +1145,30 @@ final class ChatService: ObservableObject {
     /// Instead we include only the recent *user questions* as lightweight
     /// topical context (so follow-ups like "and the osmotic pressure?"
     /// resolve), then end with a direct imperative carrying the current
-    /// question. Each answer is re-grounded from scratch via the
-    /// `searchContext` tool, so dropping prior answers costs nothing.
+    /// question.
+    ///
+    /// When `groundingContext` is non-empty we ALSO pre-bake the
+    /// RAG-selected passages from the attached documents into the prompt —
+    /// the same context the classical (prompt-stuffing) path injects. This
+    /// is the reliability fix for PDF/image chat: a small on-device model
+    /// frequently fails to call `searchContext` for broad questions ("how
+    /// is the property obtained?"), or composes a weak lexical query that
+    /// retrieves poorly. Grounding the prompt up-front guarantees the
+    /// relevant passages are in front of the model for the common case,
+    /// while the `searchContext` tool stays available so it can still pull
+    /// more on demand for follow-ups. Net effect: tool-calling becomes a
+    /// superset of the classical path's reliability, not a riskier
+    /// alternative to it.
     ///
     /// Output-length and tool-usage guidance live in the session
     /// instructions (and `GenerationOptions.maximumResponseTokens`), never
     /// in the user prompt — putting them here is what leaked
     /// "(Max output: …)" into the rendered answer.
-    private func buildToolCallingPrompt(for userMessage: String, language: ModelLanguage) -> String {
+    private func buildToolCallingPrompt(
+        for userMessage: String,
+        language: ModelLanguage,
+        groundingContext: String = ""
+    ) -> String {
         // Prior user turns only (exclude the just-appended current message
         // and every assistant answer).
         let priorQuestions = messages
@@ -1131,45 +1178,72 @@ final class ChatService: ObservableObject {
         return Self.assembleToolCallingPrompt(
             currentQuestion: userMessage,
             priorUserQuestions: Array(priorQuestions),
-            language: language
+            language: language,
+            groundingContext: groundingContext
         )
     }
 
     /// Pure assembly of the tool-calling prompt — separated from `messages`
-    /// state so it can be regression-tested directly. Guarantees the two
+    /// state so it can be regression-tested directly. Guarantees the
     /// properties that broke multi-turn PDF chat: no assistant answers are
     /// replayed (the model can't echo what it isn't shown) and no
     /// length/tool scaffolding appears (that leaked into rendered answers).
+    ///
+    /// `groundingContext`, when supplied, is the pre-selected document
+    /// context placed BEFORE the current question so the question remains
+    /// the final line of the prompt (the model ends on the thing to answer,
+    /// not on continuable context). It carries no length/format scaffolding
+    /// — only the passage text — so the leak-prevention contract holds.
     nonisolated static func assembleToolCallingPrompt(
         currentQuestion: String,
         priorUserQuestions: [String],
-        language: ModelLanguage
+        language: ModelLanguage,
+        groundingContext: String = ""
     ) -> String {
+        let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasGrounding = !trimmedGrounding.isEmpty
+
         let answerImperative: String
         let earlierLabel: String
+        let groundingHeader: String
         switch language {
         case .french:
-            answerImperative = "Réponds à la question suivante en t'appuyant sur les outils disponibles :"
+            // Grounding-aware imperative steers the model to answer from the
+            // provided passages first and only reach for the tool to fill
+            // gaps — cutting redundant tool round-trips when the context
+            // already covers the question.
+            answerImperative = hasGrounding
+                ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
+                : "Réponds à la question suivante en t'appuyant sur les outils disponibles :"
             earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+            groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
-            answerImperative = "Responde a la siguiente pregunta apoyándote en las herramientas disponibles:"
+            answerImperative = hasGrounding
+                ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
+                : "Responde a la siguiente pregunta apoyándote en las herramientas disponibles:"
             earlierLabel = "Preguntas anteriores del usuario (contexto):"
+            groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
-            answerImperative = "Answer the following question using the available tools:"
+            answerImperative = hasGrounding
+                ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
+                : "Answer the following question using the available tools:"
             earlierLabel = "Earlier user questions (context):"
+            groundingHeader = "Context from the attached documents:"
         }
 
-        guard !priorUserQuestions.isEmpty else {
-            return "\(answerImperative)\n\(currentQuestion)"
+        // Assemble top-to-bottom: grounding context, then prior questions,
+        // then the imperative + current question. The current question is
+        // always the final line regardless of which optional blocks appear.
+        var sections: [String] = []
+        if hasGrounding {
+            sections.append("\(groundingHeader)\n\(trimmedGrounding)")
         }
-        let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
-        return """
-        \(earlierLabel)
-        \(contextBlock)
-
-        \(answerImperative)
-        \(currentQuestion)
-        """
+        if !priorUserQuestions.isEmpty {
+            let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
+            sections.append("\(earlierLabel)\n\(contextBlock)")
+        }
+        sections.append("\(answerImperative)\n\(currentQuestion)")
+        return sections.joined(separator: "\n\n")
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {

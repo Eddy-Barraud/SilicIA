@@ -19,6 +19,32 @@ enum TokenBudgeting {
     static let promptOverheadTokens = 80
     static let minContextTokens = 300
 
+    /// Extra context-window tokens consumed in tool-calling mode beyond the
+    /// baseline `instructionTokens`. Two contributors the baseline doesn't
+    /// account for:
+    ///   - the per-language tool-usage appendix appended to the system
+    ///     instructions (`ToolKit.instructionsAppendix`, ~150 tokens), and
+    ///   - the Foundation Models tool *schemas* — each `Tool`'s name,
+    ///     description, and `@Generable` argument struct with its `@Guide`
+    ///     prose — which the framework injects into the model's transcript
+    ///     (~400 tokens for the four-tool kit).
+    /// Used to shrink the pre-baked grounding context (see
+    /// `maxToolGroundingCharacters`) so prompt + tool schemas + output still
+    /// fit the 4096-token window when we ground a tool-calling turn.
+    static let toolCallingOverheadTokens = 600
+
+    /// Character budget for the pre-baked grounding context injected into a
+    /// tool-calling prompt. Mirrors `maxContextCharacters` but reserves the
+    /// additional `toolCallingOverheadTokens` so the grounding text plus the
+    /// tool schemas plus the model's response coexist within the window.
+    static func maxToolGroundingCharacters(maxOutputTokens: Int) -> Int {
+        maxContextCharacters(
+            maxOutputTokens: maxOutputTokens,
+            contextUtilizationFactor: 1.0,
+            instructionTokens: instructionTokens + toolCallingOverheadTokens
+        )
+    }
+
     /// Clamps requested output tokens so prompt + context + output fit the system context window.
     static func clampedOutputTokens(
         requestedMaxTokens: Int,

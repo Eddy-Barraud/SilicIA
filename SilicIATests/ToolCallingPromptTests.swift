@@ -79,4 +79,81 @@ final class ToolCallingPromptTests: XCTestCase {
         let lastLine = prompt.split(separator: "\n").last.map(String.init) ?? ""
         XCTAssertEqual(lastLine, "And the osmotic pressure?")
     }
+
+    // MARK: - Hybrid grounding (PDF/image reliability fix)
+
+    /// When grounding context is supplied it appears in the prompt, the
+    /// model is told to base its answer on it, AND the current question is
+    /// still the final line (so the prompt ends on the thing to answer).
+    func testGroundingContextAppearsAndQuestionStaysLast() {
+        let grounding = "The critical micelle concentration was obtained by the osmotic-pressure breakpoint method at 25 °C."
+        let prompt = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "How is the property obtained?",
+            priorUserQuestions: [],
+            language: .english,
+            groundingContext: grounding
+        )
+        XCTAssertTrue(prompt.contains(grounding), "Grounding passages must be injected")
+        XCTAssertTrue(prompt.contains("Context from the attached documents:"))
+        XCTAssertTrue(prompt.lowercased().contains("base your answer on the context above"))
+        // Question is still the last line even with grounding prepended.
+        let lastLine = prompt.split(separator: "\n").last.map(String.init) ?? ""
+        XCTAssertEqual(lastLine, "How is the property obtained?")
+        // Leak-prevention contract still holds with grounding present.
+        XCTAssertFalse(prompt.contains("Assistant:"))
+    }
+
+    /// Grounding + prior questions coexist; ordering is grounding → prior
+    /// questions → imperative + current question.
+    func testGroundingAndPriorQuestionsOrdering() {
+        let grounding = "Section 3 describes the synthesis route."
+        let prompt = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "What is the yield?",
+            priorUserQuestions: ["How is the property obtained?"],
+            language: .english,
+            groundingContext: grounding
+        )
+        let groundingPos = prompt.range(of: grounding)!.lowerBound
+        let priorPos = prompt.range(of: "How is the property obtained?")!.lowerBound
+        let currentPos = prompt.range(of: "What is the yield?")!.lowerBound
+        XCTAssertTrue(groundingPos < priorPos, "Grounding should precede prior questions")
+        XCTAssertTrue(priorPos < currentPos, "Prior questions should precede the current question")
+    }
+
+    /// Empty / whitespace grounding is a no-op: the prompt is identical to
+    /// the un-grounded form, so the non-document chat path is unaffected.
+    func testEmptyGroundingIsNoOp() {
+        let plain = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: ["A?"],
+            language: .english
+        )
+        let blank = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: ["A?"],
+            language: .english,
+            groundingContext: "   \n  "
+        )
+        XCTAssertEqual(plain, blank)
+    }
+
+    /// Grounding imperative is localized for every supported language.
+    func testGroundingImperativeLocalized() {
+        let grounding = "Some attached document text."
+        let expectations: [(ModelLanguage, String)] = [
+            (.english, "Context from the attached documents:"),
+            (.french, "Contexte tiré des documents joints :"),
+            (.spanish, "Contexto de los documentos adjuntos:")
+        ]
+        for (language, header) in expectations {
+            let prompt = ChatService.assembleToolCallingPrompt(
+                currentQuestion: "Q?",
+                priorUserQuestions: [],
+                language: language,
+                groundingContext: grounding
+            )
+            XCTAssertTrue(prompt.contains(header), "Missing grounding header for \(language)")
+            XCTAssertTrue(prompt.contains(grounding))
+        }
+    }
 }
