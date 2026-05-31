@@ -21,7 +21,7 @@ jobs:
 
       - name: Verify DuckDuckGo and Wikipedia retrieval
         env:
-          QUERY: Population in Paris
+          QUERY: Latest worldwide news
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -33,8 +33,8 @@ jobs:
           import urllib.parse
           import urllib.request
 
-          QUERY = "Population in Paris"
-          USER_AGENT = "SilicIA-CI-WebSearchCheck/1.0 (+https://github.com/Eddy-Barraud/SilicIA)"
+          QUERY = "Latest worldwide news"
+          USER_AGENT = "SilicIA-CI-WebSearchCheck/1.2 (+https://github.com/Eddy-Barraud/SilicIA)"
 
           def fail(message: str) -> None:
             print(f"::error::{message}")
