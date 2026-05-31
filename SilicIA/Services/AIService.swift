@@ -973,8 +973,12 @@ class AIService: ObservableObject {
                         // so SearchView can surface the sources as cards with
                         // RAG match scores once the model finishes. Deduped on
                         // the published side via `appendUniqueResults`.
-                        onWebResults: { [weak self] results in
-                            Task { @MainActor in
+                        onWebResults: { results in
+                            // The Task gets its OWN `[weak self]` capture so it
+                            // doesn't reach into an enclosing mutable `self`
+                            // binding (which Swift 6 flags as capturing a var in
+                            // concurrently-executing code).
+                            Task { @MainActor [weak self] in
                                 self?.appendUniqueResults(results)
                             }
                         }

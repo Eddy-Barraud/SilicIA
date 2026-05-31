@@ -8,7 +8,13 @@
 import Foundation
 
 /// Shared token-budget helpers used across chat, search, and RAG selection.
-enum TokenBudgeting {
+///
+/// `nonisolated` because this is pure, stateless math with no shared mutable
+/// state: the project sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, which
+/// would otherwise make these constants/functions main-actor-isolated and
+/// unreachable from the nonisolated FoundationModels `Tool.call` runtime
+/// (e.g. `WebSearchTool` reading `avgCharsPerToken`).
+nonisolated enum TokenBudgeting {
     static let contextWindowLimit = 4096
     static let avgCharsPerToken = 3
     static let avgCharsPerSentence = 140

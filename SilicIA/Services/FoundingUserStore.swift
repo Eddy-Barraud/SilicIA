@@ -20,8 +20,15 @@ import Foundation
 
 /// Persisted record of when this install first launched and whether it
 /// qualifies as a grandfathered founding user. Pure value-free namespace —
-/// all state lives in `UserDefaults` so it survives relaunches.
-enum FoundingUserStore {
+/// all state lives in `UserDefaults` (itself thread-safe) so it survives
+/// relaunches.
+///
+/// `nonisolated` because it holds no actor state: the project's
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` would otherwise make these
+/// statics main-actor-isolated, so `Entitlements.init`'s default argument
+/// (`isFoundingUser: Bool = FoundingUserStore.isFoundingUser()`, evaluated
+/// in a nonisolated context) couldn't call them.
+nonisolated enum FoundingUserStore {
     private static let firstLaunchDateKey = "foundingUser.firstLaunchDate"
     private static let isFoundingUserKey = "foundingUser.isFoundingUser"
 

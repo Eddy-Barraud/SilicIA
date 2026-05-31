@@ -33,7 +33,14 @@ enum ToolCallingTone {
     case search
 }
 
-enum ToolKit {
+/// `nonisolated` because tool assembly is pure infrastructure that produces
+/// Sendable `Tool` values consumed by the nonisolated FoundationModels
+/// runtime. Under the project's `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
+/// leaving it main-actor-isolated made `assemble` flag the `@Sendable`
+/// `onWebResults` closure as crossing the actor boundary when stored into the
+/// (nonisolated) `WebSearchTool`. Assembling off the actor removes that
+/// false-positive crossing; callers on the main actor invoke it freely.
+nonisolated enum ToolKit {
 
     /// Configuration the caller must supply to assemble a tool kit. The
     /// `webSearch*` fields are only read when `webSearchAvailable` is
