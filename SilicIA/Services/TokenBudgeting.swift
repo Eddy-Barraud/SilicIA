@@ -112,18 +112,24 @@ enum TokenBudgeting {
     /// no room for surrounding context).
     static let toolOutputTokenBudgetFloor = 500
 
-    /// Hard ceiling on a single `webSearch` reply, applied ON TOP of the
-    /// shared `toolOutputTokenBudget`. webSearch is by far the largest tool
-    /// reply — it packs several scraped pages — so it dominates the
-    /// tool-calling transcript and is the main driver of context-window
-    /// overflow (the intermittent `GenerationError -1`). Capping it tighter
-    /// than the shared budget keeps the transcript well clear of the 4096
-    /// window even when the model fires webSearch more than once in a turn,
-    /// at the cost of slightly shorter per-source excerpts. The other tools
-    /// (searchContext, calculate, currentDateTime) keep the full shared
-    /// budget. 600t ≈ 1800 chars total, ~300 chars across ~5 sources —
-    /// enough to triangulate, not enough to blow the window.
-    static let webSearchReplyTokenCap = 600
+    /// Ceiling on a single `webSearch` reply, applied ON TOP of the shared
+    /// `toolOutputTokenBudget`. webSearch is by far the largest tool reply —
+    /// it packs several scraped pages — so it dominates the tool-calling
+    /// transcript and was the main driver of context-window overflow.
+    ///
+    /// Now that `ToolCallGovernor` caps the NUMBER of distinct webSearch
+    /// calls per turn (`maxExpensiveToolCalls`), we can afford a richer
+    /// per-reply budget again: the window-safety guarantee is
+    ///   `webSearchReplyTokenCap × maxExpensiveToolCalls + overhead ≤ 4096`.
+    /// At 1000t × 2 calls = 2000t, plus ~700t real instructions/tool schemas
+    /// + ~120t prompt + 500t response ≈ 3320t — comfortably inside 4096.
+    /// This pairing mirrors `assumedConcurrentToolReplies = 2`.
+    ///
+    /// IMPORTANT: if you raise this, lower `ToolCallGovernor`'s
+    /// `maxExpensiveToolCalls` (and vice-versa) so the product stays within
+    /// the window. The other tools (searchContext, calculate,
+    /// currentDateTime) keep the full shared budget.
+    static let webSearchReplyTokenCap = 1000
 
     /// During a tool-calling turn the `LanguageModelSession` transcript
     /// accumulates: instructions + prompt + every tool call + every tool

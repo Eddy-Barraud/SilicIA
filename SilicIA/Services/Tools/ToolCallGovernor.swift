@@ -89,6 +89,11 @@ actor ToolCallGovernor {
     /// Tight ceiling on the "expensive" tool (`webSearch`) specifically. Its
     /// replies are the largest, so a few distinct calls already approach the
     /// window; distinct calls beyond this are refused.
+    ///
+    /// Kept in lock-step with `TokenBudgeting.webSearchReplyTokenCap`: the
+    /// window-safety invariant is `cap × replyTokens + overhead ≤ 4096`.
+    /// At 2 × 1000t the transcript stays comfortably inside the window; if
+    /// you raise this, lower the per-reply cap (and vice-versa).
     let maxExpensiveToolCalls: Int
     /// Name of the tool treated as expensive for `maxExpensiveToolCalls`.
     private let expensiveToolName: String
@@ -99,7 +104,7 @@ actor ToolCallGovernor {
 
     init(
         maxTotalCalls: Int = 8,
-        maxExpensiveToolCalls: Int = 3,
+        maxExpensiveToolCalls: Int = 2,
         expensiveToolName: String = "webSearch"
     ) {
         self.maxTotalCalls = maxTotalCalls

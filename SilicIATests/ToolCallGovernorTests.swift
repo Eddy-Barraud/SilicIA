@@ -29,6 +29,18 @@ final class ToolCallGovernorTests: XCTestCase {
         XCTAssertNotNil(dup.refusalMessage)
     }
 
+    /// The production default caps webSearch at 2 distinct calls, kept in
+    /// lock-step with the 1000t per-reply ceiling so 2×1000 fits the window.
+    func testDefaultExpensiveCapIsTwo() async {
+        let governor = ToolCallGovernor()   // production defaults
+        let first = await governor.evaluate(tool: "webSearch", arguments: "q1")
+        let second = await governor.evaluate(tool: "webSearch", arguments: "q2")
+        let third = await governor.evaluate(tool: "webSearch", arguments: "q3")
+        XCTAssertEqual(first, .allow)
+        XCTAssertEqual(second, .allow)
+        XCTAssertEqual(third, .toolBudgetReached(tool: "webSearch", cap: 2))
+    }
+
     func testWebSearchIsCappedAfterThreeDistinctQueries() async {
         let governor = ToolCallGovernor(maxTotalCalls: 20, maxExpensiveToolCalls: 3)
         for i in 1...3 {
