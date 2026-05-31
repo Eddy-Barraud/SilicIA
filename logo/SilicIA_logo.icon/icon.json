@@ -4,6 +4,7 @@
     {
       "layers" : [
         {
+          "glass" : true,
           "image-name" : "icon_512x512@2x 2.png",
           "name" : "icon_512x512@2x 2",
           "position" : {
