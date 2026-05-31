@@ -82,6 +82,12 @@ enum ToolKit {
             DateTimeTool(language: config.language)
         ]
         if config.webSearchAvailable {
+            // webSearch gets a TIGHTER budget than the other tools: its
+            // reply (several scraped pages) is the dominant transcript
+            // consumer and the main cause of context-window overflow
+            // (`GenerationError -1`). Cap it below the shared budget so a
+            // turn with one or more webSearch calls still fits the window.
+            let webSearchBudget = min(tokenBudget, TokenBudgeting.webSearchReplyTokenCap)
             var webTool = WebSearchTool(
                 webSearchService: config.webSearchService,
                 webScraper: config.webScraper,
@@ -90,7 +96,7 @@ enum ToolKit {
                 useDuckDuckGo: config.useDuckDuckGo,
                 useWikipedia: config.useWikipedia,
                 language: config.language,
-                tokenBudget: tokenBudget
+                tokenBudget: webSearchBudget
             )
             webTool.onResults = config.onWebResults
             tools.append(webTool)

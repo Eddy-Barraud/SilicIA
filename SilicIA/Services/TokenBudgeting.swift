@@ -112,6 +112,19 @@ enum TokenBudgeting {
     /// no room for surrounding context).
     static let toolOutputTokenBudgetFloor = 500
 
+    /// Hard ceiling on a single `webSearch` reply, applied ON TOP of the
+    /// shared `toolOutputTokenBudget`. webSearch is by far the largest tool
+    /// reply — it packs several scraped pages — so it dominates the
+    /// tool-calling transcript and is the main driver of context-window
+    /// overflow (the intermittent `GenerationError -1`). Capping it tighter
+    /// than the shared budget keeps the transcript well clear of the 4096
+    /// window even when the model fires webSearch more than once in a turn,
+    /// at the cost of slightly shorter per-source excerpts. The other tools
+    /// (searchContext, calculate, currentDateTime) keep the full shared
+    /// budget. 600t ≈ 1800 chars total, ~300 chars across ~5 sources —
+    /// enough to triangulate, not enough to blow the window.
+    static let webSearchReplyTokenCap = 600
+
     /// During a tool-calling turn the `LanguageModelSession` transcript
     /// accumulates: instructions + prompt + every tool call + every tool
     /// reply + the final response — and the whole thing must fit in the

@@ -794,6 +794,19 @@ class AIService: ObservableObject {
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
+    /// Generates a search summary with resilience around the on-device
+    /// model's transient failures — notably the intermittent
+    /// `GenerationError -1`, which is usually tool-calling transcript
+    /// overflow tipping past the 4096-token window on an unlucky run:
+    ///   1. Run as requested (tool-calling or classical).
+    ///   2. On a transient error, retry ONCE with a fresh session — the
+    ///      exact same input frequently succeeds on a second attempt.
+    ///   3. If tool calling was on and still failing, fall back to the
+    ///      classical (no-tools) path, which builds no tool transcript and
+    ///      so sidesteps the window pressure behind most -1 failures.
+    /// Deterministic rejections (guardrail / unsupported locale) skip the
+    /// retry — a retry only reproduces them. User cancellation
+    /// short-circuits everything. Returns "" only when every avenue fails.
     private func generateSummaryWithFoundationModels(
         query: String,
         context: String,
@@ -810,7 +823,121 @@ class AIService: ObservableObject {
         useWikipedia: Bool = true,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async -> String {
+        // Attempt 1 — as requested.
         do {
+            return try await runSummaryGeneration(
+                query: query, context: context, results: results,
+                temperature: temperature, maxTokens: maxTokens, language: language,
+                profile: profile, useToolCalling: useToolCalling, corpusChunks: corpusChunks,
+                maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
+                useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
+                onPartialUpdate: onPartialUpdate
+            )
+        } catch is CancellationError {
+            return ""   // user pressed Stop — no retry, no fallback
+        } catch {
+            let diagnosis = Self.classifyGenerationError(error)
+            noteGenerationFailure(stage: "attempt 1 (toolCalling=\(useToolCalling))", label: diagnosis.label)
+
+            // Attempt 2 — retry once for transient failures, same mode. The
+            // session is rebuilt fresh inside runSummaryGeneration, so a
+            // nondeterministic tool-loop overflow often clears on retry.
+            if diagnosis.isTransient {
+                do {
+                    return try await runSummaryGeneration(
+                        query: query, context: context, results: results,
+                        temperature: temperature, maxTokens: maxTokens, language: language,
+                        profile: profile, useToolCalling: useToolCalling, corpusChunks: corpusChunks,
+                        maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
+                        useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
+                        onPartialUpdate: onPartialUpdate
+                    )
+                } catch is CancellationError {
+                    return ""
+                } catch {
+                    noteGenerationFailure(stage: "attempt 2 retry", label: Self.classifyGenerationError(error).label)
+                }
+            }
+
+            // Attempt 3 — drop the tools. The classical prompt-stuffing path
+            // builds no tool transcript, so it avoids the context-window
+            // pressure behind most -1 failures. Only meaningful if we were
+            // using tools in the first place.
+            if useToolCalling {
+                do {
+                    print("ℹ️ Falling back to non-tool generation after tool-calling failure")
+                    return try await runSummaryGeneration(
+                        query: query, context: context, results: results,
+                        temperature: temperature, maxTokens: maxTokens, language: language,
+                        profile: profile, useToolCalling: false, corpusChunks: corpusChunks,
+                        maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
+                        useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
+                        onPartialUpdate: onPartialUpdate
+                    )
+                } catch is CancellationError {
+                    return ""
+                } catch {
+                    noteGenerationFailure(stage: "non-tool fallback", label: Self.classifyGenerationError(error).label)
+                }
+            }
+
+            return ""
+        }
+    }
+
+    /// Logs a generation failure (console always; `debugNotes` in DEBUG).
+    private func noteGenerationFailure(stage: String, label: String) {
+        print("⚠️ Foundation Models summary failed [\(stage)]: \(label)")
+        #if DEBUG
+        debugNotes.append("generation failure [\(stage)]: \(label)")
+        #endif
+    }
+
+    /// Classifies a generation error into a log label + whether retrying is
+    /// worthwhile. We deliberately don't switch on specific
+    /// `LanguageModelSession.GenerationError` enum cases — their set shifts
+    /// across OS versions — but surface the case name via
+    /// `String(describing:)` so logs show the real cause (e.g.
+    /// `GenerationError.exceededContextWindowSize`) instead of a bare "-1",
+    /// and treat deterministic rejections as non-retryable.
+    nonisolated private static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
+        if let genError = error as? LanguageModelSession.GenerationError {
+            let full = String(describing: genError)
+            let caseName = String(full.prefix(while: { $0 != "(" }))
+            let lower = caseName.lowercased()
+            let permanent = lower.contains("guardrail")
+                || lower.contains("unsupportedlanguage")
+                || lower.contains("unsupportedlocale")
+                || lower.contains("unsupportedguide")
+            return ("GenerationError.\(caseName)", !permanent)
+        }
+        if error is CancellationError {
+            return ("cancelled", false)
+        }
+        let ns = error as NSError
+        return ("\(ns.domain) code=\(ns.code): \(error.localizedDescription)", true)
+    }
+
+    /// Single generation attempt. Throws on failure so the orchestrator
+    /// (`generateSummaryWithFoundationModels`) can retry / fall back. Builds
+    /// a fresh `LanguageModelSession` every call so prior-search context
+    /// never accumulates across attempts.
+    private func runSummaryGeneration(
+        query: String,
+        context: String,
+        results: [SearchResult],
+        temperature: Double = 0.3,
+        maxTokens: Int = 1000,
+        language: ModelLanguage = .french,
+        profile: GenerationProfile = .fast,
+        useToolCalling: Bool = false,
+        corpusChunks: [RAGChunk] = [],
+        maxDuckDuckGoResults: Int = 6,
+        maxWikipediaResults: Int = 2,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true,
+        onPartialUpdate: ((String) -> Void)? = nil
+    ) async throws -> String {
             // Always create a fresh session so that context from previous searches
             // does not accumulate and overflow the context window.
             let instructions = buildInstructions(
@@ -974,15 +1101,6 @@ class AIService: ObservableObject {
             let txt_response = String(describing: response.content)
 
             return txt_response
-        } catch {
-            // The app's launch-time check (see `FoundationModelAvailability`)
-            // already warns when Apple Intelligence is unavailable, so we no
-            // longer carry a deterministic NLP fallback. Return empty here —
-            // the UI surfaces this as "no summary" rather than a misleading
-            // hand-written one.
-            print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
-            return ""
-        }
     }
 
     private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
