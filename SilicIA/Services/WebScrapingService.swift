@@ -19,7 +19,7 @@ class WebScrapingService: ObservableObject {
     private static let userAgent: String = {
         // You can optionally make these dynamic using Bundle info and UIDevice.
         let appName = "SilicIA"
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
         #if os(iOS)
         let platform = "iOS"
         #elseif os(macOS)
