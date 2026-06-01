@@ -137,7 +137,14 @@ struct SearchView: View {
     @FocusState private var isSearchFieldFocused: Bool
 
     // Settings
-    @State private var settings = AppSettings.load()
+    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    /// Convenience accessor over the shared store so existing `settings.x`
+    /// reads and `settings.x = y` writes keep working unchanged; binding
+    /// sites use `$settingsStore.settings.x`.
+    private var settings: AppSettings {
+        get { settingsStore.settings }
+        nonmutating set { settingsStore.settings = newValue }
+    }
     @State private var showSettings = false
     @State private var activeGenerationProfile: AIService.GenerationProfile = .fast
 
@@ -286,7 +293,6 @@ struct SearchView: View {
             searchResults = newResults
         }
         .onAppear {
-            settings = AppSettings.load()
             consumeInitialQueryIfNeeded()
             // Drop the caret into the search field whenever this screen
             // appears in an idle state. Triggers the iOS soft keyboard
@@ -303,7 +309,8 @@ struct SearchView: View {
             }
         }
         .onChange(of: settings) {
-            settings.save()
+            // Persistence is automatic via AppSettingsStore; this handler
+            // only reacts to the first-guess toggle being switched off.
             if !settings.isFirstGuessEnabled {
                 firstGuessText = ""
                 firstGuessElapsedSeconds = nil
@@ -858,17 +865,17 @@ struct SearchView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                Slider(value: $settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
+                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
             }
 
             // First Guess Toggle
-            Toggle(isOn: $settings.isFirstGuessEnabled) {
+            Toggle(isOn: $settingsStore.settings.isFirstGuessEnabled) {
                 Text(L.t("search.settings.firstGuessToggle", language: settings.language))
                     .font(.subheadline)
             }
 
             // Web Summaries Toggle
-            Toggle(isOn: $settings.isWebSummariesEnabled) {
+            Toggle(isOn: $settingsStore.settings.isWebSummariesEnabled) {
                 Text(L.t("search.settings.webSummariesToggle", language: settings.language))
                     .font(.subheadline)
             }
@@ -879,7 +886,7 @@ struct SearchView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
-                Toggle(isOn: $settings.useDuckDuckGo) {
+                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
                     Text("DuckDuckGo")
                         .font(.subheadline)
                 }
@@ -899,7 +906,7 @@ struct SearchView: View {
                     ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
                 }
 
-                Toggle(isOn: $settings.useWikipedia) {
+                Toggle(isOn: $settingsStore.settings.useWikipedia) {
                     Text("Wikipedia")
                         .font(.subheadline)
                 }
@@ -988,7 +995,7 @@ struct SearchView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                Picker("Language", selection: $settings.language) {
+                Picker("Language", selection: $settingsStore.settings.language) {
                     ForEach(ModelLanguage.allCases, id: \.self) { lang in
                         Text(lang.rawValue).tag(lang)
                     }
@@ -1002,7 +1009,7 @@ struct SearchView: View {
             // / currentDateTime / webSearch on demand instead of receiving
             // a pre-baked context block in the summary prompt.
             VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $settings.useToolCalling) {
+                Toggle(isOn: $settingsStore.settings.useToolCalling) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Tool calling (experimental)")
                             .font(.subheadline)

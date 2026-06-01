@@ -96,7 +96,14 @@ struct ChatView: View {
     /// "+" menu immediately drops the keyboard caret into the new row.
     @FocusState private var focusedURLRowID: ContextSource.ID?
     @State private var preanalysisTask: Task<Void, Never>?
-    @State private var settings = AppSettings.load()
+    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    /// Convenience accessor over the shared store so existing `settings.x`
+    /// reads and `settings.x = y` writes keep working unchanged; binding
+    /// sites use `$settingsStore.settings.x`.
+    private var settings: AppSettings {
+        get { settingsStore.settings }
+        nonmutating set { settingsStore.settings = newValue }
+    }
     @State private var showSettings = false
     @State private var showHistory = false
     @FocusState private var isInputFieldFocused: Bool
@@ -198,12 +205,8 @@ struct ChatView: View {
                 }
             }
             .onAppear {
-                settings = AppSettings.load()
                 chatService.modelContext = modelContext
                 mergeSharedInputsIfNeeded()
-            }
-            .onChange(of: settings) {
-                settings.save()
             }
             .onChange(of: sharedURLs) {
                 mergeSharedInputsIfNeeded()
@@ -306,12 +309,6 @@ struct ChatView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .onAppear {
-            settings = AppSettings.load()
-        }
-        .onChange(of: settings) {
-            settings.save()
-        }
     }
 
     /// Renders chat-specific tuning controls.
@@ -335,7 +332,7 @@ struct ChatView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                Slider(value: $settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
+                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -394,7 +391,7 @@ struct ChatView: View {
                     .font(.subheadline)
                     .fontWeight(.semibold)
 
-                Toggle(isOn: $settings.useDuckDuckGo) {
+                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
                     Text("DuckDuckGo")
                         .font(.subheadline)
                 }
@@ -414,7 +411,7 @@ struct ChatView: View {
                     ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
                 }
 
-                Toggle(isOn: $settings.useWikipedia) {
+                Toggle(isOn: $settingsStore.settings.useWikipedia) {
                     Text("Wikipedia")
                         .font(.subheadline)
                 }
@@ -451,7 +448,7 @@ struct ChatView: View {
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
-                Picker("Language", selection: $settings.language) {
+                Picker("Language", selection: $settingsStore.settings.language) {
                     ForEach(ModelLanguage.allCases, id: \.self) { lang in
                         Text(lang.rawValue).tag(lang)
                     }
@@ -464,7 +461,7 @@ struct ChatView: View {
             // of receiving pre-baked RAG chunks in the prompt. Off by
             // default while behaviour matures.
             VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $settings.useToolCalling) {
+                Toggle(isOn: $settingsStore.settings.useToolCalling) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Tool calling (experimental)")
                             .font(.subheadline)

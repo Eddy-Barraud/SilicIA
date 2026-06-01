@@ -32,17 +32,13 @@ struct ContentView: View {
     @Binding var sharedImages: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
-    /// Observe the persisted settings blob so the top tab bar re-localises
-    /// live: language is changed in a settings sub-page that lives *inside*
-    /// this view, so ContentView never re-inits — without observing the
-    /// UserDefaults key, the tab labels stay frozen in the launch language.
-    /// The value isn't read directly; its change drives a re-render, and the
-    /// `language` computed below re-reads the fresh setting.
-    @AppStorage(AppSettings.storageKey) private var appSettingsBlob: Data?
+    /// Shared settings store. Observing it re-localises the top tab bar the
+    /// instant the language changes anywhere (e.g. in a settings sub-page
+    /// nested inside this view, which never re-inits ContentView).
+    @ObservedObject private var settingsStore = AppSettingsStore.shared
 
-    /// Current output language, re-read on every render so it tracks changes
-    /// made elsewhere in the app.
-    private var language: ModelLanguage { AppSettings.load().language }
+    /// Current output language, read live from the shared store.
+    private var language: ModelLanguage { settingsStore.settings.language }
 
     private var selectedTab: AppTab {
         get { AppTab(rawValue: selectedTabRawValue) ?? .searchAssist }
@@ -96,7 +92,7 @@ struct ContentView: View {
                             selectedTab = .chat
                             chatService.modelContext = modelContext
                             Task {
-                                let settings = AppSettings.load()
+                                let settings = settingsStore.settings
                                 await chatService.sendMessage(
                                     query,
                                     contextInput: "",

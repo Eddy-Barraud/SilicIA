@@ -14,7 +14,8 @@ struct ConversationsListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Conversation.updatedAt, order: .reverse) private var conversations: [Conversation]
     @State private var showClearAllConfirmation = false
-    @State private var language = AppSettings.load().language
+    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    private var language: ModelLanguage { settingsStore.settings.language }
 
     var onLoadConversation: (Conversation) -> Void
     var onDismiss: () -> Void
