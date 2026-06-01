@@ -1,0 +1,1 @@
+AI,local LLM,private AI,PDF chat,web search,on-device,document analysis,Apple Silicon,privacy

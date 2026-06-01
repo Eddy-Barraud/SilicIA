@@ -1,0 +1,27 @@
+SilicIA est un assistant IA privé qui s'exécute entièrement sur votre Mac — sans connexion Internet pour les inférences, sans envoi de données vers un serveur externe, sans abonnement.
+
+Propulsé par des grands modèles de langage locaux et Apple Silicon, SilicIA offre des réponses rapides et intelligentes tout en gardant vos conversations totalement privées.
+
+--- CHAT ---
+Engagez des conversations naturelles et multi-tours avec un LLM local. Posez des questions, brainstormez, obtenez des résumés, rédigez et relisez des textes — tout est traité sur votre appareil.
+
+--- INTELLIGENCE WEB ---
+Quand vous avez besoin d'informations actualisées, SilicIA peut récupérer des résultats web en direct et les synthétiser en une réponse IA claire avec sources citées. Obtenez le meilleur des deux mondes : contexte web en temps réel et raisonnement local.
+
+--- ANALYSE DE DOCUMENTS ---
+Déposez n'importe quel PDF ou image dans la conversation. SilicIA lit, comprend et répond à vos questions avec des citations précises à la page — entièrement sur votre appareil.
+
+--- CONFIDENTIALITÉ PAR CONCEPTION ---
+Vos données ne quittent jamais votre Mac. Aucun compte requis. Aucune télémétrie. Aucune inférence dans le cloud. Tout reste entre vous et votre appareil.
+
+--- OPTIMISÉ POUR APPLE SILICON ---
+Conçu pour macOS et optimisé pour Apple Silicon. SilicIA exécute les modèles locaux efficacement, rendant une IA puissante accessible sans serveur GPU distant.
+
+CE QUE VOUS POUVEZ FAIRE
+• Discuter avec une IA locale — rapide, privée, toujours disponible
+• Rechercher sur le web et obtenir des résumés synthétisés par IA avec liens sources
+• Poser des questions sur des PDFs, rapports, contrats et images
+• Combiner contexte web et documents dans une seule conversation
+• Basculer entre les interfaces française et anglaise
+
+SilicIA vous donne le contrôle de votre IA — sans dépendance au cloud, sans coûts cachés, sans compromis sur la vie privée.

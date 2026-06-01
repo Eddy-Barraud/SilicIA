@@ -1,0 +1,1 @@
+IA,LLM local,IA privée,chat PDF,recherche web,hors ligne,Apple Silicon,confidentialité,documents

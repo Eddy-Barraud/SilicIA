@@ -1,0 +1,35 @@
+{
+  "locale": "en-US",
+
+  "promotional_text": "Your private AI assistant — fully on-device. Chat, search the web, analyse PDFs and images. No cloud, no subscription.",
+
+  "keywords": "AI,local LLM,private AI,PDF chat,web search,on-device,offline AI,document analysis,Apple Silicon,privacy",
+
+  "description": "SilicIA is a private AI assistant that runs entirely on your Mac — no internet required for inference, no data sent to any server, no subscription.
+
+Powered by local large language models and Apple Silicon, SilicIA delivers fast, intelligent responses while keeping your conversations completely private.
+
+── CHAT ──
+Have natural, multi-turn conversations with a local LLM. Ask questions, brainstorm ideas, get summaries, write and review text — all processed on your device.
+
+── WEB INTELLIGENCE ──
+When you need up-to-date information, SilicIA can fetch live web results and synthesise them into a clear, cited AI answer. Get the best of both worlds: real-time web context with on-device reasoning.
+
+── DOCUMENT ANALYSIS ──
+Drop any PDF or image into the conversation. SilicIA reads, understands, and answers questions about your documents with page-precise citations — entirely on-device.
+
+── PRIVACY BY DESIGN ──
+Your data never leaves your Mac. No account required. No telemetry. No cloud inference. Everything stays between you and your device.
+
+── APPLE SILICON OPTIMISED ──
+Built for macOS and optimised for Apple Silicon. SilicIA runs local models efficiently, making powerful AI accessible without a GPU server.
+
+WHAT YOU CAN DO
+• Chat with a local AI — fast, private, always available
+• Search the web and get AI-synthesised summaries with source links
+• Ask questions about PDFs, reports, contracts, and images
+• Combine web context with your documents in one conversation
+• Switch between English and French interfaces
+
+SilicIA puts you in control of your AI — no cloud dependency, no hidden costs, no privacy trade-offs."
+}
