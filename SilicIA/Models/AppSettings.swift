@@ -44,7 +44,10 @@ struct AppSettings: Codable, Equatable {
     /// (e.g. results display limit, scraping cap).
     var maxSearchResults: Int { maxDuckDuckGoResults + maxWikipediaResults }
 
-    private static let storageKey = "SilicIA.AppSettings"
+    /// UserDefaults key under which the whole settings blob is persisted.
+    /// Exposed so views can observe it via `@AppStorage` and re-render when
+    /// any setting (e.g. the output language) changes elsewhere in the app.
+    static let storageKey = "SilicIA.AppSettings"
     private static let defaultSettings = AppSettings()
 
     private enum CodingKeys: String, CodingKey {
