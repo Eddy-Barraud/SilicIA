@@ -351,6 +351,44 @@ final class ChatService: ObservableObject {
             }
             errorMessage = nil
         } catch {
+            // A tool-calling turn can transiently fail — most notably the
+            // intermittent `GenerationError -1` (context-window overflow from
+            // the tool transcript). Recover by retrying the SAME question
+            // WITHOUT tools: the classical grounded path builds no tool
+            // transcript, so it sidesteps the failure (mirrors AIService's
+            // search-path fallback). Only attempt when tools were in play and
+            // we have a streaming message to write into.
+            if useToolCalling, let assistantID = streamingAssistantID {
+                let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
+                do {
+                    print("ℹ️ [ChatService] tool-calling turn failed (\(error.localizedDescription)); falling back to non-tool generation")
+                    let recovered = try await streamClassicalFallback(
+                        message: message,
+                        selectedContext: finalSelectedContext,
+                        language: language,
+                        temperature: temperature,
+                        maxOutputTokens: effectiveMaxOutputTokens,
+                        assistantID: assistantID,
+                        citations: citations
+                    )
+                    persistMessage(role: "assistant", content: recovered, citations: citations)
+                    errorMessage = nil
+                    return
+                } catch is CancellationError {
+                    if let index = messages.firstIndex(where: { $0.id == assistantID }) {
+                        let partial = messages[index].content
+                        if partial.isEmpty {
+                            messages.remove(at: index)
+                        } else {
+                            persistMessage(role: "assistant", content: partial, citations: messages[index].citations)
+                        }
+                    }
+                    errorMessage = nil
+                    return
+                } catch {
+                    // Fall through to the generic give-up below.
+                }
+            }
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             if let streamingAssistantID,
                let index = messages.firstIndex(where: { $0.id == streamingAssistantID }) {
@@ -362,6 +400,47 @@ final class ChatService: ObservableObject {
             persistMessage(role: "assistant", content: fallback, citations: nil)
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Non-tool recovery generation streamed into an existing assistant
+    /// message. Used when a tool-calling turn throws: the classical
+    /// prompt-stuffing path (pre-baked context, no tools) builds no tool
+    /// transcript, so it avoids the context-window pressure behind most
+    /// transient `-1` failures. Throws if it too fails (incl. cancellation).
+    private func streamClassicalFallback(
+        message: String,
+        selectedContext: String,
+        language: ModelLanguage,
+        temperature: Double,
+        maxOutputTokens: Int,
+        assistantID: UUID,
+        citations: String?
+    ) async throws -> String {
+        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let session = LanguageModelSession(instructions: instructions)
+        let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens)
+        let prompt = buildPrompt(
+            for: message,
+            selectedContext: selectedContext,
+            language: language,
+            maxOutputCharacters: maxOutputCharacters,
+            maxOutputTokens: maxOutputTokens
+        )
+        let options = GenerationOptions(temperature: temperature, maximumResponseTokens: maxOutputTokens)
+
+        var latestPartial = ""
+        for try await snapshot in session.streamResponse(to: prompt, options: options) {
+            let partial = String(describing: snapshot.content)
+            guard !partial.isEmpty, partial != latestPartial else { continue }
+            latestPartial = partial
+            updateAssistantMessage(id: assistantID, content: partial, citations: citations)
+        }
+        if latestPartial.isEmpty {
+            let response = try await session.respond(to: prompt, options: options)
+            latestPartial = String(describing: response.content)
+            updateAssistantMessage(id: assistantID, content: latestPartial, citations: citations)
+        }
+        return latestPartial
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
