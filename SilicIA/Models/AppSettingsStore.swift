@@ -15,18 +15,28 @@
 //
 
 import Foundation
-import Combine
+import Observation
 
 /// Shared, observable settings store. Use `AppSettingsStore.shared`; mutate
-/// `settings` (or any of its fields through a binding) and the change
-/// publishes to all observers and persists automatically.
+/// `settings` (or any of its fields through a binding) and the change is
+/// observed by all readers and persists automatically.
+///
+/// Uses the Observation framework (`@Observable`) rather than
+/// `ObservableObject`/`@Published`. Because this is one shared instance read
+/// by several screens at once, a `@Published` mutation could fire
+/// `objectWillChange` while a parent view (e.g. ContentView's tab bar) was
+/// mid-update, tripping SwiftUI's "Publishing changes from within view
+/// updates is not allowed" warning. `@Observable` tracks property reads
+/// granularly and doesn't use `objectWillChange`, so cross-view shared
+/// mutations are handled without that constraint.
 @MainActor
-final class AppSettingsStore: ObservableObject {
+@Observable
+final class AppSettingsStore {
     static let shared = AppSettingsStore()
 
-    /// The live settings. Any mutation re-publishes to observers and writes
+    /// The live settings. Any mutation is observed by readers and writes
     /// through to UserDefaults via `AppSettings.save()`.
-    @Published var settings: AppSettings {
+    var settings: AppSettings {
         didSet { settings.save() }
     }
 

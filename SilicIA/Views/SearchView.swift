@@ -137,7 +137,9 @@ struct SearchView: View {
     @FocusState private var isSearchFieldFocused: Bool
 
     // Settings
-    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    /// Shared settings store (@Observable). `@Bindable` so the settings
+    /// panel can derive `$settingsStore.settings.x` bindings.
+    @Bindable private var settingsStore = AppSettingsStore.shared
     /// Convenience accessor over the shared store so existing `settings.x`
     /// reads and `settings.x = y` writes keep working unchanged; binding
     /// sites use `$settingsStore.settings.x`.

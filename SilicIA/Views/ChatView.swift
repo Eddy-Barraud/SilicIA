@@ -96,7 +96,9 @@ struct ChatView: View {
     /// "+" menu immediately drops the keyboard caret into the new row.
     @FocusState private var focusedURLRowID: ContextSource.ID?
     @State private var preanalysisTask: Task<Void, Never>?
-    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    /// Shared settings store (@Observable). `@Bindable` so the settings
+    /// panel can derive `$settingsStore.settings.x` bindings.
+    @Bindable private var settingsStore = AppSettingsStore.shared
     /// Convenience accessor over the shared store so existing `settings.x`
     /// reads and `settings.x = y` writes keep working unchanged; binding
     /// sites use `$settingsStore.settings.x`.

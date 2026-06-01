@@ -10,7 +10,7 @@
 //
 
 import XCTest
-import Combine
+import Observation
 @testable import SilicIA
 
 @MainActor
@@ -20,7 +20,6 @@ final class AppSettingsStoreTests: XCTestCase {
     /// UserDefaults; snapshot and restore around each test so cases don't
     /// leak state into each other or the rest of the suite.
     private var snapshot: AppSettings!
-    private var cancellables: Set<AnyCancellable> = []
 
     override func setUp() async throws {
         try await super.setUp()
@@ -29,7 +28,6 @@ final class AppSettingsStoreTests: XCTestCase {
 
     override func tearDown() async throws {
         AppSettingsStore.shared.settings = snapshot
-        cancellables.removeAll()
         try await super.tearDown()
     }
 
@@ -53,21 +51,22 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
     }
 
-    /// A mutation publishes a change so SwiftUI observers re-render — this
-    /// is what propagates a language switch to the top tab bar.
-    /// `@Published.objectWillChange` fires synchronously on mutation, so we
-    /// assert a captured flag rather than blocking on an expectation (a
-    /// synchronous `wait(for:)` here would deadlock the main actor).
-    func testMutationPublishesObjectWillChange() {
+    /// A mutation is observable so SwiftUI readers re-render — this is what
+    /// propagates a language switch to the top tab bar. Verified via the
+    /// Observation framework's `withObservationTracking`, which fires its
+    /// `onChange` synchronously when a tracked property is mutated.
+    func testMutationIsObservable() {
         var fired = false
-        AppSettingsStore.shared.objectWillChange
-            .sink { fired = true }
-            .store(in: &cancellables)
+        withObservationTracking {
+            _ = AppSettingsStore.shared.settings
+        } onChange: {
+            fired = true
+        }
 
         AppSettingsStore.shared.settings.language =
             AppSettingsStore.shared.settings.language == .french ? .english : .french
 
-        XCTAssertTrue(fired, "mutating settings should publish objectWillChange")
+        XCTAssertTrue(fired, "mutating settings should notify observation trackers")
     }
 
     /// Several independent fields all persist together.

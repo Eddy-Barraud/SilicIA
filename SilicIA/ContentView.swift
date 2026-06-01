@@ -32,10 +32,11 @@ struct ContentView: View {
     @Binding var sharedImages: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
-    /// Shared settings store. Observing it re-localises the top tab bar the
-    /// instant the language changes anywhere (e.g. in a settings sub-page
-    /// nested inside this view, which never re-inits ContentView).
-    @ObservedObject private var settingsStore = AppSettingsStore.shared
+    /// Shared settings store (@Observable). Reading `language` in the body
+    /// re-localises the top tab bar the instant the language changes anywhere
+    /// (e.g. in a settings sub-page nested inside this view, which never
+    /// re-inits ContentView) — Observation tracks the read automatically.
+    private let settingsStore = AppSettingsStore.shared
 
     /// Current output language, read live from the shared store.
     private var language: ModelLanguage { settingsStore.settings.language }
