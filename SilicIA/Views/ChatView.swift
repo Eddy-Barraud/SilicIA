@@ -567,7 +567,7 @@ struct ChatView: View {
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
             VStack(alignment: .leading, spacing: 8) {
-                ProgressiveLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
+                StreamingLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
 
                 if let citations = message.citations,
                    !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

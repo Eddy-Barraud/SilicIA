@@ -95,6 +95,26 @@ final class ViewRenderingTests: XCTestCase {
         assertRenders(ModelUnavailableView(message: "Test reason"))
     }
 
+    /// The progressive LaTeX view renders in both the mid-stream and the
+    /// finished states (with inline + display math present).
+    func testStreamingLaTeXTextRendersWhileStreaming() {
+        assertRenders(
+            StreamingLaTeXText(
+                text: "The solution is $x = 1$. Next we compute \\[ y = 2 \\] and",
+                isStreaming: true
+            )
+        )
+    }
+
+    func testStreamingLaTeXTextRendersWhenComplete() {
+        assertRenders(
+            StreamingLaTeXText(
+                text: "The solution is $x = 1$. The total is $5.00.",
+                isStreaming: false
+            )
+        )
+    }
+
     /// Each tab renders in every supported language (drives the localized
     /// tab-bar labels through the real localization path).
     func testContentViewRendersInAllLanguages() throws {
