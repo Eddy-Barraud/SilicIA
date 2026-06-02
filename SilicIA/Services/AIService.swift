@@ -46,10 +46,6 @@ class AIService: ObservableObject {
     /// stuffing path would have used. Held by AIService (not injected
     /// from SearchView) so the tool kit stays self-contained.
     private let webSearchService = WebSearchService()
-    private var firstGuessSession: LanguageModelSession
-    private var firstGuessSessionLanguage: ModelLanguage
-    private var queryExpanderSession: LanguageModelSession
-    private var queryExpanderSessionLanguage: ModelLanguage
 
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
@@ -94,16 +90,6 @@ class AIService: ObservableObject {
         #endif
     }
 
-    init(initialFirstGuessLanguage: ModelLanguage = .french) {
-        self.firstGuessSessionLanguage = initialFirstGuessLanguage
-        self.firstGuessSession = LanguageModelSession(
-            instructions: Self.buildFirstGuessInstructions(for: initialFirstGuessLanguage)
-        )
-        self.queryExpanderSessionLanguage = initialFirstGuessLanguage
-        self.queryExpanderSession = LanguageModelSession(
-            instructions: Self.buildQueryExpanderInstructions(for: initialFirstGuessLanguage)
-        )
-    }
 
     /// Generates a tiny no-context intuition to provide immediate feedback.
     func generateFirstGuess(
@@ -117,7 +103,14 @@ class AIService: ObservableObject {
         guard !trimmedQuery.isEmpty else { return "" }
 
         do {
-            let session = firstGuessSession(for: language)
+            // Fresh, ephemeral session per call — first guess is a one-shot,
+            // context-free intuition with no memory of prior searches, so a
+            // long-lived session would only accumulate dead transcript and
+            // eventually overflow the window. It's released when this scope
+            // exits.
+            let session = LanguageModelSession(
+                instructions: Self.buildFirstGuessInstructions(for: language)
+            )
             let prompt = PromptLoader.loadPrompt(
                 mode: "quick",
                 feature: "search",
@@ -174,7 +167,11 @@ class AIService: ObservableObject {
         guard !trimmedQuery.isEmpty, maxDerivedQueries > 0 else { return [] }
 
         do {
-            let session = queryExpanderSession(for: language)
+            // Fresh, ephemeral session per call (see generateFirstGuess) —
+            // query expansion is stateless, so it never needs to persist.
+            let session = LanguageModelSession(
+                instructions: Self.buildQueryExpanderInstructions(for: language)
+            )
             let raw = String(describing: try await session.respond(
                 to: queryExpanderPrompt(for: trimmedQuery, language: language, maxDerivedQueries: maxDerivedQueries),
                 options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 140)
@@ -611,30 +608,6 @@ class AIService: ObservableObject {
         """
     }
 
-    /// Returns a long-lived first-guess session and rebuilds it when language changes.
-    private func firstGuessSession(for language: ModelLanguage) -> LanguageModelSession {
-        if language != firstGuessSessionLanguage {
-            firstGuessSessionLanguage = language
-            firstGuessSession = LanguageModelSession(
-                instructions: Self.buildFirstGuessInstructions(for: language)
-            )
-        }
-
-        return firstGuessSession
-    }
-
-    /// Returns a long-lived query-expander session and rebuilds it when language changes.
-    private func queryExpanderSession(for language: ModelLanguage) -> LanguageModelSession {
-        if language != queryExpanderSessionLanguage {
-            queryExpanderSessionLanguage = language
-            queryExpanderSession = LanguageModelSession(
-                instructions: Self.buildQueryExpanderInstructions(for: language)
-            )
-        }
-
-        return queryExpanderSession
-    }
-
     /// Prompt used to produce search-query expansions in the active UI language.
     private func queryExpanderPrompt(for query: String, language: ModelLanguage, maxDerivedQueries: Int) -> String {
         if language == .french {
@@ -995,13 +968,20 @@ class AIService: ObservableObject {
 
             let isDeepProfile = profile == .deep
 
-            // Token budget for the final summary.
-            let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
-                requestedMaxTokens: maxTokens,
-                instructionTokens: TokenBudgeting.instructionTokens,
-                promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-                minContextTokens: TokenBudgeting.minContextTokens
-            )
+            // Token budget for the final summary. In tool-calling mode the
+            // response cap must reserve the tool appendix + schema overhead
+            // (~600t) so the answer can't grow large enough to leave no room
+            // for the tool transcript — otherwise a high response setting
+            // (slider reaches 3500) overflows the 4096 window and the model
+            // fails to respond. The prompt-stuffing path keeps the base clamp.
+            let effectiveMaxTokens = useToolCalling
+                ? TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
+                : TokenBudgeting.clampedOutputTokens(
+                    requestedMaxTokens: maxTokens,
+                    instructionTokens: TokenBudgeting.instructionTokens,
+                    promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+                    minContextTokens: TokenBudgeting.minContextTokens
+                )
             let maxContextChars = TokenBudgeting.maxContextCharacters(
                 maxOutputTokens: effectiveMaxTokens,
                 contextUtilizationFactor: isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor

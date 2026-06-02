@@ -163,12 +163,43 @@ nonisolated enum TokenBudgeting {
     ///     the fix for a latent overflow — a hardcoded ceiling (formerly
     ///     3000) plus a 1500-token deep response plus instructions
     ///     exceeded 4096 on a *single* tool call.
+    /// Response-token cap for a TOOL-CALLING turn. Unlike the plain
+    /// `clampedOutputTokens`, it reserves `toolCallingOverheadTokens` (the
+    /// appendix + tool schemas) on top of the base instruction budget, so the
+    /// response can never grow so large that no room is left for the tool
+    /// transcript. Without this, a high user response setting (the slider
+    /// reaches 3500) plus the tool overhead alone exceeds the 4096 window —
+    /// the on-device overflow behind "tool calling fails to respond".
+    static func clampedToolResponseTokens(requestedMaxTokens: Int) -> Int {
+        clampedOutputTokens(
+            requestedMaxTokens: requestedMaxTokens,
+            instructionTokens: instructionTokens + toolCallingOverheadTokens
+        )
+    }
+
     static func toolOutputTokenBudget(forResponseTokens responseTokens: Int) -> Int {
-        let effectiveResponseTokens = clampedOutputTokens(requestedMaxTokens: responseTokens)
+        // Use the tool-calling response clamp so the budget is computed
+        // against the same (overhead-reserved) response the model will
+        // actually be allowed to produce.
+        let effectiveResponseTokens = clampedToolResponseTokens(requestedMaxTokens: responseTokens)
         // Tokens left for the entire tool transcript once instructions,
         // overhead, and the model's own response are accounted for.
+        //
+        // Critically this reserves `toolCallingOverheadTokens` on TOP of the
+        // base `instructionTokens`: a tool-calling turn injects the
+        // per-language tool-usage appendix AND the Foundation Models tool
+        // *schemas* (each tool's name/description + its `@Generable` argument
+        // struct), which together cost ~600 tokens the base 100 doesn't cover.
+        // Omitting it sized the per-reply budget too generously, so two
+        // window-"safe" replies plus a large response plus the real
+        // instruction cost could still blow past 4096 — the intermittent
+        // tool-calling overflow on Search.
         let availableForTools = max(
-            contextWindowLimit - instructionTokens - promptOverheadTokens - effectiveResponseTokens,
+            contextWindowLimit
+                - instructionTokens
+                - toolCallingOverheadTokens
+                - promptOverheadTokens
+                - effectiveResponseTokens,
             0
         )
         // Window-safe cap for ONE reply: dividing by the assumed
