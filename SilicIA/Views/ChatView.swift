@@ -482,6 +482,15 @@ struct ChatView: View {
     /// to the bottom on send / while streaming.
     private static let bottomAnchorID = "chatBottomAnchor"
 
+    /// Whether the transcript is currently scrolled near its bottom. While
+    /// true we follow a streaming reply down; once the user scrolls up to
+    /// re-read, this flips false and we stop tugging them back. Starts true
+    /// (a fresh/empty transcript is "at the bottom").
+    @State private var isNearBottom = true
+
+    /// How close (in points) to the bottom still counts as "near bottom".
+    private static let nearBottomThreshold: CGFloat = 80
+
     /// Scrolls the transcript to the bottom anchor.
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
         if animated {
@@ -581,14 +590,25 @@ struct ChatView: View {
         // the look users preferred before the Liquid Glass migration.
         .background(PlatformColors.textBackground)
         .cornerRadius(10)
-        // Keep the latest content in view: jump to the bottom when a message
-        // is sent (count changes) and follow the assistant's reply as it
-        // streams (last message content grows).
+        // Track how close to the bottom the user is, so we don't yank them
+        // back down while they're scrolling up to re-read.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let bottomEdge = geometry.contentOffset.y + geometry.containerSize.height
+            return bottomEdge >= geometry.contentSize.height - Self.nearBottomThreshold
+        } action: { _, nearBottom in
+            isNearBottom = nearBottom
+        }
+        // Sending a message is the user's own action → always scroll to it.
         .onChange(of: chatService.messages.count) {
             scrollToBottom(proxy)
+            isNearBottom = true
         }
+        // While the reply streams, only follow it down if the user hasn't
+        // scrolled up — otherwise leave their position alone.
         .onChange(of: chatService.messages.last?.content) {
-            scrollToBottom(proxy)
+            if isNearBottom {
+                scrollToBottom(proxy)
+            }
         }
         }
     }
