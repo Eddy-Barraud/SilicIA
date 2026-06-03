@@ -1150,6 +1150,13 @@ final class ChatService: ObservableObject {
             }
             .joined(separator: "\n")
 
+        // Communicate a CONSERVATIVE character target — well under what the
+        // hard token cap actually fits for math-dense output (LaTeX commands
+        // tokenise densely, so the naive chars≈tokens×3 estimate overshoots).
+        // This leaves headroom for the model to wrap up and, crucially, to
+        // close any equation it opened instead of being cut mid-formula.
+        let conservativeOutputCharacters = max(150, Int(Double(maxOutputCharacters) * 0.65))
+
         return PromptLoader.loadPrompt(
             mode: "normal",
             feature: "chat",
@@ -1158,7 +1165,7 @@ final class ChatService: ObservableObject {
                 "history": history,
                 "context": selectedContext,
                 "question": userMessage,
-                "maxOutputCharacters": "\(maxOutputCharacters)",
+                "maxOutputCharacters": "\(conservativeOutputCharacters)",
                 "maxOutputTokens": "\(maxOutputTokens)"
             ]
         ) ?? fallbackChatPrompt(

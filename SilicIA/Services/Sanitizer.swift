@@ -18,11 +18,63 @@ enum ModelOutputLaTeXSanitizer {
         // unterminated inline-math block (which silently swallows the rest
         // of the message into garbled math).
         sanitized = escapeCurrencyDollars(in: sanitized)
+        // Unwrap inline math whose content is "trivial" (digits, parens,
+        // commas, basic operators — no letters/sub/superscripts). LaTeXSwiftUI
+        // scales inline math by the rendered x-height, which it miscomputes
+        // for content with no x-height letters (e.g. `\((0, 0), (1, 1)\)`),
+        // rendering it oversized. Such content reads identically as plain
+        // text, so we strip the delimiters and dodge the scaling bug.
+        sanitized = unwrapTrivialInlineMath(in: sanitized)
         sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
         sanitized = replacingDigitPowers(in: sanitized)
         // sanitized = closeUnbalancedMathDelimiters(in: sanitized)
         sanitized = replacingMarkdownTitles(in: sanitized)
         return sanitized
+    }
+
+    /// Characters allowed in "trivial" inline math (renders identically as
+    /// plain text). Excludes letters, `^`, `_`, `{`, `}`, `\` — anything that
+    /// genuinely needs math typesetting (variables, sub/superscripts, frac…).
+    private static let trivialMathCharacters = CharacterSet(charactersIn: "0123456789 \t(),.-+=*/:|")
+
+    /// Matches an inline `\( ... \)` block (non-greedy). The inner parens are
+    /// plain `(` `)`, distinct from the `\(` `\)` delimiters, so the lazy
+    /// match stops at the first `\)`.
+    private static let inlineParenMathRegex = try? NSRegularExpression(
+        pattern: #"\\\((.*?)\\\)"#,
+        options: [.dotMatchesLineSeparators]
+    )
+
+    /// Replaces `\(trivial\)` inline math with its bare content; leaves any
+    /// inline math that needs real typesetting untouched.
+    static func unwrapTrivialInlineMath(in text: String) -> String {
+        guard let regex = inlineParenMathRegex else { return text }
+        let ns = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return text }
+
+        var result = ""
+        var cursor = 0
+        for match in matches {
+            let full = match.range
+            result += ns.substring(with: NSRange(location: cursor, length: full.location - cursor))
+            let inner = ns.substring(with: match.range(at: 1))
+            if isTrivialMath(inner) {
+                result += inner
+            } else {
+                result += ns.substring(with: full)
+            }
+            cursor = full.location + full.length
+        }
+        result += ns.substring(from: cursor)
+        return result
+    }
+
+    /// Trivial = at least one digit and every character drawn from
+    /// `trivialMathCharacters` (so no variables, fractions, or scripts).
+    private static func isTrivialMath(_ inner: String) -> Bool {
+        guard inner.contains(where: { $0.isNumber }) else { return false }
+        return inner.unicodeScalars.allSatisfy { trivialMathCharacters.contains($0) }
     }
 
     /// Escapes `$` characters that the model used as a currency symbol next

@@ -7,8 +7,8 @@ Contexto recuperado:
 Pregunta del usuario:
 {{question}}
 
-Responda de forma concisa y práctica.
-Límite de salida: {{maxOutputTokens}} tokens como máximo (aproximadamente {{maxOutputCharacters}} caracteres).
+Responda de forma concisa y práctica. Limite su respuesta a unos {{maxOutputCharacters}} caracteres y termine limpiamente — nunca se detenga a mitad de una frase o una ecuación.
+Cierre siempre cada delimitador LaTeX que abra ($ … $ o $$ … $$). Si se queda sin espacio, concluya el punto actual en lugar de empezar una nueva fórmula.
 Cuando sea pertinente, incluya expresiones o fórmulas matemáticas con LaTeX.
 Encapsule el código LaTeX en línea con $.
 Encapsule las ecuaciones LaTeX en bloque con $$.

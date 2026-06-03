@@ -110,4 +110,38 @@ final class SanitizerTests: XCTestCase {
         XCTAssertTrue(output.contains(#"\$1025.75"#),
                       "Currency escape lost during full sanitization pipeline: \(output)")
     }
+
+    // MARK: - Trivial inline-math unwrapping (LaTeXSwiftUI x-height bug)
+
+    func testTrivialInlineMathIsUnwrappedToPlainText() {
+        let input = #"Consider the data points \((0, 0), (1, 1), (2, 4)\)."#
+        let output = ModelOutputLaTeXSanitizer.unwrapTrivialInlineMath(in: input)
+        XCTAssertEqual(output, "Consider the data points (0, 0), (1, 1), (2, 4).")
+    }
+
+    func testInlineMathWithVariablesIsPreserved() {
+        // Contains letters → genuinely needs typesetting → must stay wrapped.
+        let input = #"the points \((x_0, y_0)\) matter"#
+        let output = ModelOutputLaTeXSanitizer.unwrapTrivialInlineMath(in: input)
+        XCTAssertEqual(output, input)
+    }
+
+    func testInlineMathWithFractionIsPreserved() {
+        let input = #"value \(\frac{1}{2}\) here"#
+        let output = ModelOutputLaTeXSanitizer.unwrapTrivialInlineMath(in: input)
+        XCTAssertEqual(output, input)
+    }
+
+    func testMixedTrivialAndNonTrivialInlineMath() {
+        let input = #"\((1, 2)\) and \(\sqrt{x}\)"#
+        let output = ModelOutputLaTeXSanitizer.unwrapTrivialInlineMath(in: input)
+        XCTAssertEqual(output, #"(1, 2) and \(\sqrt{x}\)"#)
+    }
+
+    func testTrivialUnwrapRunsInFullPipeline() {
+        let input = #"Points \((0, 0), (1, 1)\) are given."#
+        let output = ModelOutputLaTeXSanitizer.finalizeSanitizedText(input)
+        XCTAssertFalse(output.contains(#"\("#), "trivial inline math should be unwrapped: \(output)")
+        XCTAssertTrue(output.contains("(0, 0), (1, 1)"))
+    }
 }

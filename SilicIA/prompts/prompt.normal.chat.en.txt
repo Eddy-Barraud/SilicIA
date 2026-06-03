@@ -7,8 +7,8 @@ Retrieved Context:
 User question:
 {{question}}
 
-Answer in a concise and practical way.
-Output limit: {{maxOutputTokens}} tokens maximum (about {{maxOutputCharacters}} characters).
+Answer in a concise and practical way. Keep your reply under about {{maxOutputCharacters}} characters and finish cleanly — never stop in the middle of a sentence or an equation.
+Always close every LaTeX delimiter you open ($ … $ or $$ … $$). If you are running low on space, conclude the current point instead of starting a new formula.
 When relevant, include mathematical expressions or formulas with LaTeX formatting.
 Encapsulates LaTeX code inline by $.
 Encapsulates LaTeX equation bloc by $$.
