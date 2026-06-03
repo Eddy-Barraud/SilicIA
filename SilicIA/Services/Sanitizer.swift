@@ -18,63 +18,11 @@ enum ModelOutputLaTeXSanitizer {
         // unterminated inline-math block (which silently swallows the rest
         // of the message into garbled math).
         sanitized = escapeCurrencyDollars(in: sanitized)
-        // Unwrap inline math whose content is "trivial" (digits, parens,
-        // commas, basic operators — no letters/sub/superscripts). LaTeXSwiftUI
-        // scales inline math by the rendered x-height, which it miscomputes
-        // for content with no x-height letters (e.g. `\((0, 0), (1, 1)\)`),
-        // rendering it oversized. Such content reads identically as plain
-        // text, so we strip the delimiters and dodge the scaling bug.
-        sanitized = unwrapTrivialInlineMath(in: sanitized)
         sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
         sanitized = replacingDigitPowers(in: sanitized)
         // sanitized = closeUnbalancedMathDelimiters(in: sanitized)
         sanitized = replacingMarkdownTitles(in: sanitized)
         return sanitized
-    }
-
-    /// Characters allowed in "trivial" inline math (renders identically as
-    /// plain text). Excludes letters, `^`, `_`, `{`, `}`, `\` — anything that
-    /// genuinely needs math typesetting (variables, sub/superscripts, frac…).
-    private static let trivialMathCharacters = CharacterSet(charactersIn: "0123456789 \t(),.-+=*/:|")
-
-    /// Matches an inline `\( ... \)` block (non-greedy). The inner parens are
-    /// plain `(` `)`, distinct from the `\(` `\)` delimiters, so the lazy
-    /// match stops at the first `\)`.
-    private static let inlineParenMathRegex = try? NSRegularExpression(
-        pattern: #"\\\((.*?)\\\)"#,
-        options: [.dotMatchesLineSeparators]
-    )
-
-    /// Replaces `\(trivial\)` inline math with its bare content; leaves any
-    /// inline math that needs real typesetting untouched.
-    static func unwrapTrivialInlineMath(in text: String) -> String {
-        guard let regex = inlineParenMathRegex else { return text }
-        let ns = text as NSString
-        let matches = regex.matches(in: text, range: NSRange(location: 0, length: ns.length))
-        guard !matches.isEmpty else { return text }
-
-        var result = ""
-        var cursor = 0
-        for match in matches {
-            let full = match.range
-            result += ns.substring(with: NSRange(location: cursor, length: full.location - cursor))
-            let inner = ns.substring(with: match.range(at: 1))
-            if isTrivialMath(inner) {
-                result += inner
-            } else {
-                result += ns.substring(with: full)
-            }
-            cursor = full.location + full.length
-        }
-        result += ns.substring(from: cursor)
-        return result
-    }
-
-    /// Trivial = at least one digit and every character drawn from
-    /// `trivialMathCharacters` (so no variables, fractions, or scripts).
-    private static func isTrivialMath(_ inner: String) -> Bool {
-        guard inner.contains(where: { $0.isNumber }) else { return false }
-        return inner.unicodeScalars.allSatisfy { trivialMathCharacters.contains($0) }
     }
 
     /// Escapes `$` characters that the model used as a currency symbol next
@@ -87,31 +35,62 @@ enum ModelOutputLaTeXSanitizer {
     /// parser opens an inline-math block at `$1025.75` and never finds the
     /// matching close.
     ///
-    /// Rule: a `$` is treated as currency (and escaped) when it sits
-    /// immediately adjacent to a digit on either side, AND it's not already
-    /// escaped (`\$`) nor part of a `$$` display-math marker. This catches
-    /// the common forms `$1025`, `1025$`, `$1.50`, and `**$100**` while
-    /// leaving genuine math `$x + 2$`, `$\frac{1}{2}$`, and `$$E = mc^2$$`
-    /// alone.
+    /// Rule (open/close aware): we scan left-to-right tracking whether we are
+    /// inside an inline `$ … $` span. A `$` is escaped ONLY when it is NOT a
+    /// math delimiter:
+    ///   - if inline math is OPEN, the next `$` is its CLOSING delimiter —
+    ///     never escaped, even when it follows a digit (e.g. the closing `$`
+    ///     in `$a_3$`). This is the bug the old digit-adjacency regex caused:
+    ///     it escaped `a_3$`'s closing `$`, mis-pairing every following span
+    ///     and garbling the render.
+    ///   - if math is CLOSED, a `$` adjacent to a digit (`$5`, `5$`) is
+    ///     currency → escaped; otherwise it OPENS a math span.
+    /// `$$` (display math) and already-escaped `\$` are passed through.
     static func escapeCurrencyDollars(in text: String) -> String {
-        var output = text
-        // Prefix form: `$<digit>` — e.g. `$1025.75`.
-        // `(?<![\\$])` excludes `\$` (already escaped) and the trailing `$`
-        // of a display-math `$$` opener.
-        output = replacingRegex(
-            in: output,
-            pattern: #"(?<![\\$])\$(?=\d)"#,
-            with: #"\\$"#
-        )
-        // Suffix form: `<digit>$` — common in French (`1025$`).
-        // `(?![\\$\d])` excludes `$\` (a math command), `$$` (display-math
-        // close), and `$<digit>` (already handled by the prefix pass which
-        // would have escaped it; re-matching would double-escape).
-        output = replacingRegex(
-            in: output,
-            pattern: #"(?<=\d)\$(?![\\$\d])"#,
-            with: #"\\$"#
-        )
+        let chars = Array(text)
+        var output = ""
+        output.reserveCapacity(text.count + 8)
+        var inlineOpen = false
+        var i = 0
+        while i < chars.count {
+            let c = chars[i]
+
+            // Already-escaped `\$` — emit both, untouched.
+            if c == "\\", i + 1 < chars.count, chars[i + 1] == "$" {
+                output.append("\\$")
+                i += 2
+                continue
+            }
+            // `$$` display-math delimiter — pass through verbatim.
+            if c == "$", i + 1 < chars.count, chars[i + 1] == "$" {
+                output.append("$$")
+                i += 2
+                continue
+            }
+            if c == "$" {
+                if inlineOpen {
+                    // Closing delimiter — keep as-is regardless of neighbours.
+                    inlineOpen = false
+                    output.append("$")
+                } else {
+                    let prev = i > 0 ? chars[i - 1] : " "
+                    let next = i + 1 < chars.count ? chars[i + 1] : " "
+                    if prev.isNumber || next.isNumber {
+                        // Currency (e.g. `$5`, `5$`) — escape it.
+                        output.append("\\$")
+                    } else {
+                        // Opening delimiter of an inline math span.
+                        inlineOpen = true
+                        output.append("$")
+                    }
+                }
+                i += 1
+                continue
+            }
+
+            output.append(c)
+            i += 1
+        }
         return output
     }
 

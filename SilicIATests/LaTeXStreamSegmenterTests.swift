@@ -13,6 +13,32 @@ import XCTest
 
 final class LaTeXStreamSegmenterTests: XCTestCase {
 
+    // MARK: - Paragraph blocks (stable per-block rendering)
+
+    func testParagraphBlocksSplitOnBlankLines() {
+        let text = "Intro paragraph.\n\n$$\nE = mc^2\n$$\n\nClosing paragraph."
+        let blocks = LaTeXStreamSegmenter.paragraphBlocks(in: text)
+        XCTAssertEqual(blocks, ["Intro paragraph.", "$$\nE = mc^2\n$$", "Closing paragraph."])
+    }
+
+    func testParagraphBlocksCollapseMultipleBlankLines() {
+        let text = "A\n\n\n\nB"
+        XCTAssertEqual(LaTeXStreamSegmenter.paragraphBlocks(in: text), ["A", "B"])
+    }
+
+    func testParagraphBlocksAreAppendOnlyAsTextGrows() {
+        // Earlier blocks must be byte-identical as more text streams in, so a
+        // given index keeps mapping to the same completed content.
+        let partial = LaTeXStreamSegmenter.paragraphBlocks(in: "First.\n\n$$\nx\n$$\n\nSec")
+        let grown = LaTeXStreamSegmenter.paragraphBlocks(in: "First.\n\n$$\nx\n$$\n\nSecond block.")
+        XCTAssertEqual(Array(partial.dropLast()), Array(grown.dropLast()))
+        XCTAssertEqual(grown.first, "First.")
+    }
+
+    func testParagraphBlocksSingleBlock() {
+        XCTAssertEqual(LaTeXStreamSegmenter.paragraphBlocks(in: "Just one line."), ["Just one line."])
+    }
+
     func testNoBoundaryUntilFirstSentenceCompletes() {
         XCTAssertTrue(LaTeXStreamSegmenter.safeBoundaries("The value is").isEmpty)
         XCTAssertTrue(LaTeXStreamSegmenter.safeBoundaries("Computing the result").isEmpty)

@@ -18,6 +18,29 @@ import Foundation
 
 enum LaTeXStreamSegmenter {
 
+    /// Splits streamed text into paragraph blocks separated by blank lines.
+    /// Runs of blank lines collapse to one separator; surrounding blank lines
+    /// are trimmed. Each block keeps its internal newlines (so a multi-line
+    /// `$$ … $$` display block stays intact).
+    ///
+    /// `StreamingLaTeXText` renders each COMPLETED block (every block except
+    /// the last while streaming) as its own stable `LaTeX` view. Because the
+    /// blocks are append-only — earlier blocks never change as more text
+    /// streams in — each completed block is parsed exactly once, which avoids
+    /// the size fluctuation caused by re-rendering one ever-growing LaTeX view.
+    static func paragraphBlocks(in text: String) -> [String] {
+        // Collapse any blank-line run (newline, optional spaces/tabs, newline,
+        // and further blank lines) into a single `\n\n` separator.
+        let normalized = text.replacingOccurrences(
+            of: #"\n[ \t]*\n([ \t]*\n)*"#,
+            with: "\n\n",
+            options: .regularExpression
+        )
+        return normalized
+            .components(separatedBy: "\n\n")
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+
     /// Returns the end offsets (character counts from the start) of each
     /// safe-to-render segment in `text`, in increasing order. The prefix
     /// `text.prefix(boundary)` is always math-balanced and ends at a natural

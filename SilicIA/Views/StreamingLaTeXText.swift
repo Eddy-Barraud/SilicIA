@@ -2,36 +2,32 @@
 //  StreamingLaTeXText.swift
 //  SilicIA
 //
-//  Live, sentence-by-sentence LaTeX rendering of a streaming model answer.
+//  Live, block-by-block LaTeX rendering of a streaming model answer.
 //
-//  The model streams tokens into a growing string. Rather than wait for the
-//  whole answer before rendering math (the old `ProgressiveLaTeXText`
-//  behaviour) or feed the LaTeX parser a half-written `$...$` / `\[...\]`
-//  (which flickers error glyphs), this view renders the longest
-//  math-balanced prefix — every sentence / display block completed so far —
-//  as real `LaTeX`, and shows the still-incomplete trailing sentence as dim
-//  plain text so the stream stays visibly live.
+//  The model streams tokens into a growing string. We split it into
+//  paragraph blocks (separated by blank lines). Every COMPLETED block —
+//  i.e. every block except the one still being typed — is rendered as its
+//  own `LaTeX` view; the block currently streaming is shown as dim plain
+//  text so the stream stays visibly live. When streaming ends, the final
+//  block is rendered too.
 //
-//  The split is a PURE function of the inputs (`text`, `isStreaming`):
-//    - committed = `text` up to the last safe boundary (LaTeXStreamSegmenter)
-//    - pending   = the remainder, shown as plain text while streaming
-//    - when not streaming, committed = the whole answer, pending = ""
-//
-//  IMPORTANT: `LaTeXSwiftUI.LaTeX` does NOT re-parse when its input string
-//  changes for the same view identity — it renders once. During streaming
-//  the committed prefix grows (a completed equation moves from `pending` into
-//  `committed`), so without forcing a refresh the equation would silently
-//  vanish (rendered by a stale LaTeX view that never updated) until the view
-//  was rebuilt (e.g. visiting Settings and back). We therefore tag the LaTeX
-//  view with `.id(committed)` so SwiftUI re-creates it whenever the committed
-//  text changes — a fresh parse, every time it grows.
+//  Why per-block instead of one growing LaTeX view:
+//    - LaTeXSwiftUI's `LaTeX` does not re-parse when its input changes for
+//      the same view identity, so a single growing view drops equations that
+//      arrive after the first render.
+//    - Forcing it to refresh with `.id(committedText)` re-created the WHOLE
+//      view on every token, which re-rendered every equation repeatedly and
+//      made their sizes fluctuate.
+//  Paragraph blocks are append-only: earlier blocks never change as more
+//  text streams in, so each completed block is parsed exactly once at a
+//  stable size (identified by its position), and new blocks simply append.
 //
 
 import SwiftUI
 import LaTeXSwiftUI
 
 /// Drop-in replacement for `ProgressiveLaTeXText` that renders streamed math
-/// progressively. Same `(text:isStreaming:)` call site.
+/// progressively, block by block. Same `(text:isStreaming:)` call site.
 struct StreamingLaTeXText: View {
     let text: String
     let isStreaming: Bool
@@ -39,40 +35,36 @@ struct StreamingLaTeXText: View {
     @Environment(\.colorScheme) private var colorScheme
     private var foreground: Color { colorScheme == .dark ? .white : .black }
 
-    /// Splits the current text into the math-balanced prefix to render as
-    /// LaTeX and the trailing incomplete remainder. Once streaming ends the
-    /// whole answer is committed (its final sentence is complete even without
-    /// a trailing terminator).
-    private var split: (committed: String, pending: String) {
-        guard isStreaming else { return (text, "") }
-        let boundaries = LaTeXStreamSegmenter.safeBoundaries(text)
-        let length = boundaries.last ?? 0
-        return (String(text.prefix(length)), String(text.dropFirst(length)))
-    }
-
     var body: some View {
-        let parts = split
+        let blocks = LaTeXStreamSegmenter.paragraphBlocks(in: text)
+        // While streaming, the last block is still being typed → show it as
+        // plain text. Every earlier block is complete and stable. When
+        // streaming ends, all blocks are complete.
+        let committed = isStreaming ? Array(blocks.dropLast()) : blocks
+        let pending = isStreaming ? (blocks.last ?? "") : ""
+
         #if DEBUG
-        let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) committed=\(parts.committed.count) pending=\(parts.pending.count)")
+        let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) blocks=\(blocks.count) committed=\(committed.count)")
         #endif
-        return VStack(alignment: .leading, spacing: 2) {
-            if !parts.committed.isEmpty {
-                LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(parts.committed))
+
+        return VStack(alignment: .leading, spacing: 8) {
+            // Stable identity = position. Blocks are append-only, so a given
+            // index always maps to the same completed content; SwiftUI keeps
+            // each block's LaTeX view across renders (parsed once, stable
+            // size). Index — not content — because a stalled model can emit
+            // identical paragraphs, which would collide under `id: \.self`.
+            ForEach(Array(committed.enumerated()), id: \.offset) { _, block in
+                LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(block))
                     .font(.body)
                     .foregroundColor(foreground)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     #if DEBUG
                     .errorMode(.error)
                     #endif
-                    // Force a fresh parse whenever the committed text grows —
-                    // LaTeXSwiftUI won't re-render the same view on input change.
-                    .id(parts.committed)
             }
 
-            if !parts.pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                // Not-yet-finalised sentence: plain text, dimmed, so the user
-                // sees live progress without half-rendered math.
-                Text(parts.pending)
+            if !pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(pending)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
