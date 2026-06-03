@@ -109,9 +109,16 @@ final class TokenBudgetingTests: XCTestCase {
     /// deep-profile cap that exposed the old hardcoded-ceiling overflow.
     func testToolBudgetNeverOverflowsWindowWithResponseAndInstructions() {
         for responseCap in [250, 500, 750, 1000, 1500, 3000, 5000] {
-            let effectiveResponse = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: responseCap)
+            // The model's response in tool mode is bounded by the
+            // tool-calling clamp (reserves the schema/appendix overhead), not
+            // the plain clamp — so a 3500/5000 request can't eat the window.
+            let effectiveResponse = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: responseCap)
             let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap)
+            // Reserve the REAL tool-calling cost: base instructions + the
+            // tool-usage appendix and Foundation Models tool schemas
+            // (`toolCallingOverheadTokens`) + prompt overhead + the response.
             let oneToolTurn = TokenBudgeting.instructionTokens
+                + TokenBudgeting.toolCallingOverheadTokens
                 + TokenBudgeting.promptOverheadTokens
                 + effectiveResponse
                 + toolBudget
@@ -127,10 +134,11 @@ final class TokenBudgetingTests: XCTestCase {
     /// response and instructions should also fit — the budget divides the
     /// available room by `assumedConcurrentToolReplies = 2`.
     func testToolBudgetSurvivesTwoConcurrentReplies() {
-        for responseCap in [500, 1000, 1500] {
-            let effectiveResponse = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: responseCap)
+        for responseCap in [500, 1000, 1500, 3500] {
+            let effectiveResponse = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: responseCap)
             let toolBudget = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap)
             let twoToolTurn = TokenBudgeting.instructionTokens
+                + TokenBudgeting.toolCallingOverheadTokens
                 + TokenBudgeting.promptOverheadTokens
                 + effectiveResponse
                 + (toolBudget * 2)
@@ -147,6 +155,29 @@ final class TokenBudgetingTests: XCTestCase {
     /// eats the window). Window-safety still takes precedence over the
     /// floor — that's covered by the overflow test above — but in normal
     /// operation the floor always holds.
+    /// The tool-calling response clamp must leave room for the overhead +
+    /// at least the minimum context, even at the app's maximum response
+    /// setting (3500) — otherwise tool calling has no window left and fails.
+    func testToolResponseClampLeavesRoomForOverhead() {
+        for responseCap in [500, 1500, 3500, 9999] {
+            let clamped = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: responseCap)
+            let reservedBesidesResponse = TokenBudgeting.instructionTokens
+                + TokenBudgeting.toolCallingOverheadTokens
+                + TokenBudgeting.promptOverheadTokens
+                + TokenBudgeting.minContextTokens
+            XCTAssertLessThanOrEqual(
+                clamped + reservedBesidesResponse,
+                TokenBudgeting.contextWindowLimit,
+                "Tool response clamp at \(responseCap) leaves no room for overhead + min context"
+            )
+        }
+        // And it must never EXCEED the plain clamp (it only ever reserves more).
+        XCTAssertLessThanOrEqual(
+            TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: 3500),
+            TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 3500)
+        )
+    }
+
     func testToolBudgetHonoursFloorForRealisticCaps() {
         for responseCap in [1, 50, 500, 1000, 1500] {
             XCTAssertGreaterThanOrEqual(
