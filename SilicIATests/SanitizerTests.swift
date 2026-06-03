@@ -110,4 +110,34 @@ final class SanitizerTests: XCTestCase {
         XCTAssertTrue(output.contains(#"\$1025.75"#),
                       "Currency escape lost during full sanitization pipeline: \(output)")
     }
+
+    // MARK: - Inline math whose closing `$` follows a digit
+
+    /// `$a_3$` must NOT have its closing `$` escaped as currency — the close
+    /// is a delimiter even though it follows the digit `3`. The old regex
+    /// escaped it, mis-pairing every following span and garbling the render.
+    func testInlineMathClosingDollarAfterDigitIsNotEscaped() {
+        let input = #"coefficients $a_3$, $a_2$, $a_1$ et $a_0$"#
+        let output = ModelOutputLaTeXSanitizer.escapeCurrencyDollars(in: input)
+        // No `$` should have been escaped — these are all balanced math spans.
+        XCTAssertFalse(output.contains(#"\$"#), "math delimiters were wrongly escaped: \(output)")
+        XCTAssertEqual(output, input)
+    }
+
+    /// Real math interleaved with real currency: only the currency `$` is
+    /// escaped, the math delimiters are preserved.
+    func testCurrencyAndMathCoexist() {
+        let input = #"price $5 for $x$ items"#
+        let output = ModelOutputLaTeXSanitizer.escapeCurrencyDollars(in: input)
+        XCTAssertTrue(output.contains(#"\$5"#), "currency not escaped: \(output)")
+        XCTAssertTrue(output.contains("$x$"), "math span broken: \(output)")
+    }
+
+    /// A digit-adjacent closing `$` survives the FULL pipeline (regression
+    /// for the spline-coefficients render).
+    func testDigitAdjacentMathSurvivesFullPipeline() {
+        let input = #"4 coefficients : $a_3$, $a_2$, $a_1$ et $a_0$."#
+        let output = ModelOutputLaTeXSanitizer.finalizeSanitizedText(input)
+        XCTAssertFalse(output.contains(#"\$"#), "math delimiter escaped in pipeline: \(output)")
+    }
 }

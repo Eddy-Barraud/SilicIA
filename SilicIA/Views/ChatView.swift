@@ -478,8 +478,33 @@ struct ChatView: View {
         .glassCard(cornerRadius: 16)
     }
 
+    /// Invisible marker pinned to the end of the transcript so we can scroll
+    /// to the bottom on send / while streaming.
+    private static let bottomAnchorID = "chatBottomAnchor"
+
+    /// Whether the transcript is currently scrolled near its bottom. While
+    /// true we follow a streaming reply down; once the user scrolls up to
+    /// re-read, this flips false and we stop tugging them back. Starts true
+    /// (a fresh/empty transcript is "at the bottom").
+    @State private var isNearBottom = true
+
+    /// How close (in points) to the bottom still counts as "near bottom".
+    private static let nearBottomThreshold: CGFloat = 80
+
+    /// Scrolls the transcript to the bottom anchor.
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+        }
+    }
+
     /// Renders message history and in-progress state.
     private var messagesView: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(spacing: 10) {
                 if chatService.messages.isEmpty {
@@ -551,6 +576,11 @@ struct ChatView: View {
                         Spacer()
                     }
                 }
+
+                // Bottom anchor — scroll target for send / streaming.
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchorID)
             }
             .frame(maxWidth: .infinity)
         }
@@ -560,6 +590,27 @@ struct ChatView: View {
         // the look users preferred before the Liquid Glass migration.
         .background(PlatformColors.textBackground)
         .cornerRadius(10)
+        // Track how close to the bottom the user is, so we don't yank them
+        // back down while they're scrolling up to re-read.
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            let bottomEdge = geometry.contentOffset.y + geometry.containerSize.height
+            return bottomEdge >= geometry.contentSize.height - Self.nearBottomThreshold
+        } action: { _, nearBottom in
+            isNearBottom = nearBottom
+        }
+        // Sending a message is the user's own action → always scroll to it.
+        .onChange(of: chatService.messages.count) {
+            scrollToBottom(proxy)
+            isNearBottom = true
+        }
+        // While the reply streams, only follow it down if the user hasn't
+        // scrolled up — otherwise leave their position alone.
+        .onChange(of: chatService.messages.last?.content) {
+            if isNearBottom {
+                scrollToBottom(proxy)
+            }
+        }
+        }
     }
 
     /// Renders assistant replies with LaTeX-aware text and keeps plaintext for user turns.
@@ -567,7 +618,7 @@ struct ChatView: View {
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
             VStack(alignment: .leading, spacing: 8) {
-                ProgressiveLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
+                StreamingLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
 
                 if let citations = message.citations,
                    !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

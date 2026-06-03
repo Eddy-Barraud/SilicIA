@@ -660,7 +660,7 @@ struct SearchView: View {
                 }
 
                 if !aiService.summary.isEmpty {
-                    ProgressiveLaTeXText(text: aiService.summary, isStreaming: aiService.isSummarizing)
+                    StreamingLaTeXText(text: aiService.summary, isStreaming: aiService.isSummarizing)
 
                     if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         Divider()
