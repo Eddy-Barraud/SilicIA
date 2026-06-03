@@ -6,146 +6,77 @@
 //
 //  The model streams tokens into a growing string. Rather than wait for the
 //  whole answer before rendering math (the old `ProgressiveLaTeXText`
-//  behaviour) or feed the LaTeX parser half-written `$...$` (which flickers
-//  error glyphs), this view:
+//  behaviour) or feed the LaTeX parser a half-written `$...$` / `\[...\]`
+//  (which flickers error glyphs), this view renders the longest
+//  math-balanced prefix — every sentence / display block completed so far —
+//  as real `LaTeX`, and shows the still-incomplete trailing sentence as dim
+//  plain text so the stream stays visibly live.
 //
-//    1. splits the accumulated text into math-balanced segments at sentence
-//       / display-math boundaries (`LaTeXStreamSegmenter`),
-//    2. reveals one completed segment at a time on a small delay, growing a
-//       "committed" prefix that is rendered as real `LaTeX`, and
-//    3. shows the still-incomplete trailing sentence as dim plain text so
-//       the stream stays visibly live.
+//  The split is a PURE function of the inputs (`text`, `isStreaming`):
+//    - committed = `text` up to the last safe boundary (LaTeXStreamSegmenter)
+//    - pending   = the remainder, shown as plain text while streaming
+//    - when not streaming, committed = the whole answer, pending = ""
 //
-//  When streaming ends, everything is flushed and rendered as LaTeX.
+//  IMPORTANT: `LaTeXSwiftUI.LaTeX` does NOT re-parse when its input string
+//  changes for the same view identity — it renders once. During streaming
+//  the committed prefix grows (a completed equation moves from `pending` into
+//  `committed`), so without forcing a refresh the equation would silently
+//  vanish (rendered by a stale LaTeX view that never updated) until the view
+//  was rebuilt (e.g. visiting Settings and back). We therefore tag the LaTeX
+//  view with `.id(committed)` so SwiftUI re-creates it whenever the committed
+//  text changes — a fresh parse, every time it grows.
 //
 
 import SwiftUI
 import LaTeXSwiftUI
-
-/// Owns the reveal cadence. An `@Observable` (not view state) so a single
-/// long-running pump can read the latest streamed text — a SwiftUI `.task`
-/// captured on a value-type View can't see later mutations.
-@MainActor
-@Observable
-final class StreamingLaTeXReveal {
-    /// Math-balanced prefix safe to render as LaTeX right now.
-    private(set) var committedText = ""
-    /// Trailing, still-incomplete sentence — shown as plain text.
-    private(set) var pendingText = ""
-
-    private var fullText = ""
-    private var streaming = false
-    private var boundaries: [Int] = []
-    private var revealedCount = 0
-    private var pump: Task<Void, Never>?
-    private let revealDelay: Duration
-
-    init(revealDelay: Duration = .milliseconds(90)) {
-        self.revealDelay = revealDelay
-    }
-
-    /// Feed the latest streamed text + state. Idempotent; call on every change.
-    func update(text: String, isStreaming: Bool) {
-        fullText = text
-        streaming = isStreaming
-        boundaries = LaTeXStreamSegmenter.safeBoundaries(text)
-
-        guard isStreaming else {
-            // Done — reveal the entire answer (the final tail is complete even
-            // if it doesn't end in a terminator).
-            revealedCount = boundaries.count
-            committedText = text
-            pendingText = ""
-            pump?.cancel()
-            pump = nil
-            return
-        }
-
-        // Cap any over-count from a shrink (shouldn't happen — text only grows).
-        revealedCount = min(revealedCount, boundaries.count)
-        recomputeVisible()
-        startPumpIfNeeded()
-    }
-
-    /// Recomputes the committed / pending split from the current reveal count.
-    private func recomputeVisible() {
-        let length: Int
-        if revealedCount > 0, !boundaries.isEmpty {
-            length = boundaries[min(revealedCount, boundaries.count) - 1]
-        } else {
-            length = 0
-        }
-        committedText = String(fullText.prefix(length))
-        pendingText = String(fullText.dropFirst(length))
-    }
-
-    private func startPumpIfNeeded() {
-        guard pump == nil else { return }
-        pump = Task { [weak self] in
-            while !Task.isCancelled {
-                guard let self else { return }
-                if self.revealedCount < self.boundaries.count {
-                    try? await Task.sleep(for: self.revealDelay)
-                    if Task.isCancelled { return }
-                    self.revealedCount = min(self.revealedCount + 1, self.boundaries.count)
-                    self.recomputeVisible()
-                } else if !self.streaming {
-                    return
-                } else {
-                    // Caught up; wait for more text to complete a sentence.
-                    try? await Task.sleep(for: self.revealDelay)
-                }
-            }
-        }
-    }
-}
 
 /// Drop-in replacement for `ProgressiveLaTeXText` that renders streamed math
 /// progressively. Same `(text:isStreaming:)` call site.
 struct StreamingLaTeXText: View {
     let text: String
     let isStreaming: Bool
-    var revealDelay: Duration = .milliseconds(90)
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var reveal: StreamingLaTeXReveal
-
-    init(text: String, isStreaming: Bool, revealDelay: Duration = .milliseconds(90)) {
-        self.text = text
-        self.isStreaming = isStreaming
-        self.revealDelay = revealDelay
-        _reveal = State(initialValue: StreamingLaTeXReveal(revealDelay: revealDelay))
-    }
-
     private var foreground: Color { colorScheme == .dark ? .white : .black }
 
+    /// Splits the current text into the math-balanced prefix to render as
+    /// LaTeX and the trailing incomplete remainder. Once streaming ends the
+    /// whole answer is committed (its final sentence is complete even without
+    /// a trailing terminator).
+    private var split: (committed: String, pending: String) {
+        guard isStreaming else { return (text, "") }
+        let boundaries = LaTeXStreamSegmenter.safeBoundaries(text)
+        let length = boundaries.last ?? 0
+        return (String(text.prefix(length)), String(text.dropFirst(length)))
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            if !reveal.committedText.isEmpty {
-                LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(reveal.committedText))
+        let parts = split
+        #if DEBUG
+        let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) committed=\(parts.committed.count) pending=\(parts.pending.count)")
+        #endif
+        return VStack(alignment: .leading, spacing: 2) {
+            if !parts.committed.isEmpty {
+                LaTeX(ModelOutputLaTeXSanitizer.finalizeSanitizedText(parts.committed))
                     .font(.body)
                     .foregroundColor(foreground)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     #if DEBUG
                     .errorMode(.error)
                     #endif
+                    // Force a fresh parse whenever the committed text grows —
+                    // LaTeXSwiftUI won't re-render the same view on input change.
+                    .id(parts.committed)
             }
 
-            if !reveal.pendingText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !parts.pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 // Not-yet-finalised sentence: plain text, dimmed, so the user
                 // sees live progress without half-rendered math.
-                Text(reveal.pendingText)
+                Text(parts.pending)
                     .font(.body)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-        .animation(.easeOut(duration: 0.15), value: reveal.committedText)
-        .onChange(of: text, initial: true) {
-            reveal.update(text: text, isStreaming: isStreaming)
-        }
-        .onChange(of: isStreaming) {
-            reveal.update(text: text, isStreaming: isStreaming)
         }
     }
 }
