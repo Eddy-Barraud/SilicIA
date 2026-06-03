@@ -478,8 +478,24 @@ struct ChatView: View {
         .glassCard(cornerRadius: 16)
     }
 
+    /// Invisible marker pinned to the end of the transcript so we can scroll
+    /// to the bottom on send / while streaming.
+    private static let bottomAnchorID = "chatBottomAnchor"
+
+    /// Scrolls the transcript to the bottom anchor.
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+        }
+    }
+
     /// Renders message history and in-progress state.
     private var messagesView: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             LazyVStack(spacing: 10) {
                 if chatService.messages.isEmpty {
@@ -551,6 +567,11 @@ struct ChatView: View {
                         Spacer()
                     }
                 }
+
+                // Bottom anchor — scroll target for send / streaming.
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchorID)
             }
             .frame(maxWidth: .infinity)
         }
@@ -560,6 +581,16 @@ struct ChatView: View {
         // the look users preferred before the Liquid Glass migration.
         .background(PlatformColors.textBackground)
         .cornerRadius(10)
+        // Keep the latest content in view: jump to the bottom when a message
+        // is sent (count changes) and follow the assistant's reply as it
+        // streams (last message content grows).
+        .onChange(of: chatService.messages.count) {
+            scrollToBottom(proxy)
+        }
+        .onChange(of: chatService.messages.last?.content) {
+            scrollToBottom(proxy)
+        }
+        }
     }
 
     /// Renders assistant replies with LaTeX-aware text and keeps plaintext for user turns.
