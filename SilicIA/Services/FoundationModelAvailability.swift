@@ -23,6 +23,11 @@ import UIKit
 /// type — explains how to enable Apple Intelligence, or that the device
 /// can't run it.
 enum FoundationModelAvailability {
+    #if DEBUG
+    /// Test seam: set this to override the availability check during testing.
+    static var isTestingOverride: State? = nil
+    #endif
+
     /// Result of `check()`. The `.unavailable` case carries a structured
     /// `Reason` so the UI can decide whether to offer a "open Settings"
     /// affordance and which copy to show.
@@ -91,6 +96,11 @@ enum FoundationModelAvailability {
     /// they're about to need the model (the user may have toggled Apple
     /// Intelligence on while the app was running).
     static func check() -> State {
+        #if DEBUG
+        if let override = isTestingOverride {
+            return override
+        }
+        #endif
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available

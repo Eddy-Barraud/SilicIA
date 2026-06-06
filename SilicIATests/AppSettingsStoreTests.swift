@@ -23,11 +23,17 @@ final class AppSettingsStoreTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
+        #if DEBUG
+        FoundationModelAvailability.isTestingOverride = .available
+        #endif
         snapshot = AppSettingsStore.shared.settings
     }
 
     override func tearDown() async throws {
         AppSettingsStore.shared.settings = snapshot
+        #if DEBUG
+        FoundationModelAvailability.isTestingOverride = nil
+        #endif
         try await super.tearDown()
     }
 
