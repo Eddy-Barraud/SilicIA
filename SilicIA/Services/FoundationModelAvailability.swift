@@ -215,7 +215,7 @@ enum FoundationModelAvailability {
         #elseif canImport(UIKit)
         Task {
             if let url = URL(string: UIApplication.openSettingsURLString) {
-                let success = await UIApplication.shared.open(url, options: [:])
+                await UIApplication.shared.open(url, options: [:])
             }
             
         }
