@@ -603,22 +603,24 @@ struct SearchView: View {
 
                 Spacer()
 
-                Button {
-                    let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
-                    guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-                    PlatformClipboard.copyPlainText(textToCopy)
-                    didCopySummary = true
-                    Task {
-                        try? await Task.sleep(for: .seconds(1.2))
-                        didCopySummary = false
+                if FoundationModelAvailability.check().isAvailable {
+                    Button {
+                        let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
+                        guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                        PlatformClipboard.copyPlainText(textToCopy)
+                        didCopySummary = true
+                        Task {
+                            try? await Task.sleep(for: .seconds(1.2))
+                            didCopySummary = false
+                        }
+                    } label: {
+                        Image(systemName: didCopySummary ? "checkmark.circle.fill" : "doc.on.doc")
+                            .foregroundColor(didCopySummary ? .green : .secondary)
                     }
-                } label: {
-                    Image(systemName: didCopySummary ? "checkmark.circle.fill" : "doc.on.doc")
-                        .foregroundColor(didCopySummary ? .green : .secondary)
+                    .buttonStyle(.plain)
+                    .help(L.t("common.copy", language: settings.language))
+                    .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .buttonStyle(.plain)
-                .help(L.t("common.copy", language: settings.language))
-                .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if aiService.isSummarizing || (settings.isFirstGuessEnabled && isGeneratingFirstGuess) {
                     ProgressView()
@@ -626,95 +628,99 @@ struct SearchView: View {
                 }
             }
 
-            if settings.isFirstGuessEnabled {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(L.t("search.summary.firstGuess", language: settings.language))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-
-                    if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                        Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
-                            .foregroundColor(.secondary)
-                            .italic()
-                    } else if !firstGuessText.isEmpty {
-                        ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
-                    } else {
-                        Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
-                            .foregroundColor(.secondary)
-                            .italic()
-                    }
-                }
-
-                Divider()
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("search.summary.webContextAnswer", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                if aiService.isSummarizing {
-                    Text(L.t("search.summary.analyzingPages", language: settings.language))
-                        .foregroundColor(.secondary)
-                        .italic()
-                }
-
-                if !aiService.summary.isEmpty {
-                    StreamingLaTeXText(text: aiService.summary, isStreaming: aiService.isSummarizing)
-
-                    if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Divider()
-                        Text(L.t("search.summary.topSources", language: settings.language))
+            if case .unavailable(let reason) = FoundationModelAvailability.check() {
+                ModelAvailabilityNotice(reason: reason, language: settings.language, drawBackground: false)
+            } else {
+                if settings.isFirstGuessEnabled {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(L.t("search.summary.firstGuess", language: settings.language))
                             .font(.subheadline)
                             .fontWeight(.semibold)
 
-                         if let attributedCitations = try? AttributedString(
-                            markdown: aiService.citations,
-                            options: AttributedString.MarkdownParsingOptions(
-                                interpretedSyntax: .inlineOnlyPreservingWhitespace
-                            )
-                        ) {
-                            #if canImport(UIKit)
-                            citationLinksView(from: aiService.citations)
-                            #else
-                            Text(attributedCitations)
-                                .font(.footnote)
+                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
+                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
                                 .foregroundColor(.secondary)
-                                .tint(.accentColor)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            #endif
+                                .italic()
+                        } else if !firstGuessText.isEmpty {
+                            ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
                         } else {
-                            Text(aiService.citations)
-                                .font(.footnote)
+                            Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
                                 .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .italic()
                         }
                     }
-                } else if !aiService.isSummarizing {
-                    Text(L.t("search.summary.waitingAnswer", language: settings.language))
-                        .foregroundColor(.secondary)
-                        .italic()
+
+                    Divider()
                 }
-            }
 
-            // Generation time shown at the bottom-right once complete
-            if !aiService.isSummarizing && !aiService.summary.isEmpty {
-                HStack {
-                    Spacer()
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(L.t("search.summary.webContextAnswer", language: settings.language))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
 
-                    VStack(alignment: .trailing, spacing: 3) {
-                        if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
-                            Text(L.t("search.summary.timeToFirst", language: settings.language, elapsed))
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                    if aiService.isSummarizing {
+                        Text(L.t("search.summary.analyzingPages", language: settings.language))
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+
+                    if !aiService.summary.isEmpty {
+                        StreamingLaTeXText(text: aiService.summary, isStreaming: aiService.isSummarizing)
+
+                        if !aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Divider()
+                            Text(L.t("search.summary.topSources", language: settings.language))
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+
+                             if let attributedCitations = try? AttributedString(
+                                markdown: aiService.citations,
+                                options: AttributedString.MarkdownParsingOptions(
+                                    interpretedSyntax: .inlineOnlyPreservingWhitespace
+                                )
+                            ) {
+                                #if canImport(UIKit)
+                                citationLinksView(from: aiService.citations)
+                                #else
+                                Text(attributedCitations)
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                                    .tint(.accentColor)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                #endif
+                            } else {
+                                Text(aiService.citations)
+                                    .font(.footnote)
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
                         }
+                    } else if !aiService.isSummarizing {
+                        Text(L.t("search.summary.waitingAnswer", language: settings.language))
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
+                }
 
-                        if let elapsed = summaryElapsedSeconds {
-                            Text(L.t("search.summary.generatedIn", language: settings.language, elapsed))
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
+                // Generation time shown at the bottom-right once complete
+                if !aiService.isSummarizing && !aiService.summary.isEmpty {
+                    HStack {
+                        Spacer()
+
+                        VStack(alignment: .trailing, spacing: 3) {
+                            if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
+                                Text(L.t("search.summary.timeToFirst", language: settings.language, elapsed))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
+                            if let elapsed = summaryElapsedSeconds {
+                                Text(L.t("search.summary.generatedIn", language: settings.language, elapsed))
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+
                         }
-
                     }
                 }
             }
@@ -869,17 +875,41 @@ struct SearchView: View {
                 }
                 Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             // First Guess Toggle
-            Toggle(isOn: $settingsStore.settings.isFirstGuessEnabled) {
-                Text(L.t("search.settings.firstGuessToggle", language: settings.language))
-                    .font(.subheadline)
+            VStack(alignment: .leading, spacing: 4) {
+                let isModelAvailable = FoundationModelAvailability.check().isAvailable
+                Toggle(isOn: $settingsStore.settings.isFirstGuessEnabled) {
+                    Text(L.t("search.settings.firstGuessToggle", language: settings.language))
+                        .font(.subheadline)
+                }
+                .disabled(!isModelAvailable)
+                .opacity(!isModelAvailable ? 0.5 : 1.0)
+
+                if !isModelAvailable {
+                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
             }
 
             // Web Summaries Toggle
-            Toggle(isOn: $settingsStore.settings.isWebSummariesEnabled) {
-                Text(L.t("search.settings.webSummariesToggle", language: settings.language))
-                    .font(.subheadline)
+            VStack(alignment: .leading, spacing: 4) {
+                let isModelAvailable = FoundationModelAvailability.check().isAvailable
+                Toggle(isOn: $settingsStore.settings.isWebSummariesEnabled) {
+                    Text(L.t("search.settings.webSummariesToggle", language: settings.language))
+                        .font(.subheadline)
+                }
+                .disabled(!isModelAvailable)
+                .opacity(!isModelAvailable ? 0.5 : 1.0)
+
+                if !isModelAvailable {
+                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
+                        .font(.caption2)
+                        .foregroundColor(.red)
+                }
             }
 
             // Search Sources
@@ -960,6 +990,8 @@ struct SearchView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             // Max Context Tokens
             VStack(alignment: .leading, spacing: 8) {
@@ -986,6 +1018,8 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
                 }
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             // Model Language
             VStack(alignment: .leading, spacing: 8) {
@@ -1011,6 +1045,7 @@ struct SearchView: View {
             // / currentDateTime / webSearch on demand instead of receiving
             // a pre-baked context block in the summary prompt.
             VStack(alignment: .leading, spacing: 8) {
+                let isModelAvailable = FoundationModelAvailability.check().isAvailable
                 Toggle(isOn: $settingsStore.settings.useToolCalling) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Tool calling (experimental)")
@@ -1019,6 +1054,14 @@ struct SearchView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+                .disabled(!isModelAvailable)
+                .opacity(!isModelAvailable ? 0.5 : 1.0)
+
+                if !isModelAvailable {
+                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
+                        .font(.caption2)
+                        .foregroundColor(.red)
                 }
             }
         }
@@ -1323,7 +1366,8 @@ struct SearchView: View {
         aiService.debugNotes = []
         #endif
 
-        if !noAIOnly && settings.isFirstGuessEnabled {
+        let isModelAvailable = FoundationModelAvailability.check().isAvailable
+        if !noAIOnly && settings.isFirstGuessEnabled && isModelAvailable {
             isGeneratingFirstGuess = true
             Task {
                 let firstGuessStart = Date()
@@ -1463,6 +1507,7 @@ struct SearchView: View {
     private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil, queries: [String]? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
+        let isModelAvailable = FoundationModelAvailability.check().isAvailable
         _ = await aiService.summarize(
             query: searchQuery,
             results: summaryResults ?? searchResults,
@@ -1478,6 +1523,7 @@ struct SearchView: View {
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
+            generateAnswer: isModelAvailable,
             onMatchingScores: { scores in
                 Task { @MainActor in
                     // AIService chunks the full overfetched `fetchedResults`

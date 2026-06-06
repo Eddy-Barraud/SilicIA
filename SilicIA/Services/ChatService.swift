@@ -109,6 +109,14 @@ final class ChatService: ObservableObject {
         isResponding = true
         defer { isResponding = false }
 
+        let availability = FoundationModelAvailability.check()
+        if case .unavailable(let reason) = availability {
+            let assistantID = UUID()
+            messages.append(ChatMessage(id: assistantID, role: .assistant, content: "", citations: nil, modelAvailabilityReason: reason))
+            persistMessage(role: "assistant", content: "", citations: nil, modelAvailabilityReason: reason.stringValue)
+            return
+        }
+
         // Compute every effective/clamped value ONCE up front and reuse for the
         // cache key, the cache-hit comparison, and downstream calls. Clamping
         // is idempotent, but doing it twice (once for the key, once after) was
@@ -1406,7 +1414,7 @@ final class ChatService: ObservableObject {
         #endif
     }
     /// Persists a message to the current SwiftData conversation.
-    private func persistMessage(role: String, content: String, citations: String?) {
+    private func persistMessage(role: String, content: String, citations: String?, modelAvailabilityReason: String? = nil) {
         guard let modelContext else { return }
 
         // Create conversation if needed
@@ -1432,7 +1440,7 @@ final class ChatService: ObservableObject {
         guard let conversation = currentConversation else { return }
 
         // Create and add message
-        let message = Message(role: role, content: content, citations: citations)
+        let message = Message(role: role, content: content, citations: citations, modelAvailabilityReason: modelAvailabilityReason)
         conversation.messages.append(message)
         conversation.updatedAt = Date()
 
@@ -1576,7 +1584,7 @@ final class ChatService: ObservableObject {
         // Convert SwiftData messages to ChatMessage for UI
         messages = conversation.messages
             .sorted { $0.timestamp < $1.timestamp }
-            .map { ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content, citations: $0.citations) }
+            .map { ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content, citations: $0.citations, modelAvailabilityReason: $0.modelAvailabilityReason.flatMap { FoundationModelAvailability.Reason(stringValue: $0) }) }
     }
 
     /// Builds the PDF stamp for a freshly created conversation from
@@ -1729,11 +1737,13 @@ struct ChatMessage: Identifiable {
     let role: Role
     var content: String
     var citations: String?
+    var modelAvailabilityReason: FoundationModelAvailability.Reason?
 
-    init(id: UUID = UUID(), role: Role, content: String, citations: String? = nil) {
+    init(id: UUID = UUID(), role: Role, content: String, citations: String? = nil, modelAvailabilityReason: FoundationModelAvailability.Reason? = nil) {
         self.id = id
         self.role = role
         self.content = content
         self.citations = citations
+        self.modelAvailabilityReason = modelAvailabilityReason
     }
 }

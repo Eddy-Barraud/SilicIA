@@ -336,6 +336,8 @@ struct ChatView: View {
                 }
                 Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -361,6 +363,8 @@ struct ChatView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -386,6 +390,8 @@ struct ChatView: View {
                     .foregroundColor(.secondary)
                 }
             }
+            .disabled(!FoundationModelAvailability.check().isAvailable)
+            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
             if mode != .pdfTalkme {
             VStack(alignment: .leading, spacing: 8) {
@@ -463,6 +469,7 @@ struct ChatView: View {
             // of receiving pre-baked RAG chunks in the prompt. Off by
             // default while behaviour matures.
             VStack(alignment: .leading, spacing: 8) {
+                let isModelAvailable = FoundationModelAvailability.check().isAvailable
                 Toggle(isOn: $settingsStore.settings.useToolCalling) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Tool calling (experimental)")
@@ -471,6 +478,14 @@ struct ChatView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
+                }
+                .disabled(!isModelAvailable)
+                .opacity(!isModelAvailable ? 0.5 : 1.0)
+
+                if !isModelAvailable {
+                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
+                        .font(.caption2)
+                        .foregroundColor(.red)
                 }
             }
         }
@@ -618,25 +633,29 @@ struct ChatView: View {
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
             VStack(alignment: .leading, spacing: 8) {
-                StreamingLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
+                if let reason = message.modelAvailabilityReason {
+                    ModelAvailabilityNotice(reason: reason, language: settings.language, drawBackground: false)
+                } else {
+                    StreamingLaTeXText(text: message.content, isStreaming: isStreamingAssistantMessage(message))
 
-                if let citations = message.citations,
-                   !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Divider()
+                    if let citations = message.citations,
+                       !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Divider()
 
-                    if let attributedCitations = try? AttributedString(markdown: citations) {
-                        #if canImport(UIKit)
-                        citationLinksView(from: citations)
-                        #else
-                        Text(attributedCitations)
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
-                            .tint(.accentColor)
-                        #endif
-                    } else {
-                        Text(citations)
-                            .font(.footnote)
-                            .foregroundColor(.secondary)
+                        if let attributedCitations = try? AttributedString(markdown: citations) {
+                            #if canImport(UIKit)
+                            citationLinksView(from: citations)
+                            #else
+                            Text(attributedCitations)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .tint(.accentColor)
+                            #endif
+                        } else {
+                            Text(citations)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                        }
                     }
                 }
             }

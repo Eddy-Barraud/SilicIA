@@ -26,14 +26,6 @@ struct SilicIAApp: App {
         let purchaseManager = PurchaseManager()
         _purchaseManager = StateObject(wrappedValue: purchaseManager)
         _entitlements = StateObject(wrappedValue: Entitlements(purchaseManager: purchaseManager))
-        // Decide *before* the window appears whether to render the
-        // blocking screen, so the user never sees a flash of the main
-        // UI on devices where Apple Intelligence isn't available.
-        if case .unavailable(let reason) = FoundationModelAvailability.check() {
-            _modelUnavailableMessage = State(initialValue: reason)
-        } else {
-            _modelUnavailableMessage = State(initialValue: nil)
-        }
     }
     private static let sharedAppGroupIdentifier = "group.fr.trevalim.silicia.shared"
     private static let sharedInboxDirectoryName = "IncomingSharedFiles"
@@ -47,10 +39,6 @@ struct SilicIAApp: App {
     /// while `Entitlements.paywallActive` is false.
     @StateObject private var purchaseManager: PurchaseManager
     @StateObject private var entitlements: Entitlements
-    /// When non-nil, the entire window is replaced by the blocking
-    /// `ModelUnavailableView` — Apple Intelligence isn't available on
-    /// this device and the app has no NLP fallback.
-    @State private var modelUnavailableMessage: String?
 
     private static let imageFileExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
@@ -62,43 +50,43 @@ struct SilicIAApp: App {
     /// Declares the app's primary window scene.
     var body: some Scene {
         WindowGroup {
-            if let message = modelUnavailableMessage {
-                ModelUnavailableView(message: message)
-            } else {
-                ContentView(
-                    sharedURLs: $sharedURLs,
-                    sharedPDFs: $sharedPDFs,
-                    sharedImages: $sharedImages,
-                    pendingSearchQuery: $pendingSearchQuery
-                )
-                    .environmentObject(purchaseManager)
-                    .environmentObject(entitlements)
-                    // Dormant: only fetch product metadata once the paywall
-                    // is actually switched on, so v1 makes no StoreKit calls.
-                    .task {
-                        if Entitlements.paywallActive {
-                            await purchaseManager.loadProduct()
-                        }
+            // The app stays usable for everyone: when Apple Intelligence
+            // isn't available, the chat/search surfaces surface an inline
+            // notice and fall back to web search + ranked source cards
+            // instead of a blocking screen.
+            ContentView(
+                sharedURLs: $sharedURLs,
+                sharedPDFs: $sharedPDFs,
+                sharedImages: $sharedImages,
+                pendingSearchQuery: $pendingSearchQuery
+            )
+                .environmentObject(purchaseManager)
+                .environmentObject(entitlements)
+                // Dormant: only fetch product metadata once the paywall
+                // is actually switched on, so v1 makes no StoreKit calls.
+                .task {
+                    if Entitlements.paywallActive {
+                        await purchaseManager.loadProduct()
                     }
-                    .onOpenURL { url in
-                        handleIncomingURL(url)
-                    }
+                }
+                .onOpenURL { url in
+                    handleIncomingURL(url)
+                }
 #if os(macOS)
-                    .onAppear {
-                        appDelegate.onOpenURLs = { urls in
-                            for url in urls {
-                                handleIncomingURL(url)
-                            }
-                        }
-                        let pending = appDelegate.drainPendingURLs()
-                        if !pending.isEmpty {
-                            for url in pending {
-                                handleIncomingURL(url)
-                            }
+                .onAppear {
+                    appDelegate.onOpenURLs = { urls in
+                        for url in urls {
+                            handleIncomingURL(url)
                         }
                     }
+                    let pending = appDelegate.drainPendingURLs()
+                    if !pending.isEmpty {
+                        for url in pending {
+                            handleIncomingURL(url)
+                        }
+                    }
+                }
 #endif
-            }
         }
         #if os(macOS)
             .defaultSize(width: 500, height: 900)

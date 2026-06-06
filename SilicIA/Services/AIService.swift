@@ -247,7 +247,13 @@ class AIService: ObservableObject {
     /// - Parameter queries: Full query set (user + derived). When more than one query is provided
     ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
     ///   combined query vector.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    /// - Parameter generateAnswer: When false, the method still scrapes,
+    ///   chunks, ranks and emits per-source match scores (so the caller can
+    ///   render retrieval-ranked source cards), but skips the Foundation
+    ///   Models generation step entirely and returns an empty summary. Used
+    ///   when Apple Intelligence is unavailable — the search experience stays
+    ///   functional as web-search-with-ranked-sources without a written answer.
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         // Reset the tool-results accumulator at the start of every
@@ -384,26 +390,31 @@ class AIService: ObservableObject {
         #if DEBUG
         let generationStart = Date()
         #endif
-        let summary = await generateSummaryWithFoundationModels(
-            query: query,
-            context: selected.selectedContext,
-            results: results,
-            temperature: temperature,
-            maxTokens: maxTokens,
-            language: language,
-            profile: profile,
-            useToolCalling: useToolCalling,
-            corpusChunks: selected.selectedChunks.map(\.chunk),
-            maxDuckDuckGoResults: maxDuckDuckGoResults,
-            maxWikipediaResults: maxWikipediaResults,
-            useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia,
-            onPartialUpdate: { [weak self] partial in
-                guard let self else { return }
-                self.summary = partial
-                onSummaryPartialUpdate?(partial)
-            }
-        )
+        let summary: String
+        if generateAnswer {
+            summary = await generateSummaryWithFoundationModels(
+                query: query,
+                context: selected.selectedContext,
+                results: results,
+                temperature: temperature,
+                maxTokens: maxTokens,
+                language: language,
+                profile: profile,
+                useToolCalling: useToolCalling,
+                corpusChunks: selected.selectedChunks.map(\.chunk),
+                maxDuckDuckGoResults: maxDuckDuckGoResults,
+                maxWikipediaResults: maxWikipediaResults,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia,
+                onPartialUpdate: { [weak self] partial in
+                    guard let self else { return }
+                    self.summary = partial
+                    onSummaryPartialUpdate?(partial)
+                }
+            )
+        } else {
+            summary = ""
+        }
 
         // Tool-calling mode: now that the model has finished, the
         // `toolFetchedResults` accumulator holds every URL the model
@@ -431,7 +442,7 @@ class AIService: ObservableObject {
             seconds: Date().timeIntervalSince(generationStart)
         ))
         #endif
-        let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
+        let citations = generateAnswer ? RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language) : ""
 
         #if DEBUG
         debugTimings.append(TimingMetric(

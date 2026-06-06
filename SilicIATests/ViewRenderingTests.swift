@@ -90,9 +90,9 @@ final class ViewRenderingTests: XCTestCase {
         )
     }
 
-    /// The blocking screen shown when Apple Intelligence is unavailable.
-    func testModelUnavailableViewRenders() {
-        assertRenders(ModelUnavailableView(message: "Test reason"))
+    /// The inline notice shown when Apple Intelligence is unavailable.
+    func testModelAvailabilityNoticeRenders() {
+        assertRenders(ModelAvailabilityNotice(reason: .notEnabled, language: .english))
     }
 
     /// The progressive LaTeX view renders in both the mid-stream and the

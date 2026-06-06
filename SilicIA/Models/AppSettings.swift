@@ -29,16 +29,43 @@ struct AppSettings: Codable, Equatable {
     var maxResponseTokens: Int = 500
     var temperature: Double = 0.4
     var maxContextTokens: Int = 3400
-    var isFirstGuessEnabled: Bool = true
-    var isWebSummariesEnabled: Bool = false
+    private var _isFirstGuessEnabled: Bool = true
+    var isFirstGuessEnabled: Bool {
+        get {
+            guard FoundationModelAvailability.check().isAvailable else { return false }
+            return _isFirstGuessEnabled
+        }
+        set {
+            _isFirstGuessEnabled = newValue
+        }
+    }
+    private var _isWebSummariesEnabled: Bool = false
+    var isWebSummariesEnabled: Bool {
+        get {
+            guard FoundationModelAvailability.check().isAvailable else { return false }
+            return _isWebSummariesEnabled
+        }
+        set {
+            _isWebSummariesEnabled = newValue
+        }
+    }
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
     var language: ModelLanguage = .english
+    private var _useToolCalling: Bool = false
     /// Experimental: when true, ChatService runs the model with on-demand
     /// `searchContext` + `calculate` tools instead of stuffing pre-selected
     /// RAG chunks into the prompt. Off by default — gives the user a
     /// reversible escape hatch while the tool path matures.
-    var useToolCalling: Bool = false
+    var useToolCalling: Bool {
+        get {
+            guard FoundationModelAvailability.check().isAvailable else { return false }
+            return _useToolCalling
+        }
+        set {
+            _useToolCalling = newValue
+        }
+    }
 
     /// Combined per-search result cap exposed for callers that still need a single number
     /// (e.g. results display limit, scraping cap).
@@ -188,6 +215,11 @@ struct AppSettings: Codable, Equatable {
             minContextTokens: TokenBudgeting.minContextTokens
         )
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
+        if !FoundationModelAvailability.check().isAvailable {
+            copy.useToolCalling = false
+            copy.isFirstGuessEnabled = false
+            copy.isWebSummariesEnabled = false
+        }
         return copy
     }
 }
