@@ -29,6 +29,24 @@
 
 import Foundation
 
+/// Error thrown when a tool-calling limit is violated, preventing runaway model loops.
+enum ToolError: Error, LocalizedError {
+    case duplicate(tool: String, count: Int)
+    case toolBudgetReached(tool: String, cap: Int)
+    case totalBudgetReached(cap: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .duplicate(let tool, let count):
+            return "Too many duplicate calls to '\(tool)' (now \(count) times)."
+        case .toolBudgetReached(let tool, let cap):
+            return "Limit of \(cap) '\(tool)' calls reached for this turn."
+        case .totalBudgetReached(let cap):
+            return "Total tool call limit of \(cap) reached for this turn."
+        }
+    }
+}
+
 /// Shared, per-generation tool-call loop breaker. An `actor` because tools
 /// may run concurrently within a single model turn.
 actor ToolCallGovernor {

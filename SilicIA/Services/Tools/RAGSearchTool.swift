@@ -82,9 +82,18 @@ struct RAGSearchTool: Tool {
         print("[Tool:searchContext] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default") corpusSize=\(chunks.count)")
         #endif
 
-        if let governor,
-           let refusal = await governor.evaluate(tool: name, arguments: arguments.query).refusalMessage {
-            return refusal
+        if let governor {
+            let decision = await governor.evaluate(tool: name, arguments: arguments.query)
+            switch decision {
+            case .allow:
+                break
+            case .duplicate(let count):
+                throw ToolError.duplicate(tool: name, count: count)
+            case .toolBudgetReached(let tool, let cap):
+                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+            case .totalBudgetReached(let cap):
+                throw ToolError.totalBudgetReached(cap: cap)
+            }
         }
 
         let trimmed = arguments.query.trimmingCharacters(in: .whitespacesAndNewlines)

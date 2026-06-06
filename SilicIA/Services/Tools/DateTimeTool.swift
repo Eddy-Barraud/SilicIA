@@ -48,9 +48,18 @@ struct DateTimeTool: Tool {
         print("[Tool:currentDateTime] called with format=\(arguments.format ?? "default")")
         #endif
 
-        if let governor,
-           let refusal = await governor.evaluate(tool: name, arguments: arguments.format ?? "default").refusalMessage {
-            return refusal
+        if let governor {
+            let decision = await governor.evaluate(tool: name, arguments: arguments.format ?? "default")
+            switch decision {
+            case .allow:
+                break
+            case .duplicate(let count):
+                throw ToolError.duplicate(tool: name, count: count)
+            case .toolBudgetReached(let tool, let cap):
+                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+            case .totalBudgetReached(let cap):
+                throw ToolError.totalBudgetReached(cap: cap)
+            }
         }
 
         let now = dateProvider()

@@ -66,9 +66,18 @@ struct CalculatorTool: Tool {
         print("[Tool:calculate] called with expression=\"\(arguments.expression)\"")
         #endif
 
-        if let governor,
-           let refusal = await governor.evaluate(tool: name, arguments: arguments.expression).refusalMessage {
-            return refusal
+        if let governor {
+            let decision = await governor.evaluate(tool: name, arguments: arguments.expression)
+            switch decision {
+            case .allow:
+                break
+            case .duplicate(let count):
+                throw ToolError.duplicate(tool: name, count: count)
+            case .toolBudgetReached(let tool, let cap):
+                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+            case .totalBudgetReached(let cap):
+                throw ToolError.totalBudgetReached(cap: cap)
+            }
         }
 
         // Loop guard: small models sometimes get stuck calling a tool over
@@ -92,7 +101,15 @@ struct CalculatorTool: Tool {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: ",", with: ".")
 
-        guard !normalised.isEmpty else {
+        var expressionToEvaluate = normalised
+        if normalised.contains("=") {
+            let parts = normalised.components(separatedBy: "=")
+            if let firstPart = parts.first {
+                expressionToEvaluate = firstPart.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+
+        guard !expressionToEvaluate.isEmpty else {
             return "Error: empty expression. Pass an arithmetic expression like '64.24 * 2' or '(1 + 2) * 3'."
         }
 
@@ -100,7 +117,7 @@ struct CalculatorTool: Tool {
         // allow-list (which intentionally excludes `!`) still works and so
         // NSExpression sees a plain arithmetic expression. Capped at 20! to
         // stay inside Int64 range.
-        let expanded = Self.expandFactorials(in: normalised)
+        let expanded = Self.expandFactorials(in: expressionToEvaluate)
 
         guard expanded.unicodeScalars.allSatisfy({ Self.allowedCharacters.contains($0) }) else {
             return """
