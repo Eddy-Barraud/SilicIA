@@ -27,6 +27,13 @@ class AIService: ObservableObject {
     @Published var toolFetchedResults: [SearchResult] = []
     @Published var citations: String = ""
 
+    // Properties to support real-time RAG scoring during tool calling
+    private var activeQuery: String = ""
+    private var activeQueries: [String]? = nil
+    private var activeEffectiveMaxTokens: Int = 1000
+    private var activeContextUtilizationFactor: Double = 0.65
+    private var activeOnMatchingScores: (([String: Double]) -> Void)? = nil
+
     #if DEBUG
     struct TimingMetric: Identifiable {
         let id = UUID()
@@ -256,6 +263,9 @@ class AIService: ObservableObject {
     func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
+        self.activeQuery = query
+        self.activeQueries = queries
+        self.activeOnMatchingScores = onMatchingScores
         // Reset the tool-results accumulator at the start of every
         // summarize call so previous turns don't bleed into the new one.
         // Tool-calling mode appends to this as the model invokes webSearch.
@@ -357,6 +367,8 @@ class AIService: ObservableObject {
         let contextUtilizationFactor = profile == .deep
             ? Self.deepSummaryContextUtilizationFactor
             : Self.fastSummaryContextUtilizationFactor
+        self.activeEffectiveMaxTokens = effectiveMaxTokens
+        self.activeContextUtilizationFactor = contextUtilizationFactor
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
@@ -465,6 +477,30 @@ class AIService: ObservableObject {
         let novel = incoming.filter { !existing.contains($0.url) }
         guard !novel.isEmpty else { return }
         toolFetchedResults.append(contentsOf: novel)
+
+        // Calculate scores in real-time as results arrive so they display immediately
+        if let onMatchingScores = activeOnMatchingScores, !toolFetchedResults.isEmpty {
+            let toolChunks = chunkResultsForRAG(toolFetchedResults)
+            if !toolChunks.isEmpty {
+                let query = activeQuery
+                let queries = activeQueries
+                let maxTokens = activeEffectiveMaxTokens
+                let factor = activeContextUtilizationFactor
+                Task {
+                    let toolSelected = await ragContextService.selectContext(
+                        chunks: toolChunks,
+                        query: query,
+                        maxOutputTokens: maxTokens,
+                        contextUtilizationFactor: factor,
+                        queries: queries
+                    )
+                    let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
+                    await MainActor.run {
+                        onMatchingScores(scores)
+                    }
+                }
+            }
+        }
     }
 
     /// Chunks a list of `SearchResult`s for RAG scoring in tool-calling
