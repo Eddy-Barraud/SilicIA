@@ -1,5 +1,3 @@
 Question: {{query}}
 
-Follow the rule:
-- Definition / formula / constant / unit conversion / learned quantity → answer it directly and concisely. Two sentences maximum. Answer in English.
-- Date / historical fact / person / current status / news / time-sensitive value → only anser "Waiting web search results"
+Answer in English.

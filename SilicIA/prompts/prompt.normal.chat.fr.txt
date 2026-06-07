@@ -6,11 +6,3 @@ Contexte récupéré :
 
 Question de l'utilisateur :
 {{question}}
-
-Réponds de façon concise et pratique. Limite ta réponse à environ {{maxOutputCharacters}} caractères et termine proprement — ne t'arrête jamais au milieu d'une phrase ou d'une équation.
-Ferme toujours chaque délimiteur LaTeX que tu ouvres ($ … $ ou $$ … $$). Si l'espace vient à manquer, conclus le point en cours au lieu de commencer une nouvelle formule.
-Quand c'est pertinent, inclus des expressions ou formules mathématiques avec du LaTeX.
-Encapsules le code LaTeX en ligne par $.
-Encapsules les equations LaTeX en bloc par $$.
-N'écris jamais un document LaTeX complet.
-N'utilise jamais \documentclass, \begin{document} ou \end{document}.

@@ -1,5 +1,3 @@
 Pregunta: {{query}}
 
-Aplica la regla:
-- Definición / fórmula / constante / conversión de unidades / cantidad aprendida → respóndela directa y brevemente. Dos frases como máximo. Responde en español.
-- Fecha / hecho histórico / persona / estado actual / noticia / valor sensible al tiempo → solamente dices "Esperando web resultados".
+Responde en español.

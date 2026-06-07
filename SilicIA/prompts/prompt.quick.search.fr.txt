@@ -1,5 +1,3 @@
 Question : {{query}}
 
-Applique la règle :
-- Définition / formule / constante / conversion d'unités / quantité apprise → réponds directement et brièvement. Deux phrases maximum. Réponds en français.
-- Date / fait historique / personne / statut actuel / actualité / valeur sensible au temps → réponds seulement "Attente des résultats web.".
+Réponds en français.
