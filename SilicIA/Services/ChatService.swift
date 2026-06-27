@@ -26,6 +26,7 @@ final class ChatService: ObservableObject {
     @Published var errorMessage: String?
     @Published var isAnalyzingContext = false
     @Published var contextAnalysisProgress = 0.0
+    @Published private(set) var pdfAnalysisProgress: [String: Double] = [:]
     /// Filename of the PDF the current conversation is anchored to, if any.
     /// PDFtalkme observes this to keep its left pane in sync with whichever
     /// conversation is loaded (e.g. when the user picks one from history).
@@ -66,6 +67,7 @@ final class ChatService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     private static let pdfChunkMaxTokens = 220
     private static let pdfChunkOverlapTokens = 30
+    private static let pdfWholePageContextFraction = 0.9
     private static let minWebScrapingCharacters = 1500
     private static let maxWebScrapingCharacters = 12000
     private static let maxRecentMessagesForWebSearch = 4
@@ -81,6 +83,10 @@ final class ChatService: ObservableObject {
     private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
+
+    nonisolated static func contextAttachmentKey(for url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
 
     /// Sends a user message and appends the assistant response.
     func sendMessage(
@@ -492,6 +498,7 @@ final class ChatService: ObservableObject {
             preAnalyzedMaxWikipediaResults = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
+            pdfAnalysisProgress = [:]
             return
         }
         if contextKey == preAnalyzedContextKey,
@@ -501,6 +508,9 @@ final class ChatService: ObservableObject {
            effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults,
            useDuckDuckGo == preAnalyzedUseDuckDuckGo,
            useWikipedia == preAnalyzedUseWikipedia {
+            isAnalyzingContext = false
+            contextAnalysisProgress = 0
+            pdfAnalysisProgress = [:]
             return
         }
 
@@ -615,6 +625,7 @@ final class ChatService: ObservableObject {
         isResponding = false
         isAnalyzingContext = false
         contextAnalysisProgress = 0
+        pdfAnalysisProgress = [:]
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
@@ -648,14 +659,20 @@ final class ChatService: ObservableObject {
         useWikipedia: Bool = true
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
+        let uniquePDFs = Array(Set(pdfURLs))
+        let uniqueImages = Array(Set(imageURLs))
         if reportProgress {
             isAnalyzingContext = true
             contextAnalysisProgress = 0
+            pdfAnalysisProgress = Dictionary(
+                uniqueKeysWithValues: uniquePDFs.map { (Self.contextAttachmentKey(for: $0), 0.0) }
+            )
         }
         defer {
             if reportProgress {
                 contextAnalysisProgress = 1
                 isAnalyzingContext = false
+                pdfAnalysisProgress = [:]
             }
         }
 
@@ -695,8 +712,6 @@ final class ChatService: ObservableObject {
         let discoveredURLs = discoveredResults.map(\.url)
         let urls = deduplicatedURLs(contextURLs + discoveredURLs)
             .filter { !retrievedResultURLKeys.contains(normalizedURLString($0)) }
-        let uniquePDFs = Array(Set(pdfURLs))
-        let uniqueImages = Array(Set(imageURLs))
         let totalWorkItems = max(urls.count + uniquePDFs.count + uniqueImages.count + retrievedWebResults.count, 1)
         var completedWorkItems = 0
         let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
@@ -745,7 +760,14 @@ final class ChatService: ObservableObject {
         }
 
         for pdfURL in uniquePDFs {
-            let pageAnalyses = extractPDFPageAnalyses(from: pdfURL)
+            let completedBeforePDF = completedWorkItems
+            let progressKey = Self.contextAttachmentKey(for: pdfURL)
+            let pageAnalyses = await Self.extractPDFPageAnalyses(from: pdfURL) { [self, progressKey] completedPages, totalPages in
+                guard reportProgress else { return }
+                let pdfProgress = totalPages > 0 ? Double(completedPages) / Double(totalPages) : 1
+                self.pdfAnalysisProgress[progressKey] = pdfProgress
+                self.contextAnalysisProgress = (Double(completedBeforePDF) + pdfProgress) / Double(totalWorkItems)
+            }
             debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) analyzedPages=\(pageAnalyses.count)")
             for (pageIndex, analysis) in pageAnalyses.enumerated() {
                 // Build the page chunk from Vision's layout-aware OCR text
@@ -768,17 +790,18 @@ final class ChatService: ObservableObject {
                 // from a TVA percentage on the same row.
                 let tabularized = RAGChunker.convertWhitespaceAlignedTables(pageText)
                 let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
-                let chunked = ragChunker.chunk(
+                let pageChunks = Self.makePDFPageChunks(
                     text: tabularized,
                     source: source,
-                    maxChunkTokens: Self.pdfChunkMaxTokens,
-                    overlapTokens: Self.pdfChunkOverlapTokens,
-                    pdfPage: pageIndex + 1
+                    pdfPage: pageIndex + 1,
+                    maxContextTokens: maxContextTokens
                 )
-                chunks.append(contentsOf: chunked)
+                debugContext("collectChunks pdfPage=\(pageIndex + 1) chars=\(tabularized.count) emittedChunks=\(pageChunks.count)")
+                chunks.append(contentsOf: pageChunks)
             }
             completedWorkItems += 1
             if reportProgress {
+                pdfAnalysisProgress[progressKey] = 1
                 contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
             }
         }
@@ -800,6 +823,40 @@ final class ChatService: ObservableObject {
         }
 
         return chunks
+    }
+
+    /// Hierarchical PDF retrieval policy:
+    /// 1. Prefer one whole-page chunk when the page comfortably fits inside
+    ///    the current context window. This preserves sentence flow, nearby
+    ///    equations, and table/explanation locality.
+    /// 2. Fall back to chunking only for genuinely oversized pages.
+    ///
+    /// Selection/ranking still happens later in `RAGContextService`, so with
+    /// many pages we effectively rank pages first and only split the rare page
+    /// that would be too large to ship as one unit.
+    nonisolated static func makePDFPageChunks(
+        text: String,
+        source: String,
+        pdfPage: Int,
+        maxContextTokens: Int
+    ) -> [RAGChunk] {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else { return [] }
+
+        let pageCharacterBudget = max(1, maxContextTokens * TokenBudgeting.avgCharsPerToken)
+        let wholePageCap = Int(Double(pageCharacterBudget) * pdfWholePageContextFraction)
+        if cleanText.count <= wholePageCap {
+            return [RAGChunk(source: source, text: cleanText, url: nil, pdfPage: pdfPage)]
+        }
+
+        let chunker = RAGChunker()
+        return chunker.chunk(
+            text: cleanText,
+            source: source,
+            maxChunkTokens: pdfChunkMaxTokens,
+            overlapTokens: pdfChunkOverlapTokens,
+            pdfPage: pdfPage
+        )
     }
 
     /// Runs Vision OCR + image classification on the file and packages the
@@ -974,7 +1031,10 @@ final class ChatService: ObservableObject {
     ///
     /// Pages whose Vision analysis comes back empty are skipped so the
     /// chunker doesn't emit empty chunks.
-    private func extractPDFPageAnalyses(from url: URL) -> [ImageAnalysisService.PDFPageAnalysisResult] {
+    private nonisolated static func extractPDFPageAnalyses(
+        from url: URL,
+        progress: (@MainActor @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void)? = nil
+    ) async -> [ImageAnalysisService.PDFPageAnalysisResult] {
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed {
@@ -983,26 +1043,42 @@ final class ChatService: ObservableObject {
         }
 
         guard let document = PDFDocument(url: url) else {
-            debugContext("extractPDFPageAnalyses failed to open PDF at path=\(url.path)")
+            #if DEBUG
+            print("[ChatService][Context] extractPDFPageAnalyses failed to open PDF at path=\(url.path)")
+            #endif
             return []
         }
 
         if document.isLocked, document.unlock(withPassword: "") {
-            debugContext("extractPDFPageAnalyses unlocked a PDF with empty password")
+            #if DEBUG
+            print("[ChatService][Context] extractPDFPageAnalyses unlocked a PDF with empty password")
+            #endif
         }
 
+        let totalPages = document.pageCount
         var analyses: [ImageAnalysisService.PDFPageAnalysisResult] = []
-        for pageIndex in 0..<document.pageCount {
+        for pageIndex in 0..<totalPages {
+            if Task.isCancelled {
+                break
+            }
             guard let page = document.page(at: pageIndex),
                   let cgImage = renderedCGImage(for: page),
                   let analysis = ImageAnalysisService.analyzePDFPage(cgImage: cgImage),
                   !analysis.isEmpty else {
+                if let progress {
+                    await progress(pageIndex + 1, totalPages)
+                }
                 continue
             }
             analyses.append(analysis)
+            if let progress {
+                await progress(pageIndex + 1, totalPages)
+            }
         }
 
-        debugContext("extractPDFPageAnalyses pdf=\(url.lastPathComponent) pages=\(document.pageCount) analyzed=\(analyses.count)")
+        #if DEBUG
+        print("[ChatService][Context] extractPDFPageAnalyses pdf=\(url.lastPathComponent) pages=\(totalPages) analyzed=\(analyses.count)")
+        #endif
         return analyses
     }
 
@@ -1016,7 +1092,7 @@ final class ChatService: ObservableObject {
     /// sizes, where Vision's `VNRecognizeTextRequest` is significantly more
     /// accurate. The cap at 4096 px prevents memory pressure on very large
     /// document pages (e.g. A0 posters or oversized technical drawings).
-    private func renderedCGImage(for page: PDFPage) -> CGImage? {
+    private nonisolated static func renderedCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
         let nativeLonger = max(pageSize.width, pageSize.height)
@@ -1472,6 +1548,7 @@ final class ChatService: ObservableObject {
         isResponding = false
         isAnalyzingContext = false
         contextAnalysisProgress = 0
+        pdfAnalysisProgress = [:]
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil

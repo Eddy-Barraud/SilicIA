@@ -22,6 +22,11 @@ struct ImageAnalysisResult {
     }
 }
 
+struct LayoutObservation {
+    let text: String
+    let boundingBox: CGRect
+}
+
 /// On-device image analysis using Apple's Vision framework.
 ///
 /// Two Vision requests are run on every image:
@@ -39,6 +44,11 @@ enum ImageAnalysisService {
 
     /// Maximum number of classification labels returned in the result.
     private static let maxClassificationLabels = 8
+
+    private struct ArticleRowProjection {
+        let left: String?
+        let right: String?
+    }
 
     /// Runs OCR + classification on the image at `url`. Returns `nil` if the
     /// file cannot be decoded as an image at all.
@@ -104,10 +114,10 @@ enum ImageAnalysisService {
 
     /// Reconstructs the **visual reading order** from a populated
     /// `VNRecognizeTextRequest`. Groups each `VNRecognizedTextObservation`
-    /// into rows by its `.boundingBox` Y-coordinate, then sorts within each
-    /// row by X-coordinate. Cells inside a row are separated by 4 spaces so
-    /// the downstream pipeline's `RAGChunker.convertWhitespaceAlignedTables`
-    /// can detect the table and emit a Markdown pipe block.
+    /// into rows by its `.boundingBox` Y-coordinate, then renders either:
+    /// - row-major (tables, invoices, forms), or
+    /// - column-major for consecutive 2-column prose blocks (journal papers),
+    ///   so the text reads left-column top→bottom, then right-column top→bottom.
     ///
     /// Vision's bounding boxes always reflect the *visual* layout, not the
     /// PDF's drawing order, so rows recombine correctly even for column-major
@@ -116,7 +126,21 @@ enum ImageAnalysisService {
     ///
     /// Returns an empty string when the request produced no observations.
     private static func reconstructLayout(from request: VNRecognizeTextRequest) -> String {
-        guard let observations = request.results, !observations.isEmpty else {
+        let observations: [LayoutObservation] = (request.results ?? []).compactMap { observation in
+            guard let text = observation.topCandidates(1).first?.string.trimmingCharacters(in: .whitespaces),
+                  !text.isEmpty else {
+                return nil
+            }
+            return LayoutObservation(text: text, boundingBox: observation.boundingBox)
+        }
+        return reconstructLayout(from: observations)
+    }
+
+    /// Shared reading-order reconstruction used by Vision-backed OCR and unit
+    /// tests. Input observations are assumed to be Vision-normalized page
+    /// coordinates (`boundingBox` in [0,1] with origin at bottom-left).
+    static func reconstructLayout(from observations: [LayoutObservation]) -> String {
+        guard !observations.isEmpty else {
             return ""
         }
 
@@ -141,7 +165,7 @@ enum ImageAnalysisService {
         // vertical jitter of subscript/superscript observations.
         let rowTolerance = medianHeight * 0.6
 
-        var rows: [[VNRecognizedTextObservation]] = []
+        var rows: [[LayoutObservation]] = []
         for obs in topToBottom {
             let y = obs.boundingBox.midY
             if var last = rows.last,
@@ -154,19 +178,100 @@ enum ImageAnalysisService {
             }
         }
 
-        // Within each row, sort left-to-right and join by 4 spaces. The
-        // wide separator survives into the chunker pipeline and triggers
-        // `convertWhitespaceAlignedTables` to emit a Markdown pipe row.
-        let lines: [String] = rows.compactMap { row in
-            let leftToRight = row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
-            let cells = leftToRight.compactMap { $0.topCandidates(1).first?.string }
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            guard !cells.isEmpty else { return nil }
-            return cells.joined(separator: "    ")
+        // Render row-major by default, but when a run of rows looks like
+        // article prose in two columns, switch that run to column-major
+        // reading order. This avoids "line 1 left, line 1 right, line 2 left,
+        // line 2 right" interleaving on scientific PDFs, while still keeping
+        // tables row-wise so columns survive.
+        var lines: [String] = []
+        var pendingArticleRows: [ArticleRowProjection] = []
+
+        func flushArticleBlock() {
+            guard !pendingArticleRows.isEmpty else { return }
+            let leftColumn = pendingArticleRows.compactMap(\.left)
+            let rightColumn = pendingArticleRows.compactMap(\.right)
+            if pendingArticleRows.count >= 2 && !leftColumn.isEmpty && !rightColumn.isEmpty {
+                lines.append(reflowProseLines(leftColumn))
+                if !rightColumn.isEmpty {
+                    lines.append("")
+                    lines.append(reflowProseLines(rightColumn))
+                }
+            } else {
+                for row in pendingArticleRows {
+                    let cells = [row.left, row.right].compactMap { $0 }
+                    guard !cells.isEmpty else { continue }
+                    lines.append(cells.joined(separator: "    "))
+                }
+            }
+            pendingArticleRows.removeAll(keepingCapacity: true)
         }
 
+        for row in rows {
+            let leftToRight = row.sorted { $0.boundingBox.minX < $1.boundingBox.minX }
+            if let projection = articleRowProjection(from: leftToRight) {
+                pendingArticleRows.append(projection)
+                continue
+            }
+
+            flushArticleBlock()
+            let cells = leftToRight.map { $0.text }.filter { !$0.isEmpty }
+            guard !cells.isEmpty else { continue }
+            lines.append(cells.joined(separator: "    "))
+        }
+        flushArticleBlock()
+
         return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Projects a Vision row onto left/right article columns when it looks
+    /// like two-column prose rather than a table. Rows with observations
+    /// outside the left/right text bands are rejected so table/header lines
+    /// stay row-major.
+    private static func articleRowProjection(from row: [LayoutObservation]) -> ArticleRowProjection? {
+        guard !row.isEmpty else { return nil }
+
+        var left: [LayoutObservation] = []
+        var right: [LayoutObservation] = []
+
+        for observation in row {
+            if observation.boundingBox.width > 0.55 {
+                return nil
+            } else if observation.boundingBox.minX < 0.24 && observation.boundingBox.maxX <= 0.50 {
+                left.append(observation)
+            } else if observation.boundingBox.minX >= 0.45 {
+                right.append(observation)
+            } else {
+                return nil
+            }
+        }
+
+        let leftText = left.sorted { $0.boundingBox.minX < $1.boundingBox.minX }.map(\.text).joined(separator: " ")
+        let rightText = right.sorted { $0.boundingBox.minX < $1.boundingBox.minX }.map(\.text).joined(separator: " ")
+
+        let leftValue = leftText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rightValue = rightText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard leftValue.count >= 18 || rightValue.count >= 18 else { return nil }
+        return ArticleRowProjection(
+            left: leftValue.isEmpty ? nil : leftValue,
+            right: rightValue.isEmpty ? nil : rightValue
+        )
+    }
+
+    private static func reflowProseLines(_ lines: [String]) -> String {
+        var result = ""
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if result.isEmpty {
+                result = trimmed
+            } else if result.hasSuffix("-") {
+                result.removeLast()
+                result += trimmed
+            } else {
+                result += " " + trimmed
+            }
+        }
+        return result
     }
 
     /// Runs OCR on an already-decoded `CGImage`. Returns the recognized text or
@@ -261,7 +366,7 @@ enum ImageAnalysisService {
     private static func makeTextRequest(languages: [String]) -> VNRecognizeTextRequest {
         let request = VNRecognizeTextRequest()
         request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = true
+        request.usesLanguageCorrection = false
         request.recognitionLanguages = languages
         return request
     }
