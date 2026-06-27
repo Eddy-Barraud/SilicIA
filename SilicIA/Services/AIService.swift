@@ -978,7 +978,7 @@ class AIService: ObservableObject {
                     promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
                     minContextTokens: TokenBudgeting.minContextTokens
                 )
-                let (tools, toolBudget) = ToolKit.assemble(
+                let (tools, toolBudget, _) = ToolKit.assemble(
                     config: ToolKit.Configuration(
                         language: language,
                         corpusChunks: corpusChunks,

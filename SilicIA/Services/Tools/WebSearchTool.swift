@@ -74,6 +74,9 @@ struct WebSearchTool: Tool {
     /// is what overflows the context window. Optional so existing callers /
     /// tests that construct the tool directly are unaffected.
     var governor: ToolCallGovernor?
+    /// Records successful tool replies so a later context-window overflow
+    /// can recover from the last known-good tool state.
+    var transcriptRecorder: ToolTranscriptRecorder?
 
     /// Default result count when the model doesn't supply `maxResults`.
     /// Five gives SearchView a useful range of cards to display and lets
@@ -219,6 +222,10 @@ struct WebSearchTool: Tool {
         // actually surfaced, the same way the prompt-stuffing path's
         // search-result cards do.
         onResults?(results)
-        return rendered.joined(separator: "\n\n")
+        let output = rendered.joined(separator: "\n\n")
+        if let transcriptRecorder {
+            await transcriptRecorder.record(tool: name, arguments: trimmed, result: output)
+        }
+        return output
     }
 }

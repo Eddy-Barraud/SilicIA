@@ -60,6 +60,9 @@ struct CalculatorTool: Tool {
     /// per-expression backstop. Optional so direct callers / tests are
     /// unaffected.
     var governor: ToolCallGovernor?
+    /// Records successful tool replies so a later context-window overflow
+    /// can recover from the last known-good tool state.
+    var transcriptRecorder: ToolTranscriptRecorder?
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -143,7 +146,11 @@ struct CalculatorTool: Tool {
         // Format: trim a trailing ".0" so integer results read as integers.
         // Keep enough precision (up to 10 significant digits) so financial
         // values like 77.08 don't get rounded.
-        return Self.format(value)
+        let output = Self.format(value)
+        if let transcriptRecorder {
+            await transcriptRecorder.record(tool: name, arguments: arguments.expression, result: output)
+        }
+        return output
     }
 
     // MARK: - Factorial expansion

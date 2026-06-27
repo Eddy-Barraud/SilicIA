@@ -231,6 +231,7 @@ final class ChatService: ObservableObject {
         #endif
 
         var streamingAssistantID: UUID?
+        var toolTranscriptRecorder: ToolTranscriptRecorder?
         do {
             let instructions = buildInstructions(
                 for: language,
@@ -272,6 +273,7 @@ final class ChatService: ObservableObject {
                 )
                 let tools = assembled.tools
                 toolBudget = assembled.tokenBudget
+                toolTranscriptRecorder = assembled.transcriptRecorder
                 let toolNames = tools.map(\.name).joined(separator: ", ")
                 debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 session = LanguageModelSession(
@@ -381,17 +383,45 @@ final class ChatService: ObservableObject {
             // we have a streaming message to write into.
             if useToolCalling, let assistantID = streamingAssistantID {
                 let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
+                let isContextOverflow = Self.isContextWindowOverflow(error)
                 do {
-                    print("ℹ️ [ChatService] tool-calling turn failed (\(error.localizedDescription)); falling back to non-tool generation")
-                    let recovered = try await streamClassicalFallback(
-                        message: message,
-                        selectedContext: finalSelectedContext,
-                        language: language,
-                        temperature: temperature,
-                        maxOutputTokens: effectiveMaxOutputTokens,
-                        assistantID: assistantID,
-                        citations: citations
-                    )
+                    let recovered: String
+                    if isContextOverflow,
+                       let toolTranscriptRecorder,
+                       await toolTranscriptRecorder.hasEntries() {
+                        print("ℹ️ [ChatService] tool-calling turn hit context overflow; recovering from recorded tool transcript")
+                        let toolTranscriptCap = max(
+                            200,
+                            Int(Double(TokenBudgeting.maxContextCharacters(
+                                maxOutputTokens: effectiveMaxOutputTokens,
+                                contextUtilizationFactor: 1.0
+                            )) * 0.55)
+                        )
+                        let toolTranscript = await toolTranscriptRecorder.renderedTranscript(
+                            characterBudget: toolTranscriptCap
+                        )
+                        recovered = try await streamToolTranscriptRecovery(
+                            message: message,
+                            selectedContext: finalSelectedContext,
+                            toolTranscript: toolTranscript,
+                            language: language,
+                            temperature: temperature,
+                            maxOutputTokens: effectiveMaxOutputTokens,
+                            assistantID: assistantID,
+                            citations: citations
+                        )
+                    } else {
+                        print("ℹ️ [ChatService] tool-calling turn failed (\(error.localizedDescription)); falling back to non-tool generation")
+                        recovered = try await streamClassicalFallback(
+                            message: message,
+                            selectedContext: finalSelectedContext,
+                            language: language,
+                            temperature: temperature,
+                            maxOutputTokens: effectiveMaxOutputTokens,
+                            assistantID: assistantID,
+                            citations: citations
+                        )
+                    }
                     persistMessage(role: "assistant", content: recovered, citations: citations)
                     errorMessage = nil
                     return
@@ -445,6 +475,48 @@ final class ChatService: ObservableObject {
             selectedContext: selectedContext,
             language: language,
             maxOutputCharacters: maxOutputCharacters,
+            maxOutputTokens: maxOutputTokens
+        )
+        let options = GenerationOptions(temperature: temperature, maximumResponseTokens: maxOutputTokens)
+
+        var latestPartial = ""
+        for try await snapshot in session.streamResponse(to: prompt, options: options) {
+            let partial = String(describing: snapshot.content)
+            guard !partial.isEmpty, partial != latestPartial else { continue }
+            latestPartial = partial
+            updateAssistantMessage(id: assistantID, content: partial, citations: citations)
+        }
+        if latestPartial.isEmpty {
+            let response = try await session.respond(to: prompt, options: options)
+            latestPartial = String(describing: response.content)
+            updateAssistantMessage(id: assistantID, content: latestPartial, citations: citations)
+        }
+        return latestPartial
+    }
+
+    /// Recovery path for tool-calling turns that already gathered useful
+    /// tool output but later overflowed the model context window. Because
+    /// Foundation Models does not expose a way to rewind an in-flight
+    /// session to "the last successful tool call", we record successful
+    /// tool replies on our side and replay that last known-good state in a
+    /// fresh no-tool session.
+    private func streamToolTranscriptRecovery(
+        message: String,
+        selectedContext: String,
+        toolTranscript: String,
+        language: ModelLanguage,
+        temperature: Double,
+        maxOutputTokens: Int,
+        assistantID: UUID,
+        citations: String?
+    ) async throws -> String {
+        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let session = LanguageModelSession(instructions: instructions)
+        let prompt = buildToolTranscriptRecoveryPrompt(
+            for: message,
+            selectedContext: selectedContext,
+            toolTranscript: toolTranscript,
+            language: language,
             maxOutputTokens: maxOutputTokens
         )
         let options = GenerationOptions(temperature: temperature, maximumResponseTokens: maxOutputTokens)
@@ -1312,6 +1384,35 @@ final class ChatService: ObservableObject {
         )
     }
 
+    private func buildToolTranscriptRecoveryPrompt(
+        for userMessage: String,
+        selectedContext: String,
+        toolTranscript: String,
+        language: ModelLanguage,
+        maxOutputTokens: Int
+    ) -> String {
+        let priorQuestions = messages
+            .filter { $0.role == .user && $0.content != userMessage }
+            .suffix(Self.historyMessageLimit)
+            .map(\.content)
+        let totalContextCharacters = TokenBudgeting.maxContextCharacters(
+            maxOutputTokens: maxOutputTokens,
+            contextUtilizationFactor: 1.0
+        )
+        let toolCap = min(toolTranscript.count, max(200, Int(Double(totalContextCharacters) * 0.55)))
+        let selectedCap = max(0, totalContextCharacters - toolCap)
+        let compactToolTranscript = String(toolTranscript.prefix(toolCap)).trimmingCharacters(in: .whitespacesAndNewlines)
+        let compactSelectedContext = String(selectedContext.prefix(selectedCap)).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return Self.assembleToolTranscriptRecoveryPrompt(
+            currentQuestion: userMessage,
+            priorUserQuestions: Array(priorQuestions),
+            language: language,
+            groundingContext: compactSelectedContext,
+            toolTranscript: compactToolTranscript
+        )
+    }
+
     /// Pure assembly of the tool-calling prompt — separated from `messages`
     /// state so it can be regression-tested directly. Guarantees the
     /// properties that broke multi-turn PDF chat: no assistant answers are
@@ -1373,6 +1474,65 @@ final class ChatService: ObservableObject {
         }
         sections.append("\(answerImperative)\n\(currentQuestion)")
         return sections.joined(separator: "\n\n")
+    }
+
+    nonisolated static func assembleToolTranscriptRecoveryPrompt(
+        currentQuestion: String,
+        priorUserQuestions: [String],
+        language: ModelLanguage,
+        groundingContext: String = "",
+        toolTranscript: String
+    ) -> String {
+        let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTranscript = toolTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasGrounding = !trimmedGrounding.isEmpty
+
+        let answerImperative: String
+        let earlierLabel: String
+        let groundingHeader: String
+        let transcriptHeader: String
+        switch language {
+        case .french:
+            answerImperative = "Les appels d'outils précédents ont déjà fourni le contexte utile. N'appelle plus aucun outil. Réponds maintenant à la question suivante en t'appuyant d'abord sur les résultats d'outils ci-dessus, puis sur le contexte joint si nécessaire :"
+            earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+            groundingHeader = "Contexte tiré des documents joints :"
+            transcriptHeader = "Résultats d'outils déjà obtenus :"
+        case .spanish:
+            answerImperative = "Las llamadas previas a herramientas ya aportaron el contexto útil. No llames más herramientas. Responde ahora a la siguiente pregunta apoyándote primero en los resultados de herramientas anteriores y después, si hace falta, en el contexto adjunto:"
+            earlierLabel = "Preguntas anteriores del usuario (contexto):"
+            groundingHeader = "Contexto de los documentos adjuntos:"
+            transcriptHeader = "Resultados de herramientas ya obtenidos:"
+        case .english:
+            answerImperative = "The previous tool calls already gathered the useful context. Do not call any more tools. Answer the following question now using the tool results above first, then the attached-document context if needed:"
+            earlierLabel = "Earlier user questions (context):"
+            groundingHeader = "Context from the attached documents:"
+            transcriptHeader = "Tool results already gathered:"
+        }
+
+        var sections: [String] = []
+        if !trimmedTranscript.isEmpty {
+            sections.append("\(transcriptHeader)\n\(trimmedTranscript)")
+        }
+        if hasGrounding {
+            sections.append("\(groundingHeader)\n\(trimmedGrounding)")
+        }
+        if !priorUserQuestions.isEmpty {
+            let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
+            sections.append("\(earlierLabel)\n\(contextBlock)")
+        }
+        sections.append("\(answerImperative)\n\(currentQuestion)")
+        return sections.joined(separator: "\n\n")
+    }
+
+    nonisolated private static func isContextWindowOverflow(_ error: Error) -> Bool {
+        if let genError = error as? LanguageModelSession.GenerationError {
+            let label = String(describing: genError).lowercased()
+            return label.contains("exceededcontextwindowsize")
+                || label.contains("contextwindow")
+        }
+        let description = error.localizedDescription.lowercased()
+        return description.contains("context window")
+            || description.contains("exceeded model context window size")
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {

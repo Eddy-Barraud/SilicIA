@@ -69,13 +69,14 @@ nonisolated enum ToolKit {
         var onWebResults: (@Sendable ([SearchResult]) -> Void)? = nil
     }
 
-    /// Returns the model's tool array and the per-call token budget it
-    /// was sized with. The budget is also embedded inside each tool so
-    /// the inner search / scrape steps respect the same cap.
+    /// Returns the model's tool array, the per-call token budget it was
+    /// sized with, and a recorder containing any successful tool replies
+    /// produced during the turn. The budget is also embedded inside each
+    /// tool so the inner search / scrape steps respect the same cap.
     static func assemble(
         config: Configuration,
         responseTokens: Int
-    ) -> (tools: [any Tool], tokenBudget: Int) {
+    ) -> (tools: [any Tool], tokenBudget: Int, transcriptRecorder: ToolTranscriptRecorder) {
         // Per-tool reply budget scales with the response cap so verbose
         // profiles ("deep") give tools room to return richer payloads and
         // terse profiles ("fast") keep tool output tight. See
@@ -91,13 +92,17 @@ nonisolated enum ToolKit {
                 "searchContext": 3
             ]
         )
+        let transcriptRecorder = ToolTranscriptRecorder()
 
         var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
         ragTool.governor = governor
+        ragTool.transcriptRecorder = transcriptRecorder
         var calcTool = CalculatorTool()
         calcTool.governor = governor
+        calcTool.transcriptRecorder = transcriptRecorder
         var dateTool = DateTimeTool(language: config.language)
         dateTool.governor = governor
+        dateTool.transcriptRecorder = transcriptRecorder
 
         var tools: [any Tool] = [ragTool, calcTool, dateTool]
         if config.webSearchAvailable {
@@ -119,9 +124,10 @@ nonisolated enum ToolKit {
             )
             webTool.onResults = config.onWebResults
             webTool.governor = governor
+            webTool.transcriptRecorder = transcriptRecorder
             tools.append(webTool)
         }
-        return (tools, tokenBudget)
+        return (tools, tokenBudget, transcriptRecorder)
     }
 
     /// Per-language paragraph appended onto the system instructions when

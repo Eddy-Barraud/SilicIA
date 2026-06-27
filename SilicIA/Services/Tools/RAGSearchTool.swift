@@ -70,6 +70,9 @@ struct RAGSearchTool: Tool {
     /// Shared per-generation loop breaker. Refuses duplicate / over-budget
     /// calls. Optional so direct callers / tests are unaffected.
     var governor: ToolCallGovernor?
+    /// Records successful tool replies so a later context-window overflow
+    /// can recover from the last known-good tool state.
+    var transcriptRecorder: ToolTranscriptRecorder?
 
     /// Default cap when the model doesn't supply `maxResults`. Three is
     /// a good baseline: enough to surface the right row + its header +
@@ -143,10 +146,16 @@ struct RAGSearchTool: Tool {
         print("[Tool:searchContext] returning \(top.count) chunk(s), totalChars=\(rendered.map(\.count).reduce(0, +))")
         #endif
         let joined = rendered.joined(separator: Self.perResultSeparator)
+        let output: String
         if joined.count <= characterBudget {
-            return joined
+            output = joined
+        } else {
+            output = String(joined.prefix(characterBudget)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        return String(joined.prefix(characterBudget)).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let transcriptRecorder {
+            await transcriptRecorder.record(tool: name, arguments: trimmed, result: output)
+        }
+        return output
     }
 
     private func excerpt(of text: String, query: String, characterBudget: Int) -> String {
