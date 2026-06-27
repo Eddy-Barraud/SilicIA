@@ -193,6 +193,63 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertEqual(boost, 0, accuracy: 0.0001)
     }
 
+    /// Equation-number lookups should strongly prefer chunks that reference
+    /// the same numbered equation, not just any chunk that mentions the word
+    /// "equation" or contains unrelated numbers.
+    func testEquationReferenceBoostPrefersMatchingEquationNumber() {
+        let query = "explain equation 5"
+        let matching = """
+        The CMC-NaCl concentration curve follows the relationship of eq 5 for ionic surfactants.
+        ln(CMC) = ln(CMC_0) - A ln(1 + BC_ion)
+        """
+        let nonMatching = """
+        Table 1 summarizes the methodology and equation terms used throughout the paper.
+        Equation 2 defines a different interaction parameter.
+        """
+
+        let options = RAGSelectionOptions.default
+        let boostA = RAGContextService.equationRelevanceBoost(text: matching, query: query, options: options)
+        let boostB = RAGContextService.equationRelevanceBoost(text: nonMatching, query: query, options: options)
+
+        XCTAssertGreaterThan(boostA, boostB,
+                             "Chunk referencing eq 5 should outrank one that only mentions other equations")
+    }
+
+    /// Figure-number and explicit page cues should steer ranking toward the
+    /// chunk that actually contains the requested figure or lives on the
+    /// requested page.
+    func testFigureBoostPrefersMatchingFigureAndPage() {
+        let query = "describe figure 5 on page 8"
+        let matching = RAGChunk(
+            source: "PDF: fixture page 8",
+            text: "Figure 5. Chain length dependence of CMC values for several surfactant families.",
+            url: nil,
+            pdfPage: 8
+        )
+        let wrongFigure = RAGChunk(
+            source: "PDF: fixture page 8",
+            text: "Figure 4. Evolution of the SNS CMC with the salting effect of NaCl.",
+            url: nil,
+            pdfPage: 8
+        )
+        let wrongPage = RAGChunk(
+            source: "PDF: fixture page 7",
+            text: "Figure 5. Chain length dependence of CMC values for several surfactant families.",
+            url: nil,
+            pdfPage: 7
+        )
+
+        let options = RAGSelectionOptions.default
+        let exact = RAGContextService.figureRelevanceBoost(chunk: matching, query: query, options: options)
+        let figureOnly = RAGContextService.figureRelevanceBoost(chunk: wrongPage, query: query, options: options)
+        let pageOnly = RAGContextService.figureRelevanceBoost(chunk: wrongFigure, query: query, options: options)
+
+        XCTAssertGreaterThan(exact, figureOnly,
+                             "Chunk matching both figure number and page should outrank figure-only match")
+        XCTAssertGreaterThan(exact, pageOnly,
+                             "Chunk matching both figure number and page should outrank page-only match")
+    }
+
     // MARK: - Temporal intent detection
 
     /// "actualité ... cette semaine" / "today" / "este mes" must flag so
