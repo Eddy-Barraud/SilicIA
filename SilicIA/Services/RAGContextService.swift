@@ -631,8 +631,9 @@ struct RAGChunker {
                 // the outlier row back into the last column.
                 var counts: [Int: Int] = [:]
                 for row in pending { counts[row.count, default: 0] += 1 }
-                let columnCount = counts.max(by: { $0.value < $1.value })?.key ?? maxCount
-
+                let columnCount = counts
+                    .filter { $0.key >= 3 }
+                    .max { a, b in a.value == b.value ? a.key > b.key : a.value < b.value }?.key ?? maxCount
                 let normalized = pending.map { row -> [String] in
                     if row.count == columnCount {
                         return row
