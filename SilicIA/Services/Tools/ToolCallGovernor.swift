@@ -22,9 +22,11 @@
 //      transcript), and
 //    - enforce a hard ceiling on total tool calls as a safety net.
 //
-//  Refused calls return a short instruction string instead of doing the
-//  work, so the transcript barely grows and the model is steered to
-//  finalise its answer.
+//  Refused calls can either return a short instruction string or abort the
+//  turn entirely, depending on how the caller wires the tools. In the chat
+//  path we now abort the turn and recover from the last recorded successful
+//  tool replies, which prevents the model from ignoring the refusal text
+//  and continuing to spam duplicate calls.
 //
 
 import Foundation
@@ -98,6 +100,7 @@ actor ToolCallGovernor {
                 """
             }
         }
+
     }
 
     /// Hard ceiling on total tool calls in one turn (safety net so even a

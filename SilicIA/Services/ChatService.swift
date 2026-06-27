@@ -384,12 +384,14 @@ final class ChatService: ObservableObject {
             if useToolCalling, let assistantID = streamingAssistantID {
                 let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
                 let isContextOverflow = Self.isContextWindowOverflow(error)
+                let isToolLoopAbort = Self.isToolLoopAbort(error)
                 do {
                     let recovered: String
-                    if isContextOverflow,
+                    if (isContextOverflow || isToolLoopAbort),
                        let toolTranscriptRecorder,
                        await toolTranscriptRecorder.hasEntries() {
-                        print("ℹ️ [ChatService] tool-calling turn hit context overflow; recovering from recorded tool transcript")
+                        let reason = isContextOverflow ? "context overflow" : "tool loop refusal"
+                        print("ℹ️ [ChatService] tool-calling turn hit \(reason); recovering from recorded tool transcript")
                         let toolTranscriptCap = max(
                             200,
                             Int(Double(TokenBudgeting.maxContextCharacters(
@@ -1533,6 +1535,16 @@ final class ChatService: ObservableObject {
         let description = error.localizedDescription.lowercased()
         return description.contains("context window")
             || description.contains("exceeded model context window size")
+    }
+
+    nonisolated private static func isToolLoopAbort(_ error: Error) -> Bool {
+        if error is ToolError {
+            return true
+        }
+        let description = error.localizedDescription.lowercased()
+        return description.contains("duplicate calls")
+            || description.contains("calls reached for this turn")
+            || description.contains("tool call limit")
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {

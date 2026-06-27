@@ -55,6 +55,17 @@ struct DateTimeTool: Tool {
             let decision = await governor.evaluate(tool: name, arguments: arguments.format ?? "default")
             if case .allow = decision {
                 // continue
+            } else if transcriptRecorder != nil {
+                switch decision {
+                case .allow:
+                    break
+                case .duplicate(let count):
+                    throw ToolError.duplicate(tool: name, count: count)
+                case .toolBudgetReached(let tool, let cap):
+                    throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+                case .totalBudgetReached(let cap):
+                    throw ToolError.totalBudgetReached(cap: cap)
+                }
             } else if let refusal = decision.refusalMessage {
                 return refusal
             }

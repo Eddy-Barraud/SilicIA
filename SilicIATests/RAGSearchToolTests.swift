@@ -48,4 +48,29 @@ final class RAGSearchToolTests: XCTestCase {
             "Duplicate governed call should return a soft refusal, got: \(duplicate)"
         )
     }
+
+    func testDuplicateSearchContextCallThrowsWhenRecoveryRecorderIsPresent() async throws {
+        let chunk = RAGChunk(
+            source: "PDF: fixture page 6",
+            text: "Equation 6 states log(CMC) = A - B Nc and the caption explains Nc is the number of carbons.",
+            url: nil,
+            pdfPage: 6
+        )
+        var tool = RAGSearchTool(chunks: [chunk], tokenBudget: 200)
+        tool.governor = ToolCallGovernor()
+        tool.transcriptRecorder = ToolTranscriptRecorder()
+
+        _ = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
+
+        do {
+            _ = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
+            XCTFail("Expected duplicate governed call to abort when recovery recorder is present")
+        } catch let error as ToolError {
+            guard case .duplicate(let toolName, let count) = error else {
+                return XCTFail("Expected duplicate ToolError, got \(error)")
+            }
+            XCTAssertEqual(toolName, "searchContext")
+            XCTAssertEqual(count, 2)
+        }
+    }
 }
