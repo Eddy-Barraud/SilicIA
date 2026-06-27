@@ -178,6 +178,33 @@ final class TokenBudgetingTests: XCTestCase {
         )
     }
 
+    /// Hybrid chat tool-calling grounds some context up front AND still
+    /// expects at least one substantial tool reply plus a lightweight second
+    /// reply (e.g. `calculate`). That combined transcript must still fit.
+    func testHybridToolGroundingLeavesRoomForToolReplies() {
+        for responseCap in [500, 1000, 1500] {
+            let response = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: responseCap)
+            let toolReply = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap)
+            let groundingChars = TokenBudgeting.maxHybridToolGroundingCharacters(
+                maxOutputTokens: responseCap,
+                reservedToolReplyTokens: toolReply + 120
+            )
+            let groundingTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: groundingChars)
+            let total = TokenBudgeting.instructionTokens
+                + TokenBudgeting.toolCallingOverheadTokens
+                + TokenBudgeting.promptOverheadTokens
+                + response
+                + groundingTokens
+                + toolReply
+                + 120
+            XCTAssertLessThanOrEqual(
+                total,
+                TokenBudgeting.contextWindowLimit,
+                "Hybrid grounding at responseCap=\(responseCap) leaves no room for tool replies"
+            )
+        }
+    }
+
     func testToolBudgetHonoursFloorForRealisticCaps() {
         for responseCap in [1, 50, 500, 1000, 1500] {
             XCTAssertGreaterThanOrEqual(

@@ -76,6 +76,7 @@ struct RAGSearchTool: Tool {
     /// some neighbouring context, but not so many that the tool reply
     /// overruns the model's context window.
     private static let defaultMaxResults = 3
+    private static let perResultSeparator = "\n\n"
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -84,15 +85,10 @@ struct RAGSearchTool: Tool {
 
         if let governor {
             let decision = await governor.evaluate(tool: name, arguments: arguments.query)
-            switch decision {
-            case .allow:
-                break
-            case .duplicate(let count):
-                throw ToolError.duplicate(tool: name, count: count)
-            case .toolBudgetReached(let tool, let cap):
-                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
-            case .totalBudgetReached(let cap):
-                throw ToolError.totalBudgetReached(cap: cap)
+            if case .allow = decision {
+                // continue
+            } else if let refusal = decision.refusalMessage {
+                return refusal
             }
         }
 
@@ -118,19 +114,77 @@ struct RAGSearchTool: Tool {
             return "No relevant passages found for query: '\(trimmed)'."
         }
 
+        let characterBudget = max(1, TokenBudgeting.estimatedContextCharacters(forTokens: tokenBudget))
         // Render each chunk with its source header so the model can cite
         // accurately and decide whether a follow-up call to a different
         // source is needed.
-        let rendered = top.enumerated().map { idx, ranked -> String in
+        var rendered: [String] = []
+        var remainingChars = characterBudget
+        for (idx, ranked) in top.enumerated() {
             var header = "--- Result \(idx + 1): \(ranked.chunk.source)"
             if let page = ranked.chunk.pdfPage { header += " (page \(page))" }
             if let url = ranked.chunk.url { header += " — \(url)" }
             header += " ---"
-            return "\(header)\n\(ranked.chunk.text)"
+            let separatorChars = rendered.isEmpty ? 0 : Self.perResultSeparator.count
+            let availableForResult = remainingChars - separatorChars
+            guard availableForResult > header.count + 32 else { break }
+
+            let excerptBudget = availableForResult - header.count - 1
+            let body = excerpt(of: ranked.chunk.text, query: trimmed, characterBudget: excerptBudget)
+            let block = "\(header)\n\(body)"
+            rendered.append(block)
+            remainingChars -= separatorChars + block.count
+            if remainingChars <= 0 { break }
+        }
+        guard !rendered.isEmpty else {
+            return "No relevant passages found for query: '\(trimmed)'."
         }
         #if DEBUG
         print("[Tool:searchContext] returning \(top.count) chunk(s), totalChars=\(rendered.map(\.count).reduce(0, +))")
         #endif
-        return rendered.joined(separator: "\n\n")
+        let joined = rendered.joined(separator: Self.perResultSeparator)
+        if joined.count <= characterBudget {
+            return joined
+        }
+        return String(joined.prefix(characterBudget)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func excerpt(of text: String, query: String, characterBudget: Int) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > characterBudget else { return trimmed }
+        guard characterBudget > 0 else { return "" }
+
+        let loweredText = trimmed.lowercased()
+        let loweredNSString = loweredText as NSString
+        let terms = queryTerms(from: query)
+        let focusIndex = terms.compactMap { term in
+            let range = loweredNSString.range(of: term)
+            return range.location == NSNotFound ? nil : range.location
+        }.min() ?? 0
+
+        let leadingRoom = max(characterBudget / 3, 0)
+        let startOffset = max(0, focusIndex - leadingRoom)
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: min(startOffset, trimmed.count))
+        let rawEndIndex = trimmed.index(startIndex, offsetBy: min(characterBudget, trimmed.distance(from: startIndex, to: trimmed.endIndex)))
+        let snippet = String(trimmed[startIndex..<rawEndIndex]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if startIndex == trimmed.startIndex {
+            return snippet
+        }
+        return "…\(snippet)"
+    }
+
+    private func queryTerms(from query: String) -> [String] {
+        query
+            .lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { !$0.isEmpty }
+            .sorted { lhs, rhs in
+                if lhs.count == rhs.count {
+                    return lhs < rhs
+                }
+                return lhs.count > rhs.count
+            }
     }
 }

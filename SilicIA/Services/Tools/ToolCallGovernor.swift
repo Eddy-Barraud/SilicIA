@@ -115,6 +115,10 @@ actor ToolCallGovernor {
     let maxExpensiveToolCalls: Int
     /// Name of the tool treated as expensive for `maxExpensiveToolCalls`.
     private let expensiveToolName: String
+    /// Optional explicit caps for specific tools whose replies can be large
+    /// enough to dominate the transcript even if they are not the primary
+    /// "expensive" tool.
+    private let additionalToolCaps: [String: Int]
 
     private var totalAttempts = 0
     private var perToolAllowed: [String: Int] = [:]
@@ -123,11 +127,13 @@ actor ToolCallGovernor {
     init(
         maxTotalCalls: Int = 8,
         maxExpensiveToolCalls: Int = 2,
-        expensiveToolName: String = "webSearch"
+        expensiveToolName: String = "webSearch",
+        additionalToolCaps: [String: Int] = [:]
     ) {
         self.maxTotalCalls = maxTotalCalls
         self.maxExpensiveToolCalls = maxExpensiveToolCalls
         self.expensiveToolName = expensiveToolName
+        self.additionalToolCaps = additionalToolCaps
     }
 
     /// Records an attempt and decides whether the tool should run. Call this
@@ -147,7 +153,14 @@ actor ToolCallGovernor {
                 decision = .duplicate(count: priorSignature + 1)
             } else {
                 let priorTool = perToolAllowed[tool, default: 0]
-                let cap = (tool == expensiveToolName) ? maxExpensiveToolCalls : maxTotalCalls
+                let cap: Int
+                if let explicit = additionalToolCaps[tool] {
+                    cap = explicit
+                } else if tool == expensiveToolName {
+                    cap = maxExpensiveToolCalls
+                } else {
+                    cap = maxTotalCalls
+                }
                 if priorTool >= cap {
                     decision = .toolBudgetReached(tool: tool, cap: cap)
                 } else {

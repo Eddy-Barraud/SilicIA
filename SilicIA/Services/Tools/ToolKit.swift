@@ -86,7 +86,11 @@ nonisolated enum ToolKit {
         // One loop breaker shared across every tool in this turn, so it sees
         // the whole call stream and can refuse duplicate / runaway calls
         // before they overflow the 4096-token window.
-        let governor = ToolCallGovernor()
+        let governor = ToolCallGovernor(
+            additionalToolCaps: [
+                "searchContext": 3
+            ]
+        )
 
         var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
         ragTool.governor = governor

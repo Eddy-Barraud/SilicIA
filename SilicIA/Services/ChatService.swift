@@ -130,7 +130,10 @@ final class ChatService: ObservableObject {
         // values actually used.
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
-        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
+        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(
+            maxResponseTokens,
+            useToolCalling: useToolCalling
+        )
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
             maxOutputTokens: effectiveMaxOutputTokens
@@ -242,6 +245,7 @@ final class ChatService: ObservableObject {
             // calculator wipes out an entire class of small-model
             // arithmetic mistakes.
             let session: LanguageModelSession
+            var toolBudget = 0
             if useToolCalling {
                 // Web-search tool joins the kit only when (a) at least one
                 // source is enabled AND (b) the user has the "Web" chip on
@@ -250,7 +254,7 @@ final class ChatService: ObservableObject {
                 // Both must be true for the tool to be attached. PDFtalkme
                 // forces the chip off so the tool stays off in that host.
                 let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
-                let (tools, toolBudget) = ToolKit.assemble(
+                let assembled = ToolKit.assemble(
                     config: ToolKit.Configuration(
                         language: language,
                         corpusChunks: chunks,
@@ -266,6 +270,8 @@ final class ChatService: ObservableObject {
                     ),
                     responseTokens: effectiveMaxOutputTokens
                 )
+                let tools = assembled.tools
+                toolBudget = assembled.tokenBudget
                 let toolNames = tools.map(\.name).joined(separator: ", ")
                 debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 session = LanguageModelSession(
@@ -290,8 +296,9 @@ final class ChatService: ObservableObject {
                 if finalSelectedContext.isEmpty {
                     toolGroundingContext = ""
                 } else {
-                    let toolGroundingCharCap = TokenBudgeting.maxToolGroundingCharacters(
-                        maxOutputTokens: effectiveMaxOutputTokens
+                    let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
+                        maxOutputTokens: effectiveMaxOutputTokens,
+                        reservedToolReplyTokens: toolBudget + 120
                     )
                     let toolGroundingTokenCap = min(
                         effectiveMaxContextTokens,
@@ -1121,8 +1128,14 @@ final class ChatService: ObservableObject {
     }
 
     /// Clamps requested output tokens to fit the shared 4096-token context window budget.
-    private func calculateEffectiveMaxOutputTokens(_ requestedMaxTokens: Int) -> Int {
-        TokenBudgeting.clampedOutputTokens(
+    private func calculateEffectiveMaxOutputTokens(
+        _ requestedMaxTokens: Int,
+        useToolCalling: Bool = false
+    ) -> Int {
+        if useToolCalling {
+            return TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: requestedMaxTokens)
+        }
+        return TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: requestedMaxTokens,
             instructionTokens: TokenBudgeting.instructionTokens,
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,

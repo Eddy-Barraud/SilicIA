@@ -103,15 +103,10 @@ struct WebSearchTool: Tool {
         // any network work, so a runaway model can't overflow the window.
         if let governor {
             let decision = await governor.evaluate(tool: name, arguments: arguments.query)
-            switch decision {
-            case .allow:
-                break
-            case .duplicate(let count):
-                throw ToolError.duplicate(tool: name, count: count)
-            case .toolBudgetReached(let tool, let cap):
-                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
-            case .totalBudgetReached(let cap):
-                throw ToolError.totalBudgetReached(cap: cap)
+            if case .allow = decision {
+                // continue
+            } else if let refusal = decision.refusalMessage {
+                return refusal
             }
         }
 

@@ -165,4 +165,18 @@ final class CalculatorToolTests: XCTestCase {
                            "Loop guard wrongly fired on distinct expression \(expr): \(output)")
         }
     }
+
+    func testGovernorDuplicateReturnsRefusalInsteadOfThrowing() async throws {
+        var governedTool = CalculatorTool()
+        governedTool.governor = ToolCallGovernor()
+
+        _ = try await governedTool.call(arguments: .init(expression: "10 / 4"))
+        let duplicate = try await governedTool.call(arguments: .init(expression: "10 / 4"))
+
+        XCTAssertTrue(
+            duplicate.localizedCaseInsensitiveContains("do not repeat") ||
+            duplicate.localizedCaseInsensitiveContains("write your final answer now"),
+            "Duplicate governed calculator call should return a soft refusal, got: \(duplicate)"
+        )
+    }
 }
