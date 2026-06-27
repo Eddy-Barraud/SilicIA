@@ -29,6 +29,13 @@ struct RAGChunker {
     static let avgCharsPerToken = 3
     private static let minimumChunkCharacters = 200
 
+    /// Cached regex matching a word split across a newline — two lowercase
+    /// letters separated by `\n` (e.g. `"Poly-\nments"` or `"meas\nurements"`).
+    /// Used to avoid splitting chunks inside a word.
+    private static let wordSplitAcrossNewlineRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "[a-z]\\n[a-z]",
+        options: []
+    )
     /// Cached regex collapsing horizontal whitespace runs (spaces, tabs,
     /// non-breaking spaces, Unicode whitespace) to a single space. Newlines
     /// are intentionally preserved — paragraph and table-row breaks make
@@ -70,7 +77,11 @@ struct RAGChunker {
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        let cleanText = Self.normalizeWhitespace(text)
+        // Convert whitespace-aligned tables BEFORE collapsing whitespace.
+        // Vision's OCR joins cells with 4 spaces — once normalizeWhitespace
+        // runs, those boundaries are unrecoverable and tables flatten.
+        let withTables = Self.convertWhitespaceAlignedTables(text)
+        let cleanText = Self.normalizeWhitespace(withTables)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !cleanText.isEmpty else { return [] }
@@ -290,16 +301,39 @@ struct RAGChunker {
             // otherwise we'd reformat any prose line that happens to have
             // a few wide gaps.
             if pending.count >= 2,
-               let columnCount = pending.map(\.count).max(),
-               columnCount >= 3 {
-                let padded = pending.map { row -> [String] in
-                    row.count >= columnCount
-                        ? row
-                        : row + Array(repeating: "", count: columnCount - row.count)
+               let maxCount = pending.map(\.count).max(),
+               maxCount >= 3 {
+                // Use the modal (most frequent) column count as the canonical
+                // table width. When Vision OCR splits a table cell — most
+                // commonly an equation column that has subscripts/symbols
+                // recognized as separate text fragments — that row ends up
+                // with more cells than the others. Using the max would widen
+                // the whole table to that outlier, producing empty cells
+                // everywhere and confusing the model. Using the mode keeps the
+                // canonical structure intact and merges any excess cells in
+                // the outlier row back into the last column.
+                var counts: [Int: Int] = [:]
+                for row in pending { counts[row.count, default: 0] += 1 }
+                let columnCount = counts.max(by: { $0.value < $1.value })?.key ?? maxCount
+
+                let normalized = pending.map { row -> [String] in
+                    if row.count == columnCount {
+                        return row
+                    } else if row.count < columnCount {
+                        return row + Array(repeating: "", count: columnCount - row.count)
+                    } else {
+                        // Merge excess cells back into the last column so a
+                        // single equation that Vision split into N fragments
+                        // ("a_ww =", "k_BT/(2α)", "(κ^−1 N_m − 1)") becomes
+                        // one contiguous cell in the Markdown table.
+                        let head = Array(row.prefix(columnCount - 1))
+                        let tail = row.dropFirst(columnCount - 1).joined(separator: " ")
+                        return head + [tail]
+                    }
                 }
-                output.append("| " + padded[0].joined(separator: " | ") + " |")
+                output.append("| " + normalized[0].joined(separator: " | ") + " |")
                 output.append("|" + String(repeating: " --- |", count: columnCount))
-                for row in padded.dropFirst() {
+                for row in normalized.dropFirst() {
                     output.append("| " + row.joined(separator: " | ") + " |")
                 }
             } else {
@@ -439,18 +473,34 @@ struct RAGChunker {
         if let newlineHit { return newlineHit }
 
         // Pass 2: no strong boundary found. Step back from `idealEnd` while
-        // we'd be bisecting a digit/separator cluster — e.g. the middle of
-        // "1,234.56" or "3.14159". A bisection means chars on both sides of
-        // `fallback` belong to `[0-9.,]` and at least one is a real digit
-        // (so we never mistake "..." for a number).
+        // we'd be bisecting a word or a digit/separator cluster.
+        // - Two adjacent lowercase letters: never split mid-word
+        //   ("Poly" + "ments" → keep together).
+        // - Digit/separator cluster: avoid bisecting "1,234.56" or
+        //   "105.4".
+        // - European thousands separator: "10 000".
         var fallback = idealEnd
         while fallback > walkbackStart {
             let prev = text.index(before: fallback)
             let cPrev = text[prev]
+            let cAt = text[fallback]
+
+            // Never split between two lowercase letters — mid-word break.
+            if cPrev.isLowercase && cPrev.isLetter && cAt.isLowercase && cAt.isLetter {
+                // Walk back to the space before the second half of the word.
+                while fallback > walkbackStart, !text[fallback].isWhitespace {
+                    fallback = text.index(before: fallback)
+                }
+                // Step past the whitespace so the split lands *after* it.
+                if fallback > walkbackStart, text[fallback].isWhitespace {
+                    fallback = text.index(after: fallback)
+                }
+                break
+            }
+
             let prevIsNumeric = cPrev.isNumber || cPrev == "." || cPrev == ","
             guard prevIsNumeric else { break }
             guard fallback < text.endIndex else { break }
-            let cAt = text[fallback]
             let atIsNumeric = cAt.isNumber || cAt == "." || cAt == ","
             if atIsNumeric, cPrev.isNumber || cAt.isNumber {
                 fallback = prev
