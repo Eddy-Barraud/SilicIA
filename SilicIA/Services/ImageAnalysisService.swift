@@ -399,8 +399,11 @@ enum ImageAnalysisService {
 
         await withTaskGroup(of: (Int, PDFPageAnalysisResult).self) { group in
             for pageIndex in 0..<workerCount {
+                let renderedImage = document
+                    .page(at: pageIndex)
+                    .flatMap { renderedCGImage(for: $0) }
                 group.addTask {
-                    (pageIndex, Self.analyzePDFPage(at: pageIndex, in: url) ?? empty)
+                    (pageIndex, renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty)
                 }
             }
 
@@ -414,8 +417,11 @@ enum ImageAnalysisService {
                 if nextPageIndex < totalPages, !Task.isCancelled {
                     let scheduledPageIndex = nextPageIndex
                     nextPageIndex += 1
+                    let renderedImage = document
+                        .page(at: scheduledPageIndex)
+                        .flatMap { renderedCGImage(for: $0) }
                     group.addTask {
-                        (scheduledPageIndex, Self.analyzePDFPage(at: scheduledPageIndex, in: url) ?? empty)
+                        (scheduledPageIndex, renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty)
                     }
                 }
             }
@@ -451,17 +457,6 @@ enum ImageAnalysisService {
             .filter { $0.confidence >= classificationConfidenceThreshold }
             .prefix(maxClassificationLabels)
             .map { (label: $0.identifier, confidence: $0.confidence) }
-    }
-
-    private static func analyzePDFPage(at pageIndex: Int, in url: URL) -> PDFPageAnalysisResult? {
-        guard !Task.isCancelled,
-              let document = PDFDocument(url: url),
-              let page = document.page(at: pageIndex),
-              let cgImage = renderedCGImage(for: page),
-              let analysis = analyzePDFPage(cgImage: cgImage) else {
-            return nil
-        }
-        return analysis
     }
 
     /// Renders `page` to a `CGImage` at approximately 300 DPI for Vision.
