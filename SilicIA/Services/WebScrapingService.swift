@@ -20,7 +20,7 @@ import WebKit
 class WebScrapingService: ObservableObject {
     /// App-specific User-Agent identifying SilicIA. Update version/contact as needed.
     /// Format recommendation: AppName/Version (Platform; Device) Engine; +ContactURL
-    private static let userAgent: String = {
+    nonisolated private static let userAgent: String = {
         // You can optionally make these dynamic using Bundle info and UIDevice.
         let appName = "SilicIA"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
@@ -89,49 +89,49 @@ class WebScrapingService: ObservableObject {
     // MARK: - Cached HTML regexes (compiled once, reused per scrape)
 
     /// Strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` blocks (and content) in one pass.
-    private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
         options: [.caseInsensitive]
     )
     /// Matches a whole `<table>...</table>` block. Used to extract tables
     /// *before* the generic tag stripper destroys their structure, so we can
     /// emit a Markdown pipe table the model can actually read.
-    static let tableBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableBlockRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<table[^>]*>([\\s\\S]*?)</table>",
         options: [.caseInsensitive]
     )
     /// Matches a `<tr>...</tr>` row inside a table block.
-    static let tableRowRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableRowRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<tr[^>]*>([\\s\\S]*?)</tr>",
         options: [.caseInsensitive]
     )
     /// Matches a `<td>...</td>` or `<th>...</th>` cell inside a row.
-    static let tableCellRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableCellRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<(t[dh])[^>]*>([\\s\\S]*?)</\\1>",
         options: [.caseInsensitive]
     )
     /// Strips HTML comments.
-    private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<!--[\\s\\S]*?-->",
         options: []
     )
     /// Strips remaining HTML tags.
-    private static let htmlTagRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlTagRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<[^>]+>",
         options: []
     )
     /// Collapses any whitespace run into a single space.
-    private static let whitespaceRunRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let whitespaceRunRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "\\s+",
         options: []
     )
     /// Captures any HTML entity reference: named, decimal numeric, or hex numeric.
-    private static let htmlEntityRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlEntityRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "&(#[0-9]+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]+);",
         options: []
     )
     /// Lookup table for the small set of named HTML entities the scraper supports.
-    private static let namedHTMLEntities: [String: String] = [
+    nonisolated private static let namedHTMLEntities: [String: String] = [
         "nbsp": " ",
         "amp": "&",
         "lt": "<",
@@ -174,6 +174,30 @@ class WebScrapingService: ObservableObject {
             }
 
             // Extract text content from HTML
+            return Self.extractTextFromHTML(html, maxCharacters: maxCharacters)
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated private static func scrapeContentOffMainActor(
+        from urlString: String,
+        maxCharacters: Int = 5000
+    ) async -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+
+        do {
+            var request = URLRequest(url: url)
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let html = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+
             return extractTextFromHTML(html, maxCharacters: maxCharacters)
         } catch {
             return nil
@@ -209,7 +233,12 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
+                    let content: String?
+                    if useVision {
+                        content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
+                    } else {
+                        content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
+                    }
                     return (nextURL, content)
                 }
             }
@@ -236,7 +265,12 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
+                        let content: String?
+                        if useVision {
+                            content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
+                        } else {
+                            content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
+                        }
                         return (nextURL, content)
                     }
                 }
@@ -292,7 +326,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Extract readable text content from HTML using cached regexes.
-    private func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
+    nonisolated private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
         // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
@@ -329,7 +363,7 @@ class WebScrapingService: ObservableObject {
     /// and splices the result back into the document — surrounded by blank
     /// lines so it forms its own paragraph block. Surviving `\n` characters
     /// later guide the RAG chunker toward row-aligned split points.
-    static func extractAndReplaceTables(_ html: String) -> String {
+    nonisolated static func extractAndReplaceTables(_ html: String) -> String {
         guard let tableRegex = tableBlockRegex else { return html }
         let nsRange = NSRange(html.startIndex..., in: html)
         let matches = tableRegex.matches(in: html, options: [], range: nsRange)
@@ -536,7 +570,7 @@ class WebScrapingService: ObservableObject {
     /// table. Empty input → empty output. Uneven row lengths are padded.
     /// Cell text has nested tags stripped and pipe characters escaped so the
     /// resulting Markdown is well-formed.
-    static func convertTableToMarkdown(_ tableInnerHTML: String) -> String {
+    nonisolated static func convertTableToMarkdown(_ tableInnerHTML: String) -> String {
         guard let rowRegex = tableRowRegex, let cellRegex = tableCellRegex else { return "" }
         let nsRange = NSRange(tableInnerHTML.startIndex..., in: tableInnerHTML)
         let rowMatches = rowRegex.matches(in: tableInnerHTML, options: [], range: nsRange)
@@ -577,7 +611,7 @@ class WebScrapingService: ObservableObject {
 
     /// Strips nested tags, decodes entities, collapses whitespace, escapes
     /// stray pipes so they don't break the surrounding Markdown table.
-    private static func sanitizeCellText(_ text: String) -> String {
+    nonisolated private static func sanitizeCellText(_ text: String) -> String {
         var t = text
         t = applyRegex(htmlTagRegex, to: t, replacement: " ")
         t = decodeHTMLEntities(t)
@@ -587,7 +621,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Applies a cached regex with `replacement` over the full string. No-op when the regex is nil.
-    private static func applyRegex(_ regex: NSRegularExpression?, to text: String, replacement: String) -> String {
+    nonisolated private static func applyRegex(_ regex: NSRegularExpression?, to text: String, replacement: String) -> String {
         guard let regex else { return text }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
@@ -596,7 +630,7 @@ class WebScrapingService: ObservableObject {
     /// Single-pass entity decoder: walks `&...;` references in order and
     /// substitutes named, decimal-numeric (`&#nnn;`), and hex-numeric
     /// (`&#xNN;`) entities. Unknown references pass through unchanged.
-    private static func decodeHTMLEntities(_ text: String) -> String {
+    nonisolated private static func decodeHTMLEntities(_ text: String) -> String {
         guard let regex = htmlEntityRegex else { return text }
         let nsRange = NSRange(text.startIndex..., in: text)
         let matches = regex.matches(in: text, options: [], range: nsRange)
@@ -630,7 +664,7 @@ class WebScrapingService: ObservableObject {
 
     /// Decodes a single entity body (the part between `&` and `;`).
     /// Returns nil when the entity is unrecognized so the caller can preserve the original text.
-    private static func decodeEntityToken(_ token: String) -> String? {
+    nonisolated private static func decodeEntityToken(_ token: String) -> String? {
         if token.hasPrefix("#x") || token.hasPrefix("#X") {
             let hex = token.dropFirst(2)
             guard let codePoint = UInt32(hex, radix: 16),
