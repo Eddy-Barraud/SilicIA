@@ -27,6 +27,6 @@
   "chat.settings.maxWiki": "Max results (Wikipedia)",
   "chat.settings.selectAtLeastOne": "Select at least one source.",
   "chat.settings.modelLanguage": "Model Language",
-  "chat.settings.webVisionToggle": "Web vision",
+  "chat.settings.webVisionToggle": "Vision (Web and PDF)",
   "chat.settings.webVisionDescription": "Use actual page rendering for context rather than only text"
 }
