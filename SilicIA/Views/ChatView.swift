@@ -464,6 +464,18 @@ struct ChatView: View {
                 .pickerStyle(.segmented)
             }
 
+            VStack(alignment: .leading, spacing: 8) {
+                Toggle(isOn: $settingsStore.settings.useWebVision) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L.t("chat.settings.webVisionToggle", language: settings.language))
+                            .font(.subheadline)
+                        Text(L.t("chat.settings.webVisionDescription", language: settings.language))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
             // Tool-calling toggle — experimental path where the model
             // pulls context via `searchContext` and `calculate` instead
             // of receiving pre-baked RAG chunks in the prompt. Off by
@@ -972,7 +984,8 @@ struct ChatView: View {
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
                 useWikipedia: effectiveUseWikipedia,
-                useToolCalling: settings.useToolCalling
+                useToolCalling: settings.useToolCalling,
+                useWebVision: settings.useWebVision
             )
         }
     }
@@ -1023,7 +1036,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                useWebVision: settings.useWebVision
             )
         }
     }
@@ -1453,7 +1467,8 @@ struct ChatView: View {
                 maxContextTokens: settings.maxContextTokens,
                 maxResponseTokens: settings.maxResponseTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                useWebVision: settings.useWebVision
             )
         }
     }

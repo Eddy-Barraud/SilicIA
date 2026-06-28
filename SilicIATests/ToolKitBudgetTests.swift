@@ -50,6 +50,7 @@ final class ToolKitBudgetTests: XCTestCase {
             webSearchAvailable: webSearchAvailable,
             webSearchService: WebSearchService(),
             webScraper: WebScrapingService(),
+            useWebVision: false,
             maxDuckDuckGoResults: 6,
             maxWikipediaResults: 2,
             useDuckDuckGo: true,

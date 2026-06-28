@@ -7,8 +7,12 @@
 
 import Foundation
 import Combine
+import CoreGraphics
 #if os(iOS)
 import UIKit
+#endif
+#if canImport(WebKit)
+import WebKit
 #endif
 
 @MainActor
@@ -75,7 +79,11 @@ class WebScrapingService: ObservableObject {
 
     private let session: URLSession
     private static let scrapeConcurrency = 8
+    private static let renderedScrapeConcurrency = 2
     private static let overfetchCount = 3
+    private static let webVisionViewport = CGSize(width: 1280, height: 1600)
+    private static let webVisionLoadTimeoutNanoseconds: UInt64 = 15_000_000_000
+    private static let webVisionSettleNanoseconds: UInt64 = 800_000_000
 
     // MARK: - Cached HTML regexes (compiled once, reused per scrape)
 
@@ -145,8 +153,12 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Scrape content from a single URL
-    func scrapeContent(from urlString: String, maxCharacters: Int = 5000) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
+
+        if useVision, let rendered = await scrapeRenderedContent(from: url, maxCharacters: maxCharacters) {
+            return rendered
+        }
 
         do {
             var request = URLRequest(url: url)
@@ -168,7 +180,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Scrape content from multiple URLs concurrently
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000) async -> [String: String] {
+    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000, useVision: Bool = false) async -> [String: String] {
         isScrapingContent = true
         defer { isScrapingContent = false }
 
@@ -179,7 +191,8 @@ class WebScrapingService: ObservableObject {
         let limitedURLs = Array(urls.prefix(fetchCount))
         var results: [String: String] = [:]
         var urlIterator = limitedURLs.makeIterator()
-        let initialWorkers = min(Self.scrapeConcurrency, limitedURLs.count)
+        let concurrency = useVision ? Self.renderedScrapeConcurrency : Self.scrapeConcurrency
+        let initialWorkers = min(concurrency, limitedURLs.count)
 
         #if DEBUG
         let scrapeStart = Date()
@@ -195,7 +208,7 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
                     return (nextURL, content)
                 }
             }
@@ -222,7 +235,7 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
                         return (nextURL, content)
                     }
                 }
@@ -238,7 +251,7 @@ class WebScrapingService: ObservableObject {
             completedTasks: completedTasks,
             succeededPages: results.count,
             canceledTasks: canceledTasks,
-            poolSize: Self.scrapeConcurrency,
+            poolSize: concurrency,
             overfetchCount: Self.overfetchCount,
             didEarlyCancel: didEarlyCancel,
             elapsedSeconds: Date().timeIntervalSince(scrapeStart)
@@ -246,6 +259,35 @@ class WebScrapingService: ObservableObject {
         #endif
 
         return results
+    }
+
+    static func renderedPageText(
+        from analyses: [ImageAnalysisService.PDFPageAnalysisResult],
+        maxCharacters: Int
+    ) -> String {
+        var sections: [String] = []
+        for (pageIndex, analysis) in analyses.enumerated() {
+            var pageSections: [String] = []
+            let recognizedText = analysis.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !recognizedText.isEmpty {
+                pageSections.append(recognizedText)
+            }
+            if !analysis.labels.isEmpty {
+                let labelText = analysis.labels
+                    .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
+                    .joined(separator: ", ")
+                pageSections.append("Visual content: \(labelText)")
+            }
+            guard !pageSections.isEmpty else { continue }
+            sections.append("[Rendered webpage page \(pageIndex + 1)]\n" + pageSections.joined(separator: "\n\n"))
+        }
+
+        var text = RAGChunker.convertWhitespaceAlignedTables(sections.joined(separator: "\n\n"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count > maxCharacters {
+            text = String(text.prefix(maxCharacters))
+        }
+        return text
     }
 
     /// Extract readable text content from HTML using cached regexes.
@@ -316,6 +358,164 @@ class WebScrapingService: ObservableObject {
         }
         return result
     }
+
+    #if canImport(WebKit)
+    private enum RenderedScrapeError: Error {
+        case loadTimedOut
+        case invalidDocumentMetrics
+    }
+
+    private final class NavigationDelegate: NSObject, WKNavigationDelegate {
+        var continuation: CheckedContinuation<Void, Error>?
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            resume(.success(()))
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard !Self.isBenignNavigationCancellation(error) else { return }
+            resume(.failure(error))
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard !Self.isBenignNavigationCancellation(error) else { return }
+            resume(.failure(error))
+        }
+
+        private func resume(_ result: Result<Void, Error>) {
+            guard let continuation else { return }
+            self.continuation = nil
+            switch result {
+            case .success:
+                continuation.resume()
+            case .failure(let error):
+                continuation.resume(throwing: error)
+            }
+        }
+
+        private static func isBenignNavigationCancellation(_ error: Error) -> Bool {
+            let nsError = error as NSError
+            return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        }
+    }
+
+    private func scrapeRenderedContent(from url: URL, maxCharacters: Int) async -> String? {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: CGRect(origin: .zero, size: Self.webVisionViewport), configuration: configuration)
+        webView.customUserAgent = Self.userAgent
+
+        do {
+            try await load(webView: webView, url: url)
+            try await Task.sleep(nanoseconds: Self.webVisionSettleNanoseconds)
+            let contentRect = try await renderedContentRect(for: webView)
+            let pdfData = try await createPDF(from: webView, rect: contentRect)
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("pdf")
+            defer {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+            try pdfData.write(to: tempURL, options: .atomic)
+
+            let analyses = await ImageAnalysisService.extractPDFPageAnalyses(from: tempURL)
+            let rendered = Self.renderedPageText(from: analyses, maxCharacters: maxCharacters)
+            return rendered.isEmpty ? nil : rendered
+        } catch {
+            guard !Self.isBenignRenderedScrapeError(error) else {
+                return nil
+            }
+            #if DEBUG
+            print("[WebScrapingService] Rendered scrape failed for \(url.absoluteString): \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
+    private func load(webView: WKWebView, url: URL) async throws {
+        let delegate = NavigationDelegate()
+        webView.navigationDelegate = delegate
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                try await withCheckedThrowingContinuation { continuation in
+                    delegate.continuation = continuation
+                    var request = URLRequest(url: url)
+                    request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                    webView.load(request)
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.webVisionLoadTimeoutNanoseconds)
+                throw RenderedScrapeError.loadTimedOut
+            }
+            _ = try await group.next()
+            group.cancelAll()
+        }
+    }
+
+    private func renderedContentRect(for webView: WKWebView) async throws -> CGRect {
+        let raw = try await evaluateJavaScript(
+            on: webView,
+            script: """
+            [
+              Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0, window.innerWidth),
+              Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, window.innerHeight)
+            ]
+            """
+        )
+        guard let metrics = raw as? [NSNumber], metrics.count == 2 else {
+            throw RenderedScrapeError.invalidDocumentMetrics
+        }
+        return CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: max(CGFloat(truncating: metrics[0]), Self.webVisionViewport.width),
+                height: max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height)
+            )
+        )
+    }
+
+    private func evaluateJavaScript(on webView: WKWebView, script: String) async throws -> Any? {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: result)
+                }
+            }
+        }
+    }
+
+    private func createPDF(from webView: WKWebView, rect: CGRect) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            let configuration = WKPDFConfiguration()
+            configuration.rect = rect
+            webView.createPDF(configuration: configuration) { result in
+                switch result {
+                case .success(let data):
+                    continuation.resume(returning: data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func isBenignRenderedScrapeError(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        return false
+    }
+    #endif
 
     /// Converts the inner HTML of a `<table>` element to a Markdown pipe
     /// table. Empty input → empty output. Uneven row lengths are padded.
@@ -435,4 +635,3 @@ class WebScrapingService: ObservableObject {
         return namedHTMLEntities[token]
     }
 }
-

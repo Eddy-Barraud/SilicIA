@@ -107,7 +107,8 @@ struct ContentView: View {
                                     maxResponseTokens: settings.maxResponseTokens,
                                     maxContextTokens: settings.maxContextTokens,
                                     useDuckDuckGo: settings.useDuckDuckGo,
-                                    useWikipedia: settings.useWikipedia
+                                    useWikipedia: settings.useWikipedia,
+                                    useWebVision: settings.useWebVision
                                 )
                             }
                         },

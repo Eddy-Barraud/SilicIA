@@ -31,6 +31,8 @@
   "search.settings.temperature": "Temperatura de la IA",
   "search.settings.firstGuessToggle": "Activar primera respuesta",
   "search.settings.webSummariesToggle": "Activar resúmenes web",
+  "search.settings.webVisionToggle": "Visión web",
+  "search.settings.webVisionDescription": "Usar el renderizado real de la página para el contexto en lugar de solo texto",
   "search.settings.searchSources": "Fuentes de búsqueda",
   "search.settings.maxDDG": "Resultados máx (DDG)",
   "search.settings.maxWiki": "Resultados máx (Wikipedia)",

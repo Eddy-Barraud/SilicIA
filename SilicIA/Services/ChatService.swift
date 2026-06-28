@@ -83,6 +83,7 @@ final class ChatService: ObservableObject {
     private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
+    private var preAnalyzedUseWebVision: Bool = false
 
     nonisolated static func contextAttachmentKey(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
@@ -103,7 +104,8 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true,
-        useToolCalling: Bool = false
+        useToolCalling: Bool = false,
+        useWebVision: Bool = false
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -151,6 +153,7 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: effectiveIncludeWebSearch,
+            useWebVision: useWebVision,
             searchQuerySeed: effectiveIncludeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -163,6 +166,7 @@ final class ChatService: ObservableObject {
             && effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
+            && useWebVision == preAnalyzedUseWebVision
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) imageCount=\(imageURLs.count) preChunks=\(preAnalyzedChunks.count)")
         let chunks: [RAGChunk]
@@ -180,7 +184,8 @@ final class ChatService: ObservableObject {
                 maxWikipediaResults: effectiveMaxWikiResults,
                 maxContextTokens: effectiveMaxContextTokens,
                 useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: useWikipedia
+                useWikipedia: useWikipedia,
+                useWebVision: useWebVision
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
@@ -190,6 +195,7 @@ final class ChatService: ObservableObject {
             preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
             preAnalyzedUseDuckDuckGo = useDuckDuckGo
             preAnalyzedUseWikipedia = useWikipedia
+            preAnalyzedUseWebVision = useWebVision
         }
         debugContext("sendMessage chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
@@ -262,6 +268,7 @@ final class ChatService: ObservableObject {
                         webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
+                        useWebVision: useWebVision,
                         maxDuckDuckGoResults: effectiveMaxDDGResults,
                         maxWikipediaResults: effectiveMaxWikiResults,
                         useDuckDuckGo: useDuckDuckGo,
@@ -549,7 +556,8 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         maxResponseTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        useWebVision: Bool = false
     ) async {
         // Compute clamped/effective values ONCE; reused below for both the
         // cache key and the cache-hit comparison.
@@ -566,6 +574,7 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
+            useWebVision: useWebVision,
             searchQuerySeed: "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -588,7 +597,8 @@ final class ChatService: ObservableObject {
            effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults,
            effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults,
            useDuckDuckGo == preAnalyzedUseDuckDuckGo,
-           useWikipedia == preAnalyzedUseWikipedia {
+           useWikipedia == preAnalyzedUseWikipedia,
+           useWebVision == preAnalyzedUseWebVision {
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             pdfAnalysisProgress = [:]
@@ -609,7 +619,8 @@ final class ChatService: ObservableObject {
             maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            useWebVision: useWebVision
         )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
@@ -619,6 +630,7 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
         preAnalyzedUseDuckDuckGo = useDuckDuckGo
         preAnalyzedUseWikipedia = useWikipedia
+        preAnalyzedUseWebVision = useWebVision
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -642,7 +654,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        useWebVision: Bool = false
     ) async {
         guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
             return
@@ -676,7 +689,8 @@ final class ChatService: ObservableObject {
             maxResponseTokens: maxResponseTokens,
             maxContextTokens: maxContextTokens,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            useWebVision: useWebVision
         )
     }
 
@@ -715,6 +729,7 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
+        preAnalyzedUseWebVision = false
         currentConversation = nil
         currentConversationPDFFilename = nil
         currentConversationPDFBookmark = nil
@@ -737,7 +752,8 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         reportProgress: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        useWebVision: Bool = false
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
         let uniquePDFs = Array(Set(pdfURLs))
@@ -821,7 +837,8 @@ final class ChatService: ObservableObject {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, totalMaxWebResults),
-                maxCharacters: webScrapingCharacters
+                maxCharacters: webScrapingCharacters,
+                useVision: useWebVision
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
@@ -843,7 +860,7 @@ final class ChatService: ObservableObject {
         for pdfURL in uniquePDFs {
             let completedBeforePDF = completedWorkItems
             let progressKey = Self.contextAttachmentKey(for: pdfURL)
-            let pageAnalyses = await Self.extractPDFPageAnalyses(from: pdfURL) { [self, progressKey] completedPages, totalPages in
+            let pageAnalyses = await ImageAnalysisService.extractPDFPageAnalyses(from: pdfURL) { [self, progressKey] completedPages, totalPages in
                 guard reportProgress else { return }
                 let pdfProgress = totalPages > 0 ? Double(completedPages) / Double(totalPages) : 1
                 self.pdfAnalysisProgress[progressKey] = pdfProgress
@@ -1036,6 +1053,7 @@ final class ChatService: ObservableObject {
         pdfURLs: [URL],
         imageURLs: [URL] = [],
         includeWebSearch: Bool,
+        useWebVision: Bool = false,
         searchQuerySeed: String,
         clampedDuckDuckGoResults: Int,
         clampedWikipediaResults: Int
@@ -1051,7 +1069,7 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedImagePaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||webVision:\(useWebVision)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
     }
 
     private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {
@@ -1096,103 +1114,6 @@ final class ChatService: ObservableObject {
         }
 
         return Array(Set(urls))
-    }
-
-    /// Extracts a Vision analysis (layout-aware OCR text + image
-    /// classification labels) for every page of a PDF file URL.
-    ///
-    /// This is the PDF RAG extraction entry point. Every page is rendered
-    /// to a `CGImage` and run through `ImageAnalysisService.analyzePDFPage`,
-    /// which combines:
-    /// - `VNRecognizeTextRequest` with visual-row reconstruction (tables,
-    ///   invoices, and equations survive intact — no more column-major
-    ///   dumps from PDFKit's drawing-order `page.string`), and
-    /// - `VNClassifyImageRequest` so charts, diagrams, figures, and
-    ///   scanned photos get a textual hint the model can reason about.
-    ///
-    /// Pages whose Vision analysis comes back empty are skipped so the
-    /// chunker doesn't emit empty chunks.
-    private nonisolated static func extractPDFPageAnalyses(
-        from url: URL,
-        progress: (@MainActor @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void)? = nil
-    ) async -> [ImageAnalysisService.PDFPageAnalysisResult] {
-        let accessed = url.startAccessingSecurityScopedResource()
-        defer {
-            if accessed {
-                url.stopAccessingSecurityScopedResource()
-            }
-        }
-
-        guard let document = PDFDocument(url: url) else {
-            #if DEBUG
-            print("[ChatService][Context] extractPDFPageAnalyses failed to open PDF at path=\(url.path)")
-            #endif
-            return []
-        }
-
-        if document.isLocked, document.unlock(withPassword: "") {
-            #if DEBUG
-            print("[ChatService][Context] extractPDFPageAnalyses unlocked a PDF with empty password")
-            #endif
-        }
-
-        let totalPages = document.pageCount
-        var analyses: [ImageAnalysisService.PDFPageAnalysisResult] = []
-        for pageIndex in 0..<totalPages {
-            if Task.isCancelled {
-                break
-            }
-            guard let page = document.page(at: pageIndex),
-                  let cgImage = renderedCGImage(for: page),
-                  let analysis = ImageAnalysisService.analyzePDFPage(cgImage: cgImage),
-                  !analysis.isEmpty else {
-                if let progress {
-                    await progress(pageIndex + 1, totalPages)
-                }
-                continue
-            }
-            analyses.append(analysis)
-            if let progress {
-                await progress(pageIndex + 1, totalPages)
-            }
-        }
-
-        #if DEBUG
-        print("[ChatService][Context] extractPDFPageAnalyses pdf=\(url.lastPathComponent) pages=\(totalPages) analyzed=\(analyses.count)")
-        #endif
-        return analyses
-    }
-
-    /// Renders `page` to a `CGImage` at approximately 300 DPI for Vision.
-    ///
-    /// Standard A4/Letter pages are 595–842 pt at PDF's native 72 DPI.
-    /// Without an explicit upscale, Vision receives a ~600×800 px bitmap —
-    /// far too coarse for reliable OCR of equations, subscripts, Greek
-    /// letters, and dense multi-column tables found in scientific papers.
-    /// Targeting 2500 px on the longer side yields ~300 DPI for these page
-    /// sizes, where Vision's `VNRecognizeTextRequest` is significantly more
-    /// accurate. The cap at 4096 px prevents memory pressure on very large
-    /// document pages (e.g. A0 posters or oversized technical drawings).
-    private nonisolated static func renderedCGImage(for page: PDFPage) -> CGImage? {
-        let pageBounds = page.bounds(for: .mediaBox)
-        let pageSize = pageBounds.size
-        let nativeLonger = max(pageSize.width, pageSize.height)
-        // Upscale if below the target; downscale if above the cap.
-        let targetLonger: CGFloat = 2500
-        let maxLonger: CGFloat = 4096
-        let scale = nativeLonger < targetLonger
-            ? targetLonger / nativeLonger
-            : (nativeLonger > maxLonger ? maxLonger / nativeLonger : 1)
-        let targetSize = CGSize(
-            width: max(1, pageSize.width * scale),
-            height: max(1, pageSize.height * scale)
-        )
-        let image = page.thumbnail(of: targetSize, for: .mediaBox)
-        #if os(macOS)
-        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
-        #else
-        return image.cgImage
-        #endif
     }
 
     private func debugContext(_ message: @autoclosure () -> String) {

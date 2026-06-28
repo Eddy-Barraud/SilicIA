@@ -26,5 +26,7 @@
   "chat.settings.maxDDG": "Résultats max (DDG)",
   "chat.settings.maxWiki": "Résultats max (Wikipedia)",
   "chat.settings.selectAtLeastOne": "Sélectionnez au moins une source.",
-  "chat.settings.modelLanguage": "Langue du modèle"
+  "chat.settings.modelLanguage": "Langue du modèle",
+  "chat.settings.webVisionToggle": "Vision web",
+  "chat.settings.webVisionDescription": "Utiliser le rendu réel des pages pour le contexte plutôt que seulement le texte"
 }

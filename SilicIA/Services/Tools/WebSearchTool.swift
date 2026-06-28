@@ -49,6 +49,7 @@ struct WebSearchTool: Tool {
     /// + search machinery (rate limits, locale, custom UA, etc.).
     let webSearchService: WebSearchService
     let webScraper: WebScrapingService
+    let useWebVision: Bool
     let maxDuckDuckGoResults: Int
     let maxWikipediaResults: Int
     let useDuckDuckGo: Bool
@@ -201,7 +202,8 @@ struct WebSearchTool: Tool {
         let scraped = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: limit,
-            maxCharacters: perResultCharBudget
+            maxCharacters: perResultCharBudget,
+            useVision: useWebVision
         )
 
         // Each result block carries enough metadata for the model to cite
