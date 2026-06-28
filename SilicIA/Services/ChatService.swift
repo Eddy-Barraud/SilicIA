@@ -819,7 +819,7 @@ final class ChatService: ObservableObject {
                   !retrievedContent.isEmpty else {
                 continue
             }
-            let chunked = ragChunker.chunk(
+            let chunked = await ragChunker.chunk(
                 text: retrievedContent,
                 source: result.title,
                 maxChunkTokens: Self.webChunkMaxTokens,
@@ -842,7 +842,7 @@ final class ChatService: ObservableObject {
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
-                let chunked = ragChunker.chunk(
+                let chunked = await ragChunker.chunk(
                     text: text,
                     source: "Web: \(url)",
                     maxChunkTokens: Self.webChunkMaxTokens,
@@ -888,7 +888,7 @@ final class ChatService: ObservableObject {
                 // from a TVA percentage on the same row.
                 let tabularized = RAGChunker.convertWhitespaceAlignedTables(pageText)
                 let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
-                let pageChunks = Self.makePDFPageChunks(
+                let pageChunks = await Self.makePDFPageChunks(
                     text: tabularized,
                     source: source,
                     pdfPage: pageIndex + 1,
@@ -937,7 +937,7 @@ final class ChatService: ObservableObject {
         source: String,
         pdfPage: Int,
         maxContextTokens: Int
-    ) -> [RAGChunk] {
+    ) async -> [RAGChunk] {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanText.isEmpty else { return [] }
 
@@ -948,7 +948,7 @@ final class ChatService: ObservableObject {
         }
 
         let chunker = RAGChunker()
-        return chunker.chunk(
+        return await chunker.chunk(
             text: cleanText,
             source: source,
             maxChunkTokens: pdfChunkMaxTokens,

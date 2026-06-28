@@ -332,7 +332,7 @@ class AIService: ObservableObject {
         for result in results {
             if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
-                let chunked = ragChunker.chunk(
+                let chunked = await ragChunker.chunk(
                     text: retrievedContent,
                     source: result.title,
                     maxChunkTokens: Self.webChunkMaxTokens,
@@ -341,7 +341,7 @@ class AIService: ObservableObject {
                 )
                 chunks.append(contentsOf: chunked)
             } else if let pageContent = scrapedContent[result.url] {
-                let chunked = ragChunker.chunk(
+                let chunked = await ragChunker.chunk(
                     text: pageContent,
                     source: result.title,
                     maxChunkTokens: Self.webChunkMaxTokens,
@@ -350,7 +350,7 @@ class AIService: ObservableObject {
                 )
                 chunks.append(contentsOf: chunked)
             } else {
-                let chunked = ragChunker.chunk(
+                let chunked = await ragChunker.chunk(
                     text: result.snippet,
                     source: result.title,
                     maxChunkTokens: Self.webChunkMaxTokens,
@@ -438,7 +438,7 @@ class AIService: ObservableObject {
         // same RAG pipeline the prompt-stuffing path uses so the cards
         // render with match-score badges instead of bare 0% rings.
         if useToolCalling, !toolFetchedResults.isEmpty, let onMatchingScores {
-            let toolChunks = chunkResultsForRAG(toolFetchedResults)
+            let toolChunks = await chunkResultsForRAG(toolFetchedResults)
             if !toolChunks.isEmpty {
                 let toolSelected = await ragContextService.selectContext(
                     chunks: toolChunks,
@@ -476,7 +476,7 @@ class AIService: ObservableObject {
     /// already seen so multiple webSearch calls don't produce duplicate
     /// cards. Order-preserving — newer URLs append at the tail.
     @MainActor
-    private func appendUniqueResults(_ incoming: [SearchResult]) {
+    private func appendUniqueResults(_ incoming: [SearchResult]) async {
         let existing = Set(toolFetchedResults.map(\.url))
         let novel = incoming.filter { !existing.contains($0.url) }
         guard !novel.isEmpty else { return }
@@ -484,7 +484,7 @@ class AIService: ObservableObject {
 
         // Calculate scores in real-time as results arrive so they display immediately
         if let onMatchingScores = activeOnMatchingScores, !toolFetchedResults.isEmpty {
-            let toolChunks = chunkResultsForRAG(toolFetchedResults)
+            let toolChunks = await chunkResultsForRAG(toolFetchedResults)
             if !toolChunks.isEmpty {
                 let query = activeQuery
                 let queries = activeQueries
@@ -512,7 +512,7 @@ class AIService: ObservableObject {
     /// `summarize`'s `results` parameter — same source field, same chunk
     /// size, same fallback ladder (retrieved content → snippet) so the
     /// resulting per-URL scores are comparable across the two modes.
-    private func chunkResultsForRAG(_ results: [SearchResult]) -> [RAGChunk] {
+    private func chunkResultsForRAG(_ results: [SearchResult]) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
         for result in results {
             let text: String
@@ -523,7 +523,7 @@ class AIService: ObservableObject {
                 text = result.snippet
             }
             guard !text.isEmpty else { continue }
-            let chunked = ragChunker.chunk(
+            let chunked = await ragChunker.chunk(
                 text: text,
                 source: result.title,
                 maxChunkTokens: Self.webChunkMaxTokens,
@@ -1006,7 +1006,7 @@ class AIService: ObservableObject {
                             // binding (which Swift 6 flags as capturing a var in
                             // concurrently-executing code).
                             Task { @MainActor [weak self] in
-                                self?.appendUniqueResults(results)
+                                await self?.appendUniqueResults(results)
                             }
                         }
                     ),

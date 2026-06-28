@@ -89,7 +89,7 @@ struct RAGChunker {
         overlapTokens: Int,
         url: String? = nil,
         pdfPage: Int? = nil
-    ) -> [RAGChunk] {
+    ) async -> [RAGChunk] {
         // Convert whitespace-aligned tables BEFORE collapsing whitespace.
         // Vision's OCR joins cells with 4 spaces — once normalizeWhitespace
         // runs, those boundaries are unrecoverable and tables flatten.
@@ -101,7 +101,7 @@ struct RAGChunker {
 
         let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
         let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
-        let units = Self.makeChunkUnits(from: cleanText, maxChunkChars: maxChunkChars)
+        let units = await Self.makeChunkUnits(from: cleanText, maxChunkChars: maxChunkChars)
         guard !units.isEmpty else { return [] }
 
         var chunks: [RAGChunk] = []
@@ -140,26 +140,26 @@ struct RAGChunker {
         return Self.preserveTableHeadersAcrossChunks(chunks)
     }
 
-    private nonisolated static func makeChunkUnits(from text: String, maxChunkChars: Int) -> [ChunkUnit] {
+    private nonisolated static func makeChunkUnits(from text: String, maxChunkChars: Int) async -> [ChunkUnit] {
         let lines = text.components(separatedBy: "\n")
         var units: [ChunkUnit] = []
         var pendingParagraph: [String] = []
         var nextSectionID = 0
         var index = 0
 
-        func appendUnit(text: String, kind: ChunkUnitKind, sectionID: Int) {
+        func appendUnit(text: String, kind: ChunkUnitKind, sectionID: Int) async {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return }
             if trimmed.count <= maxChunkChars {
                 units.append(ChunkUnit(text: trimmed, sectionID: sectionID, kind: kind))
                 return
             }
-            for piece in await MainActor.run { splitOversizedText(trimmed, maxChunkChars: maxChunkChars) } {
+            for piece in await MainActor.run(body: { splitOversizedText(trimmed, maxChunkChars: maxChunkChars) }) {
                 units.append(ChunkUnit(text: piece, sectionID: sectionID, kind: kind))
             }
         }
 
-        func flushParagraph() {
+        func flushParagraph() async {
             let paragraph = pendingParagraph
                 .joined(separator: "\n")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -172,7 +172,7 @@ struct RAGChunker {
             let sentenceUnits = sentenceStrings(in: paragraph)
             if sentenceUnits.count >= 2 {
                 for sentence in sentenceUnits {
-                    appendUnit(text: sentence, kind: .sentence, sectionID: sectionID)
+                    await appendUnit(text: sentence, kind: .sentence, sectionID: sectionID)
                 }
                 return
             }
@@ -183,10 +183,10 @@ struct RAGChunker {
                 .filter { !$0.isEmpty }
             if proseLines.count >= 2 {
                 for line in proseLines {
-                    appendUnit(text: line, kind: .line, sectionID: sectionID)
+                    await appendUnit(text: line, kind: .line, sectionID: sectionID)
                 }
             } else {
-                appendUnit(text: paragraph, kind: .line, sectionID: sectionID)
+                await appendUnit(text: paragraph, kind: .line, sectionID: sectionID)
             }
         }
 
@@ -195,13 +195,13 @@ struct RAGChunker {
             let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
 
             if trimmedLine.isEmpty {
-                flushParagraph()
+                await flushParagraph()
                 index += 1
                 continue
             }
 
             if isMarkdownTableRow(trimmedLine) {
-                flushParagraph()
+                await flushParagraph()
                 let sectionID = nextSectionID
                 nextSectionID += 1
                 var tableLines: [String] = []
@@ -211,7 +211,7 @@ struct RAGChunker {
                     tableLines.append(candidate)
                     index += 1
                 }
-                appendUnit(text: tableLines.joined(separator: "\n"), kind: .table, sectionID: sectionID)
+                await appendUnit(text: tableLines.joined(separator: "\n"), kind: .table, sectionID: sectionID)
                 continue
             }
 
@@ -219,7 +219,7 @@ struct RAGChunker {
             index += 1
         }
 
-        flushParagraph()
+        await flushParagraph()
         return units
     }
 
@@ -258,11 +258,11 @@ struct RAGChunker {
         return pieces
     }
 
-    private nonisolated static func additionalRenderedLength(for unit: ChunkUnit, after previous: ChunkUnit?) -> Int {
+    private static func additionalRenderedLength(for unit: ChunkUnit, after previous: ChunkUnit?) -> Int {
         unit.text.count + (previous.map { separator(between: $0, and: unit).count } ?? 0)
     }
 
-    private nonisolated static func renderChunkUnits(_ units: [ChunkUnit]) -> String {
+    private static func renderChunkUnits(_ units: [ChunkUnit]) -> String {
         guard let first = units.first else { return "" }
         var rendered = first.text
         var previous = first
@@ -280,7 +280,7 @@ struct RAGChunker {
         return "\n"
     }
 
-    private nonisolated static func nextChunkStartIndex(
+    private static func nextChunkStartIndex(
         units: [ChunkUnit],
         chunkStart: Int,
         chunkEnd: Int,
