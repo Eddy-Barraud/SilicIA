@@ -449,10 +449,21 @@ class WebScrapingService: ObservableObject {
                 try await Task.sleep(nanoseconds: Self.webVisionLoadTimeoutNanoseconds)
                 throw RenderedScrapeError.loadTimedOut
             }
-            _ = try await group.next()
-            group.cancelAll()
+
+            do {
+                _ = try await group.next()
+                group.cancelAll()
+            } catch {
+                await MainActor.run {
+                    webView.stopLoading()
+                    delegate.continuation?.resume(throwing: error)
+                    delegate.continuation = nil
+                }
+                group.cancelAll()
+                throw error
+            }
         }
-    }
+    
 
     private func renderedContentRect(for webView: WKWebView) async throws -> CGRect {
         let raw = try await evaluateJavaScript(
