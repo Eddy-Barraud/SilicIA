@@ -82,6 +82,7 @@ class WebScrapingService: ObservableObject {
     private static let renderedScrapeConcurrency = 2
     private static let overfetchCount = 3
     private static let webVisionViewport = CGSize(width: 1280, height: 1600)
+    private static let webVisionMaxRenderedPages: CGFloat = 3
     private static let webVisionLoadTimeoutNanoseconds: UInt64 = 15_000_000_000
     private static let webVisionSettleNanoseconds: UInt64 = 800_000_000
 
@@ -482,7 +483,10 @@ class WebScrapingService: ObservableObject {
             origin: .zero,
             size: CGSize(
                 width: max(CGFloat(truncating: metrics[0]), Self.webVisionViewport.width),
-                height: max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height)
+                height: min(
+                    max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height),
+                    Self.webVisionViewport.height * Self.webVisionMaxRenderedPages
+                )
             )
         )
     }
