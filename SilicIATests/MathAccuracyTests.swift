@@ -28,14 +28,14 @@ final class MathAccuracyTests: XCTestCase {
     /// A multi-digit number with thousands separators must not be split
     /// across two chunks — the model silently corrupts numbers when half
     /// of the digits land in a different chunk.
-    func testChunkerKeepsThousandsSeparatedNumberIntact() {
+    func testChunkerKeepsThousandsSeparatedNumberIntact() async {
         let chunker = RAGChunker()
         // Pre/post strings sized to force the ideal boundary near the
         // middle of "8,432,567".
         let prefix = String(repeating: "x", count: 200)
         let suffix = String(repeating: "y", count: 200)
         let text = "\(prefix) 8,432,567 \(suffix)"
-        let chunks = chunker.chunk(
+        let chunks = await chunker.chunk(
             text: text,
             source: "test",
             maxChunkTokens: 70,           // → ~210 chars per chunk
@@ -58,26 +58,26 @@ final class MathAccuracyTests: XCTestCase {
 
     /// Decimal numbers ("105.4", "3.14159") must not be split at the
     /// decimal point.
-    func testChunkerKeepsDecimalNumberIntact() {
+    func testChunkerKeepsDecimalNumberIntact() async {
         let chunker = RAGChunker()
         let prefix = String(repeating: "a", count: 200)
         let suffix = String(repeating: "b", count: 200)
         let text = "\(prefix) 3.14159265 \(suffix)"
-        let chunks = chunker.chunk(text: text, source: "test", maxChunkTokens: 70, overlapTokens: 0)
+        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 70, overlapTokens: 0)
         let intact = chunks.contains { $0.text.contains("3.14159265") }
         XCTAssertTrue(intact, "Decimal number was split. Chunks: \(chunks.map(\.text))")
     }
 
     /// When a sentence-ending period sits within the walkback range, the
     /// chunker should prefer it over a mid-sentence split.
-    func testChunkerPrefersSentenceBoundary() {
+    func testChunkerPrefersSentenceBoundary() async {
         let chunker = RAGChunker()
         // Build text where the byte-count ideal end lands mid-second-sentence,
         // but a sentence boundary exists ~10% earlier.
         let s1 = "The first sentence has some content here that goes on for a while to fill space."
         let s2 = "Now begins a fresh second sentence with completely different unrelated content."
         let text = s1 + " " + s2
-        let chunks = chunker.chunk(text: text, source: "test", maxChunkTokens: 30, overlapTokens: 0)
+        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 30, overlapTokens: 0)
         // The first chunk should end at the s1/s2 boundary (period + space).
         guard let first = chunks.first else {
             XCTFail("No chunks produced")
@@ -91,7 +91,7 @@ final class MathAccuracyTests: XCTestCase {
     /// in the walkback window. Fixture sized so the byte-count ideal end
     /// lands inside paragraph 2 but the paragraph break sits inside the
     /// 20% walkback window.
-    func testChunkerPrefersParagraphBoundary() {
+    func testChunkerPrefersParagraphBoundary() async {
         let chunker = RAGChunker()
         // p1 ~213 chars, p2 ~148 chars; \n\n at offset 213-214.
         let p1 = String(repeating: "Paragraph one fills with content for the test. ", count: 4)
@@ -100,7 +100,7 @@ final class MathAccuracyTests: XCTestCase {
         let text = p1 + "\n\n" + p2
         // maxChunkChars = max(200, 80*3) = 240 — hardEnd lands ~26 chars
         // into p2; walkback = 240/5 = 48 chars, which reaches the \n\n.
-        let chunks = chunker.chunk(text: text, source: "test", maxChunkTokens: 80, overlapTokens: 0)
+        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 80, overlapTokens: 0)
         guard let first = chunks.first else {
             XCTFail("No chunks produced")
             return
@@ -398,7 +398,7 @@ final class MathAccuracyTests: XCTestCase {
     /// End-to-end through the chunker: after conversion + chunking, the
     /// Amortisseurs row remains a contiguous unit and the price "154,17"
     /// sits in the same chunk as the row's other cells.
-    func testAmortisseursRowSurvivesChunkingIntact() {
+    func testAmortisseursRowSurvivesChunkingIntact() async {
         let pdf = """
         Devis voiture 208
 
@@ -409,7 +409,7 @@ final class MathAccuracyTests: XCTestCase {
         Total TTC: 298,17
         """
         let converted = RAGChunker.convertWhitespaceAlignedTables(pdf)
-        let chunks = RAGChunker().chunk(
+        let chunks = await RAGChunker().chunk(
             text: converted,
             source: "test",
             maxChunkTokens: 200,
