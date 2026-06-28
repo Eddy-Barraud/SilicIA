@@ -498,8 +498,10 @@ class WebScrapingService: ObservableObject {
                 throw error
             }
         }
-    
+    }
+    #endif
 
+    #if canImport(WebKit)
     private func renderedContentRect(for webView: WKWebView) async throws -> CGRect {
         let raw = try await evaluateJavaScript(
             on: webView,
