@@ -932,7 +932,7 @@ final class ChatService: ObservableObject {
     /// Selection/ranking still happens later in `RAGContextService`, so with
     /// many pages we effectively rank pages first and only split the rare page
     /// that would be too large to ship as one unit.
-    nonisolated static func makePDFPageChunks(
+    static func makePDFPageChunks(
         text: String,
         source: String,
         pdfPage: Int,

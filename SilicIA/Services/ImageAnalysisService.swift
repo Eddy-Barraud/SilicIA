@@ -364,6 +364,7 @@ enum ImageAnalysisService {
 
     /// Extracts a Vision analysis (layout-aware OCR text + image
     /// classification labels) for every page of a PDF file URL.
+    @MainActor
     static func extractPDFPageAnalyses(
         from url: URL,
         progress: (@MainActor @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void)? = nil
@@ -403,7 +404,7 @@ enum ImageAnalysisService {
                     .page(at: pageIndex)
                     .flatMap { renderedCGImage(for: $0) }
                 group.addTask {
-                    (pageIndex, renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty)
+                    (pageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
                 }
             }
 
@@ -411,7 +412,7 @@ enum ImageAnalysisService {
                 analyses[pageIndex] = analysis
                 completedPages += 1
                 if let progress {
-                    await progress(completedPages, totalPages)
+                    progress(completedPages, totalPages)
                 }
 
                 if nextPageIndex < totalPages, !Task.isCancelled {
@@ -421,7 +422,7 @@ enum ImageAnalysisService {
                         .page(at: scheduledPageIndex)
                         .flatMap { renderedCGImage(for: $0) }
                     group.addTask {
-                        (scheduledPageIndex, renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty)
+                        (scheduledPageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
                     }
                 }
             }

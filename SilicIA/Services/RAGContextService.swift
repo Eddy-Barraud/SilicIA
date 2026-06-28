@@ -154,7 +154,7 @@ struct RAGChunker {
                 units.append(ChunkUnit(text: trimmed, sectionID: sectionID, kind: kind))
                 return
             }
-            for piece in splitOversizedText(trimmed, maxChunkChars: maxChunkChars) {
+            for piece in await MainActor.run { splitOversizedText(trimmed, maxChunkChars: maxChunkChars) } {
                 units.append(ChunkUnit(text: piece, sectionID: sectionID, kind: kind))
             }
         }
@@ -237,7 +237,7 @@ struct RAGChunker {
         return sentences
     }
 
-    private nonisolated static func splitOversizedText(_ text: String, maxChunkChars: Int) -> [String] {
+    private static func splitOversizedText(_ text: String, maxChunkChars: Int) -> [String] {
         guard text.count > maxChunkChars else { return [text] }
         var pieces: [String] = []
         var start = text.startIndex
@@ -274,7 +274,7 @@ struct RAGChunker {
         return rendered
     }
 
-    private nonisolated static func separator(between previous: ChunkUnit, and current: ChunkUnit) -> String {
+    private static func separator(between previous: ChunkUnit, and current: ChunkUnit) -> String {
         if previous.sectionID != current.sectionID { return "\n\n" }
         if previous.kind == .sentence && current.kind == .sentence { return " " }
         return "\n"

@@ -198,7 +198,7 @@ class WebScrapingService: ObservableObject {
                 return nil
             }
 
-            return extractTextFromHTML(html, maxCharacters: maxCharacters)
+            return await extractTextFromHTML(html, maxCharacters: maxCharacters)
         } catch {
             return nil
         }
@@ -326,7 +326,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Extract readable text content from HTML using cached regexes.
-    nonisolated private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
+    private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
         // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
