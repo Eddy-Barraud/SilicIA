@@ -78,11 +78,13 @@ final class AppSettingsStoreTests: XCTestCase {
     /// Several independent fields all persist together.
     func testMultipleFieldUpdatesAllPersist() {
         AppSettingsStore.shared.settings.useToolCalling = true
+        AppSettingsStore.shared.settings.useWebVision = true
         AppSettingsStore.shared.settings.maxContextTokens = 1234
         AppSettingsStore.shared.settings.useWikipedia = false
 
         let reloaded = AppSettings.load()
         XCTAssertTrue(reloaded.useToolCalling)
+        XCTAssertTrue(reloaded.useWebVision)
         XCTAssertEqual(reloaded.maxContextTokens, 1234)
         XCTAssertFalse(reloaded.useWikipedia)
     }

@@ -9,6 +9,7 @@ import Foundation
 import Vision
 import CoreGraphics
 import ImageIO
+import PDFKit
 
 /// Result of analyzing a single image with Apple Vision: OCR text and
 /// classification labels with confidence scores. Either field may be empty;
@@ -299,7 +300,7 @@ enum ImageAnalysisService {
     /// describe charts, diagrams, photos, and scanned content the OCR
     /// pass can't see. Either field may be empty; callers should treat a
     /// fully empty result as "nothing useful was extracted".
-    struct PDFPageAnalysisResult {
+    struct PDFPageAnalysisResult: Sendable {
         let recognizedText: String
         let labels: [(label: String, confidence: Float)]
 
@@ -361,6 +362,79 @@ enum ImageAnalysisService {
         return result.isEmpty ? nil : result
     }
 
+    /// Extracts a Vision analysis (layout-aware OCR text + image
+    /// classification labels) for every page of a PDF file URL.
+    @MainActor
+    static func extractPDFPageAnalyses(
+        from url: URL,
+        progress: (@MainActor @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void)? = nil
+    ) async -> [PDFPageAnalysisResult] {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let document = PDFDocument(url: url) else {
+            #if DEBUG
+            print("[ImageAnalysisService] Failed to open PDF at \(url.path)")
+            #endif
+            return []
+        }
+
+        if document.isLocked, document.unlock(withPassword: "") {
+            #if DEBUG
+            print("[ImageAnalysisService] Unlocked a PDF with empty password")
+            #endif
+        }
+
+        let totalPages = document.pageCount
+        guard totalPages > 0 else { return [] }
+
+        let workerCount = min(totalPages, max(1, min(ProcessInfo.processInfo.activeProcessorCount, 4)))
+        let empty = PDFPageAnalysisResult(recognizedText: "", labels: [])
+        var analyses = Array(repeating: empty, count: totalPages)
+        var nextPageIndex = workerCount
+        var completedPages = 0
+
+        await withTaskGroup(of: (Int, PDFPageAnalysisResult).self) { group in
+            for pageIndex in 0..<workerCount {
+                let renderedImage = document
+                    .page(at: pageIndex)
+                    .flatMap { renderedCGImage(for: $0) }
+                group.addTask {
+                    (pageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
+                }
+            }
+
+            while let (pageIndex, analysis) = await group.next() {
+                analyses[pageIndex] = analysis
+                completedPages += 1
+                if let progress {
+                    progress(completedPages, totalPages)
+                }
+
+                if nextPageIndex < totalPages, !Task.isCancelled {
+                    let scheduledPageIndex = nextPageIndex
+                    nextPageIndex += 1
+                    let renderedImage = document
+                        .page(at: scheduledPageIndex)
+                        .flatMap { renderedCGImage(for: $0) }
+                    group.addTask {
+                        (scheduledPageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
+                    }
+                }
+            }
+        }
+
+        #if DEBUG
+        let analyzedPageCount = analyses.filter { !$0.isEmpty }.count
+        print("[ImageAnalysisService] extractPDFPageAnalyses pdf=\(url.lastPathComponent) pages=\(totalPages) analyzed=\(analyzedPageCount)")
+        #endif
+        return analyses
+    }
+
     // MARK: - Helpers
 
     private static func makeTextRequest(languages: [String]) -> VNRecognizeTextRequest {
@@ -384,6 +458,28 @@ enum ImageAnalysisService {
             .filter { $0.confidence >= classificationConfidenceThreshold }
             .prefix(maxClassificationLabels)
             .map { (label: $0.identifier, confidence: $0.confidence) }
+    }
+
+    /// Renders `page` to a `CGImage` at approximately 300 DPI for Vision.
+    private static func renderedCGImage(for page: PDFPage) -> CGImage? {
+        let pageBounds = page.bounds(for: .mediaBox)
+        let pageSize = pageBounds.size
+        let nativeLonger = max(pageSize.width, pageSize.height)
+        let targetLonger: CGFloat = 2500
+        let maxLonger: CGFloat = 4096
+        let scale = nativeLonger < targetLonger
+            ? targetLonger / nativeLonger
+            : (nativeLonger > maxLonger ? maxLonger / nativeLonger : 1)
+        let targetSize = CGSize(
+            width: max(1, pageSize.width * scale),
+            height: max(1, pageSize.height * scale)
+        )
+        let image = page.thumbnail(of: targetSize, for: .mediaBox)
+        #if os(macOS)
+        return image.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        #else
+        return image.cgImage
+        #endif
     }
 
     /// Loads a `CGImage` from disk using ImageIO. Works on both macOS and iOS

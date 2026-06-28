@@ -7,8 +7,12 @@
 
 import Foundation
 import Combine
+import CoreGraphics
 #if os(iOS)
 import UIKit
+#endif
+#if canImport(WebKit)
+import WebKit
 #endif
 
 @MainActor
@@ -16,7 +20,7 @@ import UIKit
 class WebScrapingService: ObservableObject {
     /// App-specific User-Agent identifying SilicIA. Update version/contact as needed.
     /// Format recommendation: AppName/Version (Platform; Device) Engine; +ContactURL
-    private static let userAgent: String = {
+    nonisolated private static let userAgent: String = {
         // You can optionally make these dynamic using Bundle info and UIDevice.
         let appName = "SilicIA"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
@@ -75,54 +79,59 @@ class WebScrapingService: ObservableObject {
 
     private let session: URLSession
     private static let scrapeConcurrency = 8
+    private static let renderedScrapeConcurrency = 2
     private static let overfetchCount = 3
+    private static let webVisionViewport = CGSize(width: 1280, height: 1600)
+    private static let webVisionMaxRenderedPages: CGFloat = 3
+    private static let webVisionLoadTimeoutNanoseconds: UInt64 = 15_000_000_000
+    private static let webVisionSettleNanoseconds: UInt64 = 800_000_000
 
     // MARK: - Cached HTML regexes (compiled once, reused per scrape)
 
     /// Strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` blocks (and content) in one pass.
-    private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
         options: [.caseInsensitive]
     )
     /// Matches a whole `<table>...</table>` block. Used to extract tables
     /// *before* the generic tag stripper destroys their structure, so we can
     /// emit a Markdown pipe table the model can actually read.
-    static let tableBlockRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableBlockRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<table[^>]*>([\\s\\S]*?)</table>",
         options: [.caseInsensitive]
     )
     /// Matches a `<tr>...</tr>` row inside a table block.
-    static let tableRowRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableRowRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<tr[^>]*>([\\s\\S]*?)</tr>",
         options: [.caseInsensitive]
     )
     /// Matches a `<td>...</td>` or `<th>...</th>` cell inside a row.
-    static let tableCellRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated static let tableCellRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<(t[dh])[^>]*>([\\s\\S]*?)</\\1>",
         options: [.caseInsensitive]
     )
     /// Strips HTML comments.
-    private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlCommentRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<!--[\\s\\S]*?-->",
         options: []
     )
     /// Strips remaining HTML tags.
-    private static let htmlTagRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlTagRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "<[^>]+>",
         options: []
     )
     /// Collapses any whitespace run into a single space.
-    private static let whitespaceRunRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let whitespaceRunRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "\\s+",
         options: []
     )
     /// Captures any HTML entity reference: named, decimal numeric, or hex numeric.
-    private static let htmlEntityRegex: NSRegularExpression? = try? NSRegularExpression(
+    nonisolated private static let htmlEntityRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "&(#[0-9]+|#x[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]+);",
         options: []
     )
     /// Lookup table for the small set of named HTML entities the scraper supports.
-    private static let namedHTMLEntities: [String: String] = [
+    nonisolated private static let namedHTMLEntities: [String: String] = [
         "nbsp": " ",
         "amp": "&",
         "lt": "<",
@@ -145,8 +154,12 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Scrape content from a single URL
-    func scrapeContent(from urlString: String, maxCharacters: Int = 5000) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
+
+        if useVision, let rendered = await scrapeRenderedContent(from: url, maxCharacters: maxCharacters) {
+            return rendered
+        }
 
         do {
             var request = URLRequest(url: url)
@@ -161,14 +174,38 @@ class WebScrapingService: ObservableObject {
             }
 
             // Extract text content from HTML
-            return extractTextFromHTML(html, maxCharacters: maxCharacters)
+            return Self.extractTextFromHTML(html, maxCharacters: maxCharacters)
+        } catch {
+            return nil
+        }
+    }
+
+    nonisolated private static func scrapeContentOffMainActor(
+        from urlString: String,
+        maxCharacters: Int = 5000
+    ) async -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+
+        do {
+            var request = URLRequest(url: url)
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200,
+                  let html = String(data: data, encoding: .utf8) else {
+                return nil
+            }
+
+            return await extractTextFromHTML(html, maxCharacters: maxCharacters)
         } catch {
             return nil
         }
     }
 
     /// Scrape content from multiple URLs concurrently
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000) async -> [String: String] {
+    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000, useVision: Bool = false) async -> [String: String] {
         isScrapingContent = true
         defer { isScrapingContent = false }
 
@@ -179,7 +216,8 @@ class WebScrapingService: ObservableObject {
         let limitedURLs = Array(urls.prefix(fetchCount))
         var results: [String: String] = [:]
         var urlIterator = limitedURLs.makeIterator()
-        let initialWorkers = min(Self.scrapeConcurrency, limitedURLs.count)
+        let concurrency = useVision ? Self.renderedScrapeConcurrency : Self.scrapeConcurrency
+        let initialWorkers = min(concurrency, limitedURLs.count)
 
         #if DEBUG
         let scrapeStart = Date()
@@ -195,7 +233,12 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                    let content: String?
+                    if useVision {
+                        content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
+                    } else {
+                        content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
+                    }
                     return (nextURL, content)
                 }
             }
@@ -222,7 +265,12 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                        let content: String?
+                        if useVision {
+                            content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
+                        } else {
+                            content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
+                        }
                         return (nextURL, content)
                     }
                 }
@@ -238,7 +286,7 @@ class WebScrapingService: ObservableObject {
             completedTasks: completedTasks,
             succeededPages: results.count,
             canceledTasks: canceledTasks,
-            poolSize: Self.scrapeConcurrency,
+            poolSize: concurrency,
             overfetchCount: Self.overfetchCount,
             didEarlyCancel: didEarlyCancel,
             elapsedSeconds: Date().timeIntervalSince(scrapeStart)
@@ -248,8 +296,37 @@ class WebScrapingService: ObservableObject {
         return results
     }
 
+    static func renderedPageText(
+        from analyses: [ImageAnalysisService.PDFPageAnalysisResult],
+        maxCharacters: Int
+    ) -> String {
+        var sections: [String] = []
+        for (pageIndex, analysis) in analyses.enumerated() {
+            var pageSections: [String] = []
+            let recognizedText = analysis.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !recognizedText.isEmpty {
+                pageSections.append(recognizedText)
+            }
+            if !analysis.labels.isEmpty {
+                let labelText = analysis.labels
+                    .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
+                    .joined(separator: ", ")
+                pageSections.append("Visual content: \(labelText)")
+            }
+            guard !pageSections.isEmpty else { continue }
+            sections.append("[Rendered webpage page \(pageIndex + 1)]\n" + pageSections.joined(separator: "\n\n"))
+        }
+
+        var text = RAGChunker.convertWhitespaceAlignedTables(sections.joined(separator: "\n\n"))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count > maxCharacters {
+            text = String(text.prefix(maxCharacters))
+        }
+        return text
+    }
+
     /// Extract readable text content from HTML using cached regexes.
-    private func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
+    private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
         // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
@@ -286,7 +363,7 @@ class WebScrapingService: ObservableObject {
     /// and splices the result back into the document — surrounded by blank
     /// lines so it forms its own paragraph block. Surviving `\n` characters
     /// later guide the RAG chunker toward row-aligned split points.
-    static func extractAndReplaceTables(_ html: String) -> String {
+    nonisolated static func extractAndReplaceTables(_ html: String) -> String {
         guard let tableRegex = tableBlockRegex else { return html }
         let nsRange = NSRange(html.startIndex..., in: html)
         let matches = tableRegex.matches(in: html, options: [], range: nsRange)
@@ -317,11 +394,185 @@ class WebScrapingService: ObservableObject {
         return result
     }
 
+    #if canImport(WebKit)
+    private enum RenderedScrapeError: Error {
+        case loadTimedOut
+        case invalidDocumentMetrics
+    }
+
+    private final class NavigationDelegate: NSObject, WKNavigationDelegate {
+        var continuation: CheckedContinuation<Void, Error>?
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            resume(.success(()))
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            guard !Self.isBenignNavigationCancellation(error) else { return }
+            resume(.failure(error))
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            guard !Self.isBenignNavigationCancellation(error) else { return }
+            resume(.failure(error))
+        }
+
+        private func resume(_ result: Result<Void, Error>) {
+            guard let continuation else { return }
+            self.continuation = nil
+            switch result {
+            case .success:
+                continuation.resume()
+            case .failure(let error):
+                continuation.resume(throwing: error)
+            }
+        }
+
+        private static func isBenignNavigationCancellation(_ error: Error) -> Bool {
+            let nsError = error as NSError
+            return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
+        }
+    }
+
+    private func scrapeRenderedContent(from url: URL, maxCharacters: Int) async -> String? {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let webView = WKWebView(frame: CGRect(origin: .zero, size: Self.webVisionViewport), configuration: configuration)
+        webView.customUserAgent = Self.userAgent
+
+        do {
+            try await load(webView: webView, url: url)
+            try await Task.sleep(nanoseconds: Self.webVisionSettleNanoseconds)
+            let contentRect = try await renderedContentRect(for: webView)
+            let pdfData = try await createPDF(from: webView, rect: contentRect)
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString)
+                .appendingPathExtension("pdf")
+            defer {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
+            try pdfData.write(to: tempURL, options: .atomic)
+
+            let analyses = await ImageAnalysisService.extractPDFPageAnalyses(from: tempURL)
+            let rendered = Self.renderedPageText(from: analyses, maxCharacters: maxCharacters)
+            return rendered.isEmpty ? nil : rendered
+        } catch {
+            guard !Self.isBenignRenderedScrapeError(error) else {
+                return nil
+            }
+            #if DEBUG
+            print("[WebScrapingService] Rendered scrape failed for \(url.absoluteString): \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
+    private func load(webView: WKWebView, url: URL) async throws {
+        let delegate = NavigationDelegate()
+        webView.navigationDelegate = delegate
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { @MainActor in
+                try await withCheckedThrowingContinuation { continuation in
+                    delegate.continuation = continuation
+                    var request = URLRequest(url: url)
+                    request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                    webView.load(request)
+                }
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: Self.webVisionLoadTimeoutNanoseconds)
+                throw RenderedScrapeError.loadTimedOut
+            }
+
+            do {
+                _ = try await group.next()
+                group.cancelAll()
+            } catch {
+                await MainActor.run {
+                    webView.stopLoading()
+                    delegate.continuation?.resume(throwing: error)
+                    delegate.continuation = nil
+                }
+                group.cancelAll()
+                throw error
+            }
+        }
+    }
+    #endif
+
+    #if canImport(WebKit)
+    private func renderedContentRect(for webView: WKWebView) async throws -> CGRect {
+        let raw = try await evaluateJavaScript(
+            on: webView,
+            script: """
+            [
+              Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0, window.innerWidth),
+              Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, window.innerHeight)
+            ]
+            """
+        )
+        guard let metrics = raw as? [NSNumber], metrics.count == 2 else {
+            throw RenderedScrapeError.invalidDocumentMetrics
+        }
+        return CGRect(
+            origin: .zero,
+            size: CGSize(
+                width: max(CGFloat(truncating: metrics[0]), Self.webVisionViewport.width),
+                height: min(
+                    max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height),
+                    Self.webVisionViewport.height * Self.webVisionMaxRenderedPages
+                )
+            )
+        )
+    }
+
+    private func evaluateJavaScript(on webView: WKWebView, script: String) async throws -> Any? {
+        try await withCheckedThrowingContinuation { continuation in
+            webView.evaluateJavaScript(script) { result, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: result)
+                }
+            }
+        }
+    }
+
+    private func createPDF(from webView: WKWebView, rect: CGRect) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            let configuration = WKPDFConfiguration()
+            configuration.rect = rect
+            webView.createPDF(configuration: configuration) { result in
+                switch result {
+                case .success(let data):
+                    continuation.resume(returning: data)
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private static func isBenignRenderedScrapeError(_ error: Error) -> Bool {
+        if error is CancellationError {
+            return true
+        }
+
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
+            return true
+        }
+
+        return false
+    }
+    #endif
+
     /// Converts the inner HTML of a `<table>` element to a Markdown pipe
     /// table. Empty input → empty output. Uneven row lengths are padded.
     /// Cell text has nested tags stripped and pipe characters escaped so the
     /// resulting Markdown is well-formed.
-    static func convertTableToMarkdown(_ tableInnerHTML: String) -> String {
+    nonisolated static func convertTableToMarkdown(_ tableInnerHTML: String) -> String {
         guard let rowRegex = tableRowRegex, let cellRegex = tableCellRegex else { return "" }
         let nsRange = NSRange(tableInnerHTML.startIndex..., in: tableInnerHTML)
         let rowMatches = rowRegex.matches(in: tableInnerHTML, options: [], range: nsRange)
@@ -362,7 +613,7 @@ class WebScrapingService: ObservableObject {
 
     /// Strips nested tags, decodes entities, collapses whitespace, escapes
     /// stray pipes so they don't break the surrounding Markdown table.
-    private static func sanitizeCellText(_ text: String) -> String {
+    nonisolated private static func sanitizeCellText(_ text: String) -> String {
         var t = text
         t = applyRegex(htmlTagRegex, to: t, replacement: " ")
         t = decodeHTMLEntities(t)
@@ -372,7 +623,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Applies a cached regex with `replacement` over the full string. No-op when the regex is nil.
-    private static func applyRegex(_ regex: NSRegularExpression?, to text: String, replacement: String) -> String {
+    nonisolated private static func applyRegex(_ regex: NSRegularExpression?, to text: String, replacement: String) -> String {
         guard let regex else { return text }
         let range = NSRange(text.startIndex..., in: text)
         return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
@@ -381,7 +632,7 @@ class WebScrapingService: ObservableObject {
     /// Single-pass entity decoder: walks `&...;` references in order and
     /// substitutes named, decimal-numeric (`&#nnn;`), and hex-numeric
     /// (`&#xNN;`) entities. Unknown references pass through unchanged.
-    private static func decodeHTMLEntities(_ text: String) -> String {
+    nonisolated private static func decodeHTMLEntities(_ text: String) -> String {
         guard let regex = htmlEntityRegex else { return text }
         let nsRange = NSRange(text.startIndex..., in: text)
         let matches = regex.matches(in: text, options: [], range: nsRange)
@@ -415,7 +666,7 @@ class WebScrapingService: ObservableObject {
 
     /// Decodes a single entity body (the part between `&` and `;`).
     /// Returns nil when the entity is unrecognized so the caller can preserve the original text.
-    private static func decodeEntityToken(_ token: String) -> String? {
+    nonisolated private static func decodeEntityToken(_ token: String) -> String? {
         if token.hasPrefix("#x") || token.hasPrefix("#X") {
             let hex = token.dropFirst(2)
             guard let codePoint = UInt32(hex, radix: 16),
@@ -435,4 +686,3 @@ class WebScrapingService: ObservableObject {
         return namedHTMLEntities[token]
     }
 }
-

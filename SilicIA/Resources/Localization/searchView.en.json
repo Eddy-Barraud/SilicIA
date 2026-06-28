@@ -31,6 +31,8 @@
   "search.settings.temperature": "AI Temperature",
   "search.settings.firstGuessToggle": "Enable First Guess",
   "search.settings.webSummariesToggle": "Activate web summaries",
+  "search.settings.webVisionToggle": "Web vision",
+  "search.settings.webVisionDescription": "Use actual page rendering for context rather than only text",
   "search.settings.searchSources": "Search sources",
   "search.settings.maxDDG": "Max results (DDG)",
   "search.settings.maxWiki": "Max results (Wikipedia)",

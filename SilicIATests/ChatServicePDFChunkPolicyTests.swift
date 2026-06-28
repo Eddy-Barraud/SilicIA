@@ -3,13 +3,13 @@ import XCTest
 
 final class ChatServicePDFChunkPolicyTests: XCTestCase {
 
-    func testShortPDFPageStaysWholeWhenItFitsContextWindow() {
+    func testShortPDFPageStaysWholeWhenItFitsContextWindow() async {
         let pageText = """
         Thermodynamically, the CMC manifests as a distinct change in the slope of the osmotic pressure or chemical potential with increasing surfactant concentration.
         In the absence of alternative information for initializing the optimization of ion-water interactions, Nieto-Draghi et al.43 proposed that partial osmotic pressures could be used as initial values.
         """
 
-        let chunks = ChatService.makePDFPageChunks(
+        let chunks = await ChatService.makePDFPageChunks(
             text: pageText,
             source: "PDF: fixture page 1",
             pdfPage: 1,
@@ -20,10 +20,10 @@ final class ChatServicePDFChunkPolicyTests: XCTestCase {
         XCTAssertEqual(chunks.first?.text, pageText.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
-    func testOversizedPDFPageFallsBackToChunking() {
+    func testOversizedPDFPageFallsBackToChunking() async {
         let pageText = String(repeating: "Long sentence content that keeps filling the page without ending too quickly. ", count: 300)
 
-        let chunks = ChatService.makePDFPageChunks(
+        let chunks = await ChatService.makePDFPageChunks(
             text: pageText,
             source: "PDF: oversized page 1",
             pdfPage: 1,
