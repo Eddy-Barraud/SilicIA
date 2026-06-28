@@ -28,7 +28,7 @@ final class ToolKitBudgetTests: XCTestCase {
     /// shared budget.
     @MainActor
     func testWebSearchCapBitesOnRicherProfile() {
-        let (tools, sharedBudget) = ToolKit.assemble(
+        let (tools, sharedBudget, _) = ToolKit.assemble(
             config: makeConfig(webSearchAvailable: true),
             responseTokens: 600
         )
@@ -62,7 +62,7 @@ final class ToolKitBudgetTests: XCTestCase {
     @MainActor
     func testWebSearchToolGetsCappedBudgetOthersDoNot() {
         let responseTokens = 500
-        let (tools, sharedBudget) = ToolKit.assemble(
+        let (tools, sharedBudget, _) = ToolKit.assemble(
             config: makeConfig(webSearchAvailable: true),
             responseTokens: responseTokens
         )
@@ -83,7 +83,7 @@ final class ToolKitBudgetTests: XCTestCase {
     /// When web search is disabled the kit omits the webSearch tool entirely.
     @MainActor
     func testNoWebSearchToolWhenUnavailable() {
-        let (tools, _) = ToolKit.assemble(
+        let (tools, _, _) = ToolKit.assemble(
             config: makeConfig(webSearchAvailable: false),
             responseTokens: 500
         )

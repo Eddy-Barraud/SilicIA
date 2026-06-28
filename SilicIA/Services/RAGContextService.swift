@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NaturalLanguage
 
 /// Represents a retrieval chunk and its source metadata.
 struct RAGChunk: Identifiable {
@@ -18,17 +19,36 @@ struct RAGChunk: Identifiable {
 
 /// Splits long context text into overlapping retrieval chunks.
 ///
-/// Chunk boundaries are sentence/paragraph-aware: when the ideal byte-count
-/// boundary would land mid-sentence, the chunker walks back up to ~20% of the
-/// chunk size to find a paragraph break (`\n\n`), a sentence terminator
-/// (`. ` / `! ` / `? `), or a table-row break (`\n`). If no such boundary is
-/// available, it still avoids splitting inside a multi-digit number sequence
-/// (e.g. `"8,432,567"`, `"105.4 km²"`) — small models silently mangle numbers
-/// when a chunk boundary slices through the middle of them.
+/// The chunker now packs **whole units** instead of slicing raw characters:
+/// - prose is tokenized into sentences,
+/// - Markdown tables stay atomic whenever possible,
+/// - and overlap is carried as whole trailing sentences / rows.
+///
+/// This avoids retrieval snippets that begin or end mid-sentence such as
+/// `"epulsion parameters"` or mid-cell table fragments like `"bAE/RT |"`.
 struct RAGChunker {
     static let avgCharsPerToken = 3
     private static let minimumChunkCharacters = 200
 
+    private enum ChunkUnitKind {
+        case sentence
+        case line
+        case table
+    }
+
+    private struct ChunkUnit {
+        let text: String
+        let sectionID: Int
+        let kind: ChunkUnitKind
+    }
+
+    /// Cached regex matching a word split across a newline — two lowercase
+    /// letters separated by `\n` (e.g. `"Poly-\nments"` or `"meas\nurements"`).
+    /// Used to avoid splitting chunks inside a word.
+    private static let wordSplitAcrossNewlineRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "[a-z]\\n[a-z]",
+        options: []
+    )
     /// Cached regex collapsing horizontal whitespace runs (spaces, tabs,
     /// non-breaking spaces, Unicode whitespace) to a single space. Newlines
     /// are intentionally preserved — paragraph and table-row breaks make
@@ -70,44 +90,218 @@ struct RAGChunker {
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        let cleanText = Self.normalizeWhitespace(text)
+        // Convert whitespace-aligned tables BEFORE collapsing whitespace.
+        // Vision's OCR joins cells with 4 spaces — once normalizeWhitespace
+        // runs, those boundaries are unrecoverable and tables flatten.
+        let withTables = Self.convertWhitespaceAlignedTables(text)
+        let cleanText = Self.normalizeWhitespace(withTables)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !cleanText.isEmpty else { return [] }
 
         let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
         let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
+        let units = Self.makeChunkUnits(from: cleanText, maxChunkChars: maxChunkChars)
+        guard !units.isEmpty else { return [] }
 
         var chunks: [RAGChunk] = []
-        var start = cleanText.startIndex
+        var startUnitIndex = 0
 
-        while start < cleanText.endIndex {
-            let hardEnd = cleanText.index(start, offsetBy: maxChunkChars, limitedBy: cleanText.endIndex) ?? cleanText.endIndex
-            let end = hardEnd == cleanText.endIndex
-                ? hardEnd
-                : Self.safeChunkBoundary(in: cleanText, from: start, idealEnd: hardEnd)
+        while startUnitIndex < units.count {
+            var endUnitIndex = startUnitIndex
+            var currentLength = 0
 
-            var piece = cleanText[start..<end]
-            while let first = piece.first, first.isWhitespace { piece = piece.dropFirst() }
-            while let last = piece.last, last.isWhitespace { piece = piece.dropLast() }
-            if !piece.isEmpty {
-                chunks.append(RAGChunk(source: source, text: String(piece), url: url, pdfPage: pdfPage))
+            while endUnitIndex < units.count {
+                let additionalLength = Self.additionalRenderedLength(
+                    for: units[endUnitIndex],
+                    after: endUnitIndex > startUnitIndex ? units[endUnitIndex - 1] : nil
+                )
+                if endUnitIndex > startUnitIndex, currentLength + additionalLength > maxChunkChars {
+                    break
+                }
+                currentLength += additionalLength
+                endUnitIndex += 1
             }
 
-            if end >= cleanText.endIndex { break }
-            // Slide the window so the next chunk starts `overlapChars` before
-            // the boundary we just used. Anchoring overlap to the *chosen*
-            // boundary (rather than a fixed stride from `start`) keeps the
-            // overlap meaningful when the boundary walks back from `hardEnd`.
-            let candidate = cleanText.index(end, offsetBy: -overlapChars, limitedBy: start) ?? start
-            // Always make forward progress: if walkback brought us back to
-            // `start` (tiny final chunk) advance by at least one character.
-            start = candidate <= start
-                ? (cleanText.index(start, offsetBy: 1, limitedBy: cleanText.endIndex) ?? cleanText.endIndex)
-                : candidate
+            let rendered = Self.renderChunkUnits(Array(units[startUnitIndex..<endUnitIndex]))
+            if !rendered.isEmpty {
+                chunks.append(RAGChunk(source: source, text: rendered, url: url, pdfPage: pdfPage))
+            }
+
+            if endUnitIndex >= units.count { break }
+            startUnitIndex = Self.nextChunkStartIndex(
+                units: units,
+                chunkStart: startUnitIndex,
+                chunkEnd: endUnitIndex,
+                overlapChars: overlapChars
+            )
         }
 
         return Self.preserveTableHeadersAcrossChunks(chunks)
+    }
+
+    private nonisolated static func makeChunkUnits(from text: String, maxChunkChars: Int) -> [ChunkUnit] {
+        let lines = text.components(separatedBy: "\n")
+        var units: [ChunkUnit] = []
+        var pendingParagraph: [String] = []
+        var nextSectionID = 0
+        var index = 0
+
+        func appendUnit(text: String, kind: ChunkUnitKind, sectionID: Int) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            if trimmed.count <= maxChunkChars {
+                units.append(ChunkUnit(text: trimmed, sectionID: sectionID, kind: kind))
+                return
+            }
+            for piece in splitOversizedText(trimmed, maxChunkChars: maxChunkChars) {
+                units.append(ChunkUnit(text: piece, sectionID: sectionID, kind: kind))
+            }
+        }
+
+        func flushParagraph() {
+            let paragraph = pendingParagraph
+                .joined(separator: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            pendingParagraph.removeAll(keepingCapacity: true)
+            guard !paragraph.isEmpty else { return }
+
+            let sectionID = nextSectionID
+            nextSectionID += 1
+
+            let sentenceUnits = sentenceStrings(in: paragraph)
+            if sentenceUnits.count >= 2 {
+                for sentence in sentenceUnits {
+                    appendUnit(text: sentence, kind: .sentence, sectionID: sectionID)
+                }
+                return
+            }
+
+            let proseLines = paragraph
+                .components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            if proseLines.count >= 2 {
+                for line in proseLines {
+                    appendUnit(text: line, kind: .line, sectionID: sectionID)
+                }
+            } else {
+                appendUnit(text: paragraph, kind: .line, sectionID: sectionID)
+            }
+        }
+
+        while index < lines.count {
+            let rawLine = lines[index]
+            let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
+
+            if trimmedLine.isEmpty {
+                flushParagraph()
+                index += 1
+                continue
+            }
+
+            if isMarkdownTableRow(trimmedLine) {
+                flushParagraph()
+                let sectionID = nextSectionID
+                nextSectionID += 1
+                var tableLines: [String] = []
+                while index < lines.count {
+                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+                    guard isMarkdownTableRow(candidate) else { break }
+                    tableLines.append(candidate)
+                    index += 1
+                }
+                appendUnit(text: tableLines.joined(separator: "\n"), kind: .table, sectionID: sectionID)
+                continue
+            }
+
+            pendingParagraph.append(rawLine)
+            index += 1
+        }
+
+        flushParagraph()
+        return units
+    }
+
+    private nonisolated static func sentenceStrings(in text: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var sentences: [String] = []
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let sentence = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !sentence.isEmpty {
+                sentences.append(String(sentence))
+            }
+            return true
+        }
+        return sentences
+    }
+
+    private nonisolated static func splitOversizedText(_ text: String, maxChunkChars: Int) -> [String] {
+        guard text.count > maxChunkChars else { return [text] }
+        var pieces: [String] = []
+        var start = text.startIndex
+
+        while start < text.endIndex {
+            let hardEnd = text.index(start, offsetBy: maxChunkChars, limitedBy: text.endIndex) ?? text.endIndex
+            let end = hardEnd == text.endIndex
+                ? hardEnd
+                : safeChunkBoundary(in: text, from: start, idealEnd: hardEnd)
+            let piece = text[start..<end].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !piece.isEmpty {
+                pieces.append(String(piece))
+            }
+            if end >= text.endIndex { break }
+            start = end
+        }
+
+        return pieces
+    }
+
+    private nonisolated static func additionalRenderedLength(for unit: ChunkUnit, after previous: ChunkUnit?) -> Int {
+        unit.text.count + (previous.map { separator(between: $0, and: unit).count } ?? 0)
+    }
+
+    private nonisolated static func renderChunkUnits(_ units: [ChunkUnit]) -> String {
+        guard let first = units.first else { return "" }
+        var rendered = first.text
+        var previous = first
+        for unit in units.dropFirst() {
+            rendered += separator(between: previous, and: unit)
+            rendered += unit.text
+            previous = unit
+        }
+        return rendered
+    }
+
+    private nonisolated static func separator(between previous: ChunkUnit, and current: ChunkUnit) -> String {
+        if previous.sectionID != current.sectionID { return "\n\n" }
+        if previous.kind == .sentence && current.kind == .sentence { return " " }
+        return "\n"
+    }
+
+    private nonisolated static func nextChunkStartIndex(
+        units: [ChunkUnit],
+        chunkStart: Int,
+        chunkEnd: Int,
+        overlapChars: Int
+    ) -> Int {
+        guard overlapChars > 0 else { return chunkEnd }
+        guard chunkEnd - chunkStart > 1 else { return chunkEnd }
+
+        var overlapStart = chunkEnd - 1
+        var accumulated = units[overlapStart].text.count
+
+        while overlapStart > chunkStart {
+            let previous = units[overlapStart - 1]
+            let current = units[overlapStart]
+            let candidate = accumulated + separator(between: previous, and: current).count + previous.text.count
+            guard candidate <= overlapChars else { break }
+            overlapStart -= 1
+            accumulated = candidate
+        }
+
+        return overlapStart > chunkStart ? overlapStart : (chunkEnd - 1)
     }
 
     /// Post-process chunks so that Markdown table headers survive across
@@ -196,6 +390,140 @@ struct RAGChunker {
             ))
         }
         return result
+    }
+
+    /// Chooses the next chunk start from the desired overlap position while
+    /// avoiding heads that begin mid-word or mid-table-row. Prefer walking
+    /// backward to the nearest structural boundary so we keep as much overlap
+    /// as possible; if that would collapse to the current chunk's start,
+    /// fall forward to the next whitespace/newline instead.
+    private nonisolated static func safeChunkStart(
+        in text: String,
+        currentStart: String.Index,
+        previousEnd: String.Index,
+        overlapChars: Int
+    ) -> String.Index {
+        let rawCandidate = text.index(previousEnd, offsetBy: -overlapChars, limitedBy: currentStart) ?? currentStart
+        guard rawCandidate > currentStart else { return rawCandidate }
+        if isChunkStartBoundary(in: text, at: rawCandidate) {
+            return rawCandidate
+        }
+
+        if let backward = precedingChunkStartBoundary(in: text, before: rawCandidate, lowerBound: currentStart),
+           backward > currentStart {
+            return backward
+        }
+
+        if let forward = followingChunkStartBoundary(in: text, after: rawCandidate),
+           forward > currentStart {
+            return forward
+        }
+
+        return rawCandidate
+    }
+
+    /// A safe chunk start is already aligned if it sits at the start of the
+    /// text or immediately after whitespace/newline. Exception: when the
+    /// candidate sits *inside* a Markdown table row, only the row start is
+    /// considered safe — restarting at a later cell boundary (`bAE/RT |`)
+    /// still garbles the table for retrieval even though it is technically
+    /// "word-aligned".
+    private nonisolated static func isChunkStartBoundary(in text: String, at index: String.Index) -> Bool {
+        if index <= text.startIndex { return true }
+        if let rowStart = markdownRowStart(in: text, containing: index) {
+            return index == rowStart
+        }
+        let prev = text.index(before: index)
+        return text[prev].isWhitespace
+    }
+
+    /// Walks backward to the nearest whitespace/newline boundary and returns
+    /// the first non-whitespace character after it.
+    private nonisolated static func precedingChunkStartBoundary(
+        in text: String,
+        before index: String.Index,
+        lowerBound: String.Index
+    ) -> String.Index? {
+        if let rowStart = markdownRowStart(in: text, containing: index),
+           rowStart > lowerBound {
+            return rowStart
+        }
+
+        var cursor = index
+        while cursor > lowerBound {
+            let prev = text.index(before: cursor)
+            if text[prev].isWhitespace {
+                return firstNonWhitespaceIndex(in: text, startingAt: cursor)
+            }
+            cursor = prev
+        }
+        return nil
+    }
+
+    /// Falls forward to the next whitespace/newline boundary, then returns
+    /// the first non-whitespace character after that boundary.
+    private nonisolated static func followingChunkStartBoundary(
+        in text: String,
+        after index: String.Index
+    ) -> String.Index? {
+        var cursor = index
+        while cursor < text.endIndex {
+            if text[cursor].isWhitespace {
+                let next = text.index(after: cursor)
+                return firstNonWhitespaceIndex(in: text, startingAt: next) ?? text.endIndex
+            }
+            cursor = text.index(after: cursor)
+        }
+        return nil
+    }
+
+    private nonisolated static func firstNonWhitespaceIndex(
+        in text: String,
+        startingAt index: String.Index
+    ) -> String.Index? {
+        var cursor = index
+        while cursor < text.endIndex, text[cursor].isWhitespace {
+            cursor = text.index(after: cursor)
+        }
+        return cursor < text.endIndex ? cursor : nil
+    }
+
+    /// Returns the first non-whitespace character of the containing line when
+    /// `index` lies inside a Markdown table row (`| a | b |`), otherwise nil.
+    private nonisolated static func markdownRowStart(
+        in text: String,
+        containing index: String.Index
+    ) -> String.Index? {
+        let lineStart = startOfLine(in: text, containing: index)
+        let lineEnd = endOfLine(in: text, containing: index)
+        let trimmedStart = firstNonWhitespaceIndex(in: text, startingAt: lineStart) ?? lineEnd
+        guard trimmedStart < lineEnd else { return nil }
+        let line = String(text[trimmedStart..<lineEnd]).trimmingCharacters(in: .whitespaces)
+        return isMarkdownTableRow(line) ? trimmedStart : nil
+    }
+
+    private nonisolated static func startOfLine(
+        in text: String,
+        containing index: String.Index
+    ) -> String.Index {
+        var cursor = index
+        while cursor > text.startIndex {
+            let prev = text.index(before: cursor)
+            if text[prev] == "\n" { break }
+            cursor = prev
+        }
+        return cursor
+    }
+
+    private nonisolated static func endOfLine(
+        in text: String,
+        containing index: String.Index
+    ) -> String.Index {
+        var cursor = index
+        while cursor < text.endIndex, text[cursor] != "\n" {
+            cursor = text.index(after: cursor)
+        }
+        return cursor
     }
 
     /// Scans `lines` and returns the position + column count of the first
@@ -290,16 +618,40 @@ struct RAGChunker {
             // otherwise we'd reformat any prose line that happens to have
             // a few wide gaps.
             if pending.count >= 2,
-               let columnCount = pending.map(\.count).max(),
-               columnCount >= 3 {
-                let padded = pending.map { row -> [String] in
-                    row.count >= columnCount
-                        ? row
-                        : row + Array(repeating: "", count: columnCount - row.count)
+               let maxCount = pending.map(\.count).max(),
+               maxCount >= 3 {
+                // Use the modal (most frequent) column count as the canonical
+                // table width. When Vision OCR splits a table cell — most
+                // commonly an equation column that has subscripts/symbols
+                // recognized as separate text fragments — that row ends up
+                // with more cells than the others. Using the max would widen
+                // the whole table to that outlier, producing empty cells
+                // everywhere and confusing the model. Using the mode keeps the
+                // canonical structure intact and merges any excess cells in
+                // the outlier row back into the last column.
+                var counts: [Int: Int] = [:]
+                for row in pending { counts[row.count, default: 0] += 1 }
+                let columnCount = counts
+                    .filter { $0.key >= 3 }
+                    .max { a, b in a.value == b.value ? a.key > b.key : a.value < b.value }?.key ?? maxCount
+                let normalized = pending.map { row -> [String] in
+                    if row.count == columnCount {
+                        return row
+                    } else if row.count < columnCount {
+                        return row + Array(repeating: "", count: columnCount - row.count)
+                    } else {
+                        // Merge excess cells back into the last column so a
+                        // single equation that Vision split into N fragments
+                        // ("a_ww =", "k_BT/(2α)", "(κ^−1 N_m − 1)") becomes
+                        // one contiguous cell in the Markdown table.
+                        let head = Array(row.prefix(columnCount - 1))
+                        let tail = row.dropFirst(columnCount - 1).joined(separator: " ")
+                        return head + [tail]
+                    }
                 }
-                output.append("| " + padded[0].joined(separator: " | ") + " |")
+                output.append("| " + normalized[0].joined(separator: " | ") + " |")
                 output.append("|" + String(repeating: " --- |", count: columnCount))
-                for row in padded.dropFirst() {
+                for row in normalized.dropFirst() {
                     output.append("| " + row.joined(separator: " | ") + " |")
                 }
             } else {
@@ -439,18 +791,34 @@ struct RAGChunker {
         if let newlineHit { return newlineHit }
 
         // Pass 2: no strong boundary found. Step back from `idealEnd` while
-        // we'd be bisecting a digit/separator cluster — e.g. the middle of
-        // "1,234.56" or "3.14159". A bisection means chars on both sides of
-        // `fallback` belong to `[0-9.,]` and at least one is a real digit
-        // (so we never mistake "..." for a number).
+        // we'd be bisecting a word or a digit/separator cluster.
+        // - Two adjacent lowercase letters: never split mid-word
+        //   ("Poly" + "ments" → keep together).
+        // - Digit/separator cluster: avoid bisecting "1,234.56" or
+        //   "105.4".
+        // - European thousands separator: "10 000".
         var fallback = idealEnd
         while fallback > walkbackStart {
             let prev = text.index(before: fallback)
             let cPrev = text[prev]
+            let cAt = text[fallback]
+
+            // Never split between two lowercase letters — mid-word break.
+            if cPrev.isLowercase && cPrev.isLetter && cAt.isLowercase && cAt.isLetter {
+                // Walk back to the space before the second half of the word.
+                while fallback > walkbackStart, !text[fallback].isWhitespace {
+                    fallback = text.index(before: fallback)
+                }
+                // Step past the whitespace so the split lands *after* it.
+                if fallback > walkbackStart, text[fallback].isWhitespace {
+                    fallback = text.index(after: fallback)
+                }
+                break
+            }
+
             let prevIsNumeric = cPrev.isNumber || cPrev == "." || cPrev == ","
             guard prevIsNumeric else { break }
             guard fallback < text.endIndex else { break }
-            let cAt = text[fallback]
             let atIsNumeric = cAt.isNumber || cAt == "." || cAt == ","
             if atIsNumeric, cPrev.isNumber || cAt.isNumber {
                 fallback = prev
@@ -502,6 +870,27 @@ struct RAGSelectionOptions {
     /// contains any number at all. Lifts stats-bearing paragraphs above
     /// boilerplate when the user hasn't named a specific number.
     let numericPresenceBonus: Double
+    /// Strong bonus when an equation-oriented query ("equation 5", "eq. 12")
+    /// and a chunk reference the same numbered equation.
+    let equationReferenceMatchBonus: Double
+    /// Extra nudge for chunks that both reference the requested equation and
+    /// visibly contain formula syntax (`=`, `ln(`, etc.).
+    let equationFormulaBonus: Double
+    /// Small fallback bonus for formula-bearing chunks when the query asks
+    /// about an equation but names no specific equation number.
+    let equationPresenceBonus: Double
+    /// Strong bonus when a figure-oriented query ("figure 5", "fig. 3")
+    /// and a chunk reference the same numbered figure.
+    let figureReferenceMatchBonus: Double
+    /// Extra nudge for chunks that both match the requested figure/page and
+    /// visibly contain a figure cue in the text/caption.
+    let figureCaptionBonus: Double
+    /// Strong bonus when a figure-oriented query names an explicit PDF page
+    /// and the chunk comes from that page.
+    let figurePageMatchBonus: Double
+    /// Small fallback bonus for chunks that contain a figure cue when the
+    /// query asks about a figure but does not carry stronger signals.
+    let figurePresenceBonus: Double
 
     nonisolated static let `default` = RAGSelectionOptions(
         avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
@@ -513,7 +902,14 @@ struct RAGSelectionOptions {
         longChunkCharacterThreshold: 300,
         longChunkBonusScore: 0.2,
         numericTokenMatchBonus: 0.6,
-        numericPresenceBonus: 0.3
+        numericPresenceBonus: 0.3,
+        equationReferenceMatchBonus: 2.5,
+        equationFormulaBonus: 0.5,
+        equationPresenceBonus: 0.2,
+        figureReferenceMatchBonus: 2.5,
+        figureCaptionBonus: 0.5,
+        figurePageMatchBonus: 2.0,
+        figurePresenceBonus: 0.2
     )
 }
 
@@ -623,13 +1019,13 @@ actor RAGContextService {
             let score: Double
             if let combinedQueryVector {
                 score = cosineRelevanceScore(
-                    text: chunk.text,
+                    chunk: chunk,
                     queryVector: combinedQueryVector,
                     numericQueryString: numericQueryString,
                     options: options
                 )
             } else {
-                score = relevanceScore(text: chunk.text, query: query, options: options)
+                score = relevanceScore(chunk: chunk, query: query, options: options)
             }
             ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
         }
@@ -706,10 +1102,11 @@ actor RAGContextService {
         }
     }
 
-    private func relevanceScore(text: String, query: String, options: RAGSelectionOptions) -> Double {
+    private func relevanceScore(chunk: RAGChunk, query: String, options: RAGSelectionOptions) -> Double {
         let queryWords = Set(tokenize(query).filter { $0.count > 2 })
         guard !queryWords.isEmpty else { return 0 }
 
+        let text = chunk.text
         let textWords = Set(tokenize(text))
         var score = 0.0
         for word in queryWords where textWords.contains(word) {
@@ -719,6 +1116,8 @@ actor RAGContextService {
             score += options.longChunkBonusScore
         }
         score += Self.numericRelevanceBoost(text: text, query: query, options: options)
+        score += Self.equationRelevanceBoost(text: text, query: query, options: options)
+        score += Self.figureRelevanceBoost(chunk: chunk, query: query, options: options)
         return score
     }
 
@@ -736,13 +1135,14 @@ actor RAGContextService {
     /// Cosine similarity between a chunk and a precomputed query term vector,
     /// with the legacy long-chunk bonus preserved for tie-breaking.
     private func cosineRelevanceScore(
-        text: String,
+        chunk: RAGChunk,
         queryVector: [String: Double],
         numericQueryString: String,
         options: RAGSelectionOptions
     ) -> Double {
         guard !queryVector.isEmpty else { return 0 }
 
+        let text = chunk.text
         var textVector: [String: Double] = [:]
         for term in tokenize(text) where term.count > 2 {
             textVector[term, default: 0] += 1
@@ -769,6 +1169,8 @@ actor RAGContextService {
         // values. Without this, deep-search (cosine path) was systematically
         // worse than fast-search at picking stat-heavy chunks.
         score += Self.numericRelevanceBoost(text: text, query: numericQueryString, options: options)
+        score += Self.equationRelevanceBoost(text: text, query: numericQueryString, options: options)
+        score += Self.figureRelevanceBoost(chunk: chunk, query: numericQueryString, options: options)
         return score
     }
 
@@ -785,6 +1187,23 @@ actor RAGContextService {
     private nonisolated static let anyDigitRegex: NSRegularExpression? = try? NSRegularExpression(
         pattern: "\\d",
         options: []
+    )
+    /// Matches explicit equation references such as "equation 5", "eq 5",
+    /// "eq. 5", and numbered display-equation markers like "(5)".
+    private nonisolated static let equationReferenceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "(?:\\b(?:eq(?:uation)?s?\\.?)\\s*(?:no\\.?\\s*)?\\(?\\s*(\\d{1,3})\\s*\\)?)|(?:\\((\\d{1,3})\\))",
+        options: [.caseInsensitive]
+    )
+    /// Matches explicit figure references such as "figure 5", "fig 5",
+    /// and "fig. 5".
+    private nonisolated static let figureReferenceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "\\b(?:fig(?:ure)?s?\\.?)\\s*(?:no\\.?\\s*)?\\(?\\s*(\\d{1,3})\\s*\\)?",
+        options: [.caseInsensitive]
+    )
+    /// Matches explicit page references such as "page 8" or "p. 8".
+    private nonisolated static let pageReferenceRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "\\b(?:page|pages|p\\.)\\s*(\\d{1,3})\\b",
+        options: [.caseInsensitive]
     )
 
     /// Lowercased numeric/unit tokens found in `text`. Whitespace in
@@ -840,6 +1259,16 @@ actor RAGContextService {
         return false
     }
 
+    nonisolated static func hasEquationIntent(_ query: String) -> Bool {
+        let tokens = tokenizeStatic(query)
+        return tokens.contains("equation") || tokens.contains("equations") || tokens.contains("eq")
+    }
+
+    nonisolated static func hasFigureIntent(_ query: String) -> Bool {
+        let tokens = tokenizeStatic(query)
+        return tokens.contains("figure") || tokens.contains("fig") || tokens.contains("figures")
+    }
+
     /// Heuristic: does the query look like it needs *recent / current*
     /// information rather than encyclopedic background? Detects EN/FR/ES
     /// cues for "today", "this week", "current", "news", "trending", etc.
@@ -875,6 +1304,78 @@ actor RAGContextService {
         return regex.firstMatch(in: text, options: [], range: nsRange) != nil
     }
 
+    nonisolated static func extractEquationReferenceNumbers(_ text: String) -> Set<String> {
+        guard let regex = equationReferenceRegex else { return [] }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, options: [], range: nsRange)
+        var references: Set<String> = []
+        references.reserveCapacity(matches.count)
+        for match in matches {
+            for rangeIndex in 1..<match.numberOfRanges {
+                guard let range = Range(match.range(at: rangeIndex), in: text) else { continue }
+                let digits = String(text[range]).filter(\.isNumber)
+                if !digits.isEmpty {
+                    references.insert(digits)
+                }
+            }
+        }
+        if !references.isEmpty {
+            return references
+        }
+        guard hasEquationIntent(text) else { return [] }
+        return extractNumericTokens(text).filter { token in
+            !token.isEmpty && token.allSatisfy(\.isNumber) && token.count <= 3
+        }
+    }
+
+    nonisolated static func extractFigureReferenceNumbers(_ text: String) -> Set<String> {
+        guard let regex = figureReferenceRegex else { return [] }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, options: [], range: nsRange)
+        var references: Set<String> = []
+        references.reserveCapacity(matches.count)
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: text) else { continue }
+            let digits = String(text[range]).filter(\.isNumber)
+            if !digits.isEmpty {
+                references.insert(digits)
+            }
+        }
+        return references
+    }
+
+    nonisolated static func extractRequestedPageNumbers(_ text: String) -> Set<String> {
+        guard let regex = pageReferenceRegex else { return [] }
+        let nsRange = NSRange(text.startIndex..., in: text)
+        let matches = regex.matches(in: text, options: [], range: nsRange)
+        var pages: Set<String> = []
+        pages.reserveCapacity(matches.count)
+        for match in matches {
+            guard let range = Range(match.range(at: 1), in: text) else { continue }
+            let digits = String(text[range]).filter(\.isNumber)
+            if !digits.isEmpty {
+                pages.insert(digits)
+            }
+        }
+        return pages
+    }
+
+    nonisolated static func textContainsFormulaSyntax(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("=")
+            || lowered.contains("ln(")
+            || lowered.contains("log(")
+            || lowered.contains("exp(")
+            || lowered.contains("sqrt")
+            || lowered.contains("∑")
+            || lowered.contains("∫")
+    }
+
+    nonisolated static func textContainsFigureCue(_ text: String) -> Bool {
+        let lowered = text.lowercased()
+        return lowered.contains("figure") || lowered.contains("fig.")
+    }
+
     /// Number-aware boost shared by both relevance scorers.
     ///
     /// - Strong: per numeric token shared between query and chunk
@@ -901,7 +1402,73 @@ actor RAGContextService {
         return 0
     }
 
+    nonisolated static func equationRelevanceBoost(
+        text: String,
+        query: String,
+        options: RAGSelectionOptions
+    ) -> Double {
+        guard hasEquationIntent(query) else { return 0 }
+
+        let queryReferences = extractEquationReferenceNumbers(query)
+        if !queryReferences.isEmpty {
+            let textReferences = extractEquationReferenceNumbers(text)
+            let overlapCount = queryReferences.intersection(textReferences).count
+            guard overlapCount > 0 else { return 0 }
+
+            var score = Double(overlapCount) * options.equationReferenceMatchBonus
+            if textContainsFormulaSyntax(text) {
+                score += options.equationFormulaBonus
+            }
+            return score
+        }
+
+        return textContainsFormulaSyntax(text) ? options.equationPresenceBonus : 0
+    }
+
+    nonisolated static func figureRelevanceBoost(
+        chunk: RAGChunk,
+        query: String,
+        options: RAGSelectionOptions
+    ) -> Double {
+        guard hasFigureIntent(query) else { return 0 }
+
+        let text = chunk.text
+        var score = 0.0
+
+        let queryFigureReferences = extractFigureReferenceNumbers(query)
+        if !queryFigureReferences.isEmpty {
+            let textFigureReferences = extractFigureReferenceNumbers(text)
+            let overlapCount = queryFigureReferences.intersection(textFigureReferences).count
+            if overlapCount > 0 {
+                score += Double(overlapCount) * options.figureReferenceMatchBonus
+                if textContainsFigureCue(text) {
+                    score += options.figureCaptionBonus
+                }
+            }
+        }
+
+        let requestedPages = extractRequestedPageNumbers(query)
+        if let pdfPage = chunk.pdfPage,
+           !requestedPages.isEmpty,
+           requestedPages.contains(String(pdfPage)) {
+            score += options.figurePageMatchBonus
+            if textContainsFigureCue(text) {
+                score += options.figureCaptionBonus
+            }
+        }
+
+        if score > 0 {
+            return score
+        }
+
+        return textContainsFigureCue(text) ? options.figurePresenceBonus : 0
+    }
+
     private func tokenize(_ text: String) -> [String] {
+        Self.tokenizeStatic(text)
+    }
+
+    private nonisolated static func tokenizeStatic(_ text: String) -> [String] {
         text.lowercased()
             .split { !$0.isLetter && !$0.isNumber }
             .map(String.init)

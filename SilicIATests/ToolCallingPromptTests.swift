@@ -156,4 +156,33 @@ final class ToolCallingPromptTests: XCTestCase {
             XCTAssertTrue(prompt.contains(grounding))
         }
     }
+
+    func testToolTranscriptRecoveryPromptPrioritizesToolResultsAndEndsOnQuestion() {
+        let prompt = ChatService.assembleToolTranscriptRecoveryPrompt(
+            currentQuestion: "What is Nc in equation 6?",
+            priorUserQuestions: ["Explain equation 6."],
+            language: .english,
+            groundingContext: "Equation 6 is shown in Figure 5.",
+            toolTranscript: "Tool: searchContext\nArguments: what is Nc in equation 6\nResult:\nNc is the number of carbons."
+        )
+
+        XCTAssertTrue(prompt.contains("Tool results already gathered:"))
+        XCTAssertTrue(prompt.contains("Nc is the number of carbons."))
+        XCTAssertTrue(prompt.contains("Do not call any more tools."))
+        let lastLine = prompt.split(separator: "\n").last.map(String.init) ?? ""
+        XCTAssertEqual(lastLine, "What is Nc in equation 6?")
+    }
+
+    func testToolTranscriptRecoveryPromptIsLocalized() {
+        let prompt = ChatService.assembleToolTranscriptRecoveryPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: [],
+            language: .french,
+            groundingContext: "",
+            toolTranscript: "Résultat"
+        )
+
+        XCTAssertTrue(prompt.contains("Résultats d'outils déjà obtenus :"))
+        XCTAssertTrue(prompt.contains("N'appelle plus aucun outil."))
+    }
 }

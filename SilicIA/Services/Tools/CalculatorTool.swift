@@ -60,6 +60,9 @@ struct CalculatorTool: Tool {
     /// per-expression backstop. Optional so direct callers / tests are
     /// unaffected.
     var governor: ToolCallGovernor?
+    /// Records successful tool replies so a later context-window overflow
+    /// can recover from the last known-good tool state.
+    var transcriptRecorder: ToolTranscriptRecorder?
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -68,15 +71,21 @@ struct CalculatorTool: Tool {
 
         if let governor {
             let decision = await governor.evaluate(tool: name, arguments: arguments.expression)
-            switch decision {
-            case .allow:
-                break
-            case .duplicate(let count):
-                throw ToolError.duplicate(tool: name, count: count)
-            case .toolBudgetReached(let tool, let cap):
-                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
-            case .totalBudgetReached(let cap):
-                throw ToolError.totalBudgetReached(cap: cap)
+            if case .allow = decision {
+                // continue
+            } else if transcriptRecorder != nil {
+                switch decision {
+                case .allow:
+                    break
+                case .duplicate(let count):
+                    throw ToolError.duplicate(tool: name, count: count)
+                case .toolBudgetReached(let tool, let cap):
+                    throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+                case .totalBudgetReached(let cap):
+                    throw ToolError.totalBudgetReached(cap: cap)
+                }
+            } else if let refusal = decision.refusalMessage {
+                return refusal
             }
         }
 
@@ -148,7 +157,11 @@ struct CalculatorTool: Tool {
         // Format: trim a trailing ".0" so integer results read as integers.
         // Keep enough precision (up to 10 significant digits) so financial
         // values like 77.08 don't get rounded.
-        return Self.format(value)
+        let output = Self.format(value)
+        if let transcriptRecorder {
+            await transcriptRecorder.record(tool: name, arguments: arguments.expression, result: output)
+        }
+        return output
     }
 
     // MARK: - Factorial expansion

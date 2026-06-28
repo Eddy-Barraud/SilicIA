@@ -51,6 +51,28 @@ nonisolated enum TokenBudgeting {
         )
     }
 
+    /// Character budget for HYBRID tool-calling chat prompts that both
+    /// pre-bake some grounding context and still need room for at least one
+    /// subsequent tool reply in the same turn. Unlike
+    /// `maxToolGroundingCharacters`, this reserves a concrete tool-reply
+    /// budget as well as the schema/appendix overhead.
+    static func maxHybridToolGroundingCharacters(
+        maxOutputTokens: Int,
+        reservedToolReplyTokens: Int
+    ) -> Int {
+        let effectiveResponseTokens = clampedToolResponseTokens(requestedMaxTokens: maxOutputTokens)
+        let availableTokens = max(
+            contextWindowLimit
+                - instructionTokens
+                - toolCallingOverheadTokens
+                - promptOverheadTokens
+                - effectiveResponseTokens
+                - max(reservedToolReplyTokens, 0),
+            0
+        )
+        return availableTokens * avgCharsPerToken
+    }
+
     /// Clamps requested output tokens so prompt + context + output fit the system context window.
     static func clampedOutputTokens(
         requestedMaxTokens: Int,

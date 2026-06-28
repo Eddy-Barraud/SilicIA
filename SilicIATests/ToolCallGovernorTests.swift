@@ -84,4 +84,18 @@ final class ToolCallGovernorTests: XCTestCase {
         }
         XCTAssertTrue(sawTotalCeiling, "spamming a duplicate must eventually hit the total ceiling")
     }
+
+    func testConfiguredSearchContextCapIsApplied() async {
+        let governor = ToolCallGovernor(
+            maxTotalCalls: 10,
+            maxExpensiveToolCalls: 2,
+            additionalToolCaps: ["searchContext": 3]
+        )
+        for i in 1...3 {
+            let decision = await governor.evaluate(tool: "searchContext", arguments: "query \(i)")
+            XCTAssertEqual(decision, .allow, "distinct searchContext #\(i) should be allowed")
+        }
+        let fourth = await governor.evaluate(tool: "searchContext", arguments: "query 4")
+        XCTAssertEqual(fourth, .toolBudgetReached(tool: "searchContext", cap: 3))
+    }
 }

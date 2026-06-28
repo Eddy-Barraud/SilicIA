@@ -678,10 +678,11 @@ struct ChatView: View {
     private var composerView: some View {
         let isInputEmpty = messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let isResponding = chatService.isResponding
+        let isAnalyzingContext = chatService.isAnalyzingContext
         // Send button is disabled only when there's nothing to send AND
         // the model isn't responding. While responding, the button is
         // replaced by a Stop button entirely (handled below).
-        let isSendDisabled = isInputEmpty
+        let isSendDisabled = isInputEmpty || isAnalyzingContext
 
         return VStack(alignment: .leading, spacing: 8) {
             // Attached-source list. Hidden when nothing has been added.
@@ -720,22 +721,12 @@ struct ChatView: View {
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
 
-            // Bottom action row: + menu (leading), analyzing progress
-            // (centre, when active), send icon (trailing).
+            // Bottom action row: + menu (leading), send/stop control
+            // (trailing). Per-PDF preanalysis progress renders directly
+            // under each PDF row instead of in the composer footer.
             HStack(spacing: 8) {
                 if mode != .pdfTalkme {
                     attachmentMenu
-                }
-
-                if chatService.isAnalyzingContext {
-                    HStack(spacing: 6) {
-                        ProgressView(value: chatService.contextAnalysisProgress)
-                            .controlSize(.small)
-                            .frame(maxWidth: 80)
-                        Text(L.t("chat.context.analyzing", language: settings.language))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
 
                 Spacer()
@@ -897,9 +888,15 @@ struct ChatView: View {
                 .focused($focusedURLRowID, equals: source.id)
             case .pdf:
                 if case .pdf(let url) = source.kind {
-                    Text(url?.lastPathComponent ?? "PDF")
-                        .lineLimit(1)
-                        .foregroundColor(.secondary)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(url?.lastPathComponent ?? "PDF")
+                            .lineLimit(1)
+                            .foregroundColor(.secondary)
+                        if let progress = pdfAnalysisProgress(for: url) {
+                            ProgressView(value: progress)
+                                .controlSize(.small)
+                        }
+                    }
                     Spacer()
                 }
             case .image:
@@ -948,6 +945,7 @@ struct ChatView: View {
 
         let trimmed = messageInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        guard !chatService.isAnalyzingContext else { return }
 
         // Drop any "+ → Add URL" rows the user opened but never filled.
         compactEmptyURLSources()
@@ -1471,6 +1469,11 @@ struct ChatView: View {
         chatService.resetConversation()
         _ = DroppedPDFStore.clearAll()
         _ = DroppedImageStore.clearAll()
+    }
+
+    private func pdfAnalysisProgress(for url: URL?) -> Double? {
+        guard chatService.isAnalyzingContext, let url else { return nil }
+        return chatService.pdfAnalysisProgress[ChatService.contextAttachmentKey(for: url)]
     }
 }
 

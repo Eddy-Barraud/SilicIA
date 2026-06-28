@@ -193,6 +193,63 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertEqual(boost, 0, accuracy: 0.0001)
     }
 
+    /// Equation-number lookups should strongly prefer chunks that reference
+    /// the same numbered equation, not just any chunk that mentions the word
+    /// "equation" or contains unrelated numbers.
+    func testEquationReferenceBoostPrefersMatchingEquationNumber() {
+        let query = "explain equation 5"
+        let matching = """
+        The CMC-NaCl concentration curve follows the relationship of eq 5 for ionic surfactants.
+        ln(CMC) = ln(CMC_0) - A ln(1 + BC_ion)
+        """
+        let nonMatching = """
+        Table 1 summarizes the methodology and equation terms used throughout the paper.
+        Equation 2 defines a different interaction parameter.
+        """
+
+        let options = RAGSelectionOptions.default
+        let boostA = RAGContextService.equationRelevanceBoost(text: matching, query: query, options: options)
+        let boostB = RAGContextService.equationRelevanceBoost(text: nonMatching, query: query, options: options)
+
+        XCTAssertGreaterThan(boostA, boostB,
+                             "Chunk referencing eq 5 should outrank one that only mentions other equations")
+    }
+
+    /// Figure-number and explicit page cues should steer ranking toward the
+    /// chunk that actually contains the requested figure or lives on the
+    /// requested page.
+    func testFigureBoostPrefersMatchingFigureAndPage() {
+        let query = "describe figure 5 on page 8"
+        let matching = RAGChunk(
+            source: "PDF: fixture page 8",
+            text: "Figure 5. Chain length dependence of CMC values for several surfactant families.",
+            url: nil,
+            pdfPage: 8
+        )
+        let wrongFigure = RAGChunk(
+            source: "PDF: fixture page 8",
+            text: "Figure 4. Evolution of the SNS CMC with the salting effect of NaCl.",
+            url: nil,
+            pdfPage: 8
+        )
+        let wrongPage = RAGChunk(
+            source: "PDF: fixture page 7",
+            text: "Figure 5. Chain length dependence of CMC values for several surfactant families.",
+            url: nil,
+            pdfPage: 7
+        )
+
+        let options = RAGSelectionOptions.default
+        let exact = RAGContextService.figureRelevanceBoost(chunk: matching, query: query, options: options)
+        let figureOnly = RAGContextService.figureRelevanceBoost(chunk: wrongPage, query: query, options: options)
+        let pageOnly = RAGContextService.figureRelevanceBoost(chunk: wrongFigure, query: query, options: options)
+
+        XCTAssertGreaterThan(exact, figureOnly,
+                             "Chunk matching both figure number and page should outrank figure-only match")
+        XCTAssertGreaterThan(exact, pageOnly,
+                             "Chunk matching both figure number and page should outrank page-only match")
+    }
+
     // MARK: - Temporal intent detection
 
     /// "actualité ... cette semaine" / "today" / "este mes" must flag so
@@ -479,74 +536,65 @@ final class MathAccuracyTests: XCTestCase {
                        "Prose chunk was wrongly modified: \(result[1].text)")
     }
 
-    // MARK: - Column-major PDF detection
+    // MARK: - Scientific table: OCR-split equation cells
 
-    /// PDFKit's `page.string` for many invoice templates emits text in draw
-    /// order: all descriptions, then all quantities, then all prices, etc.
-    /// `ChatService.looksColumnMajor` must flag this so we re-extract via
-    /// layout-aware OCR.
-    func testColumnMajorDetectedOnInvoiceDump() {
-        let columnMajor = """
-        Devis
-        Description
-        Amortisseurs
-        Coupelles
-        Jeu de protection
-        Géometrie
-        Joint spy PSA G
-        Joint spy PSA D
-        Huile de boite
-        2,00
-        2,00
-        2,00
-        1,00
-        1,00
-        1,00
-        1,00
-        63,33
-        77,08
-        33,33
-        43,75
-        141,67
-        54,17
-        29,40
-        20,00
-        20,00
-        20,00
-        20,00
-        20,00
-        20,00
-        20,00
+    /// When Vision OCR splits a table's equation cell into multiple
+    /// observations (e.g. "aww =" and "kBT/(2a0)(k-1Nm - 1)" become
+    /// separate fragments joined by 4 spaces), the reconstructed row has
+    /// more cells than the canonical 3-column table. The converter must
+    /// use the modal column count (3) rather than the max (4+) and merge
+    /// the excess equation fragments back into the last cell, so the
+    /// resulting Markdown table has the correct column shape.
+    func testScientificTableEquationCellsAreNotSplit() {
+        // Simulates Vision OCR output for a scientific methods table where
+        // the equation column is partially split into separate observations.
+        // "aww =" and "kBT/(2a0)(k^-1Nm - 1)" are two fragments from the
+        // same equation cell, joined by 4 spaces by reconstructLayout.
+        let visionOCROutput = """
+        repulsive parameter    origin    equation
+        water/water    water compressibility    aww =    kBT/(2a0)(k^-1Nm - 1)
+        like/like    same as water    aii = aww
+        tail/water    fitted with CMC using osmotic pressure    -
         """
-        XCTAssertTrue(ChatService.looksColumnMajor(columnMajor),
-                      "Failed to detect column-major dump containing long runs of numeric-only lines")
+        let converted = RAGChunker.convertWhitespaceAlignedTables(visionOCROutput)
+        // The table must have exactly 3 columns — equation fragments merged.
+        let separatorLine = converted.components(separatedBy: "\n").first { $0.hasPrefix("|") && $0.contains("---") }
+        // Count columns from the separator row: "| --- | --- | --- |" → 4 pipes = 3 columns
+        let pipeCount = separatorLine.map { $0.filter { $0 == "|" }.count } ?? 0
+        XCTAssertEqual(pipeCount, 4, // 4 pipes = 3 columns
+                       "Table should have 3 columns (4 pipes); separator: \(separatorLine ?? "nil")")
+        // The header row must be present.
+        XCTAssertTrue(converted.contains("| repulsive parameter | origin | equation |"),
+                      "Header row missing or mis-formatted: \n\(converted)")
+        // The water/water row equation fragments must be merged into one cell.
+        XCTAssertTrue(converted.contains("| water/water | water compressibility |"),
+                      "water/water row missing: \n\(converted)")
+        XCTAssertFalse(converted.contains("| aww = |"),
+                       "Equation was split into a separate column: \n\(converted)")
+        // The merged equation cell must contain both fragments.
+        let waterRow = converted.components(separatedBy: "\n").first { $0.contains("water/water") }
+        XCTAssertTrue(waterRow?.contains("aww =    kBT/(2a0)(k^-1Nm - 1)") == true ||
+                      waterRow?.contains("aww = kBT/(2a0)(k^-1Nm - 1)") == true,
+                      "Equation fragments not merged in row: \(waterRow ?? "nil")")
     }
 
-    /// Ordinary prose with occasional numbers must NOT trip the detector —
-    /// otherwise every PDF with a few statistics would be re-OCR'd needlessly.
-    func testProseDoesNotTriggerColumnMajorDetection() {
-        let prose = """
-        The company grew by 10% in 2025. Revenue reached 1,234,567 euros
-        across three regions. The largest division contributed 65% of total
-        sales while the smallest one accounted for just 8% of revenue.
+    /// A table where all rows have a consistent column count must still
+    /// produce the correct Markdown — modal == max in this case.
+    func testScientificTableWithConsistentColumnCount() {
+        let visionOCROutput = """
+        repulsive parameter    origin    equation
+        water/water    water compressibility    aww = kBT/(2a0)(k^-1 Nm - 1)
+        like/like    same as water    aii = aww
+        tail/water    fitted with CMC    -
         """
-        XCTAssertFalse(ChatService.looksColumnMajor(prose),
-                       "Prose with numeric content was wrongly flagged as column-major")
-    }
-
-    /// A short numeric run (fewer than 5 consecutive numeric-only lines)
-    /// should not trip the detector — invoices may have brief number
-    /// blocks (e.g. totals) that don't indicate column-major layout.
-    func testShortNumericRunIsNotColumnMajor() {
-        let text = """
-        Total HT    777,09
-        Total TVA   155,41
-        Total TTC   932,50
-        Acomptes    0,00
-        Net à payer 932,50
-        """
-        XCTAssertFalse(ChatService.looksColumnMajor(text),
-                       "Aligned totals were wrongly flagged as column-major")
+        let converted = RAGChunker.convertWhitespaceAlignedTables(visionOCROutput)
+        XCTAssertTrue(converted.contains("| repulsive parameter | origin | equation |"),
+                      "Header missing: \n\(converted)")
+        XCTAssertTrue(converted.contains("| --- | --- | --- |") ||
+                      converted.contains("| --- |") ,
+                      "Separator row missing: \n\(converted)")
+        XCTAssertTrue(converted.contains("| water/water | water compressibility | aww = kBT/(2a0)(k^-1 Nm - 1) |"),
+                      "water/water row malformed: \n\(converted)")
     }
 
     // MARK: - Test helpers

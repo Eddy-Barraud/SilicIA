@@ -42,6 +42,9 @@ struct DateTimeTool: Tool {
     /// Shared per-generation loop breaker. Optional so direct callers /
     /// tests are unaffected.
     var governor: ToolCallGovernor?
+    /// Records successful tool replies so a later context-window overflow
+    /// can recover from the last known-good tool state.
+    var transcriptRecorder: ToolTranscriptRecorder?
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
@@ -50,43 +53,54 @@ struct DateTimeTool: Tool {
 
         if let governor {
             let decision = await governor.evaluate(tool: name, arguments: arguments.format ?? "default")
-            switch decision {
-            case .allow:
-                break
-            case .duplicate(let count):
-                throw ToolError.duplicate(tool: name, count: count)
-            case .toolBudgetReached(let tool, let cap):
-                throw ToolError.toolBudgetReached(tool: tool, cap: cap)
-            case .totalBudgetReached(let cap):
-                throw ToolError.totalBudgetReached(cap: cap)
+            if case .allow = decision {
+                // continue
+            } else if transcriptRecorder != nil {
+                switch decision {
+                case .allow:
+                    break
+                case .duplicate(let count):
+                    throw ToolError.duplicate(tool: name, count: count)
+                case .toolBudgetReached(let tool, let cap):
+                    throw ToolError.toolBudgetReached(tool: tool, cap: cap)
+                case .totalBudgetReached(let cap):
+                    throw ToolError.totalBudgetReached(cap: cap)
+                }
+            } else if let refusal = decision.refusalMessage {
+                return refusal
             }
         }
 
         let now = dateProvider()
         let format = (arguments.format ?? "datetime").lowercased()
 
+        let output: String
         switch format {
         case "iso":
             // RFC3339 / ISO8601, UTC. Trivially parseable by the model
             // if it wants to do downstream arithmetic.
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            return formatter.string(from: now)
+            output = formatter.string(from: now)
 
         case "date":
-            return localizedString(date: now, mode: .dateOnly)
+            output = localizedString(date: now, mode: .dateOnly)
 
         case "time":
-            return localizedString(date: now, mode: .timeOnly)
+            output = localizedString(date: now, mode: .timeOnly)
 
         case "datetime", "":
-            return localizedString(date: now, mode: .both)
+            output = localizedString(date: now, mode: .both)
 
         default:
             // Unknown format — fall back to the safest answer rather than
             // surfacing an error the model would just retry.
-            return localizedString(date: now, mode: .both)
+            output = localizedString(date: now, mode: .both)
         }
+        if let transcriptRecorder {
+            await transcriptRecorder.record(tool: name, arguments: arguments.format ?? "default", result: output)
+        }
+        return output
     }
 
     private enum Mode { case dateOnly, timeOnly, both }
