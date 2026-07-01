@@ -1203,7 +1203,7 @@ class AIService: ObservableObject {
 
             Responde de forma breve, precisa y factual.
             Responde en español.
-            Responde en una frase como máximo.
+            Responde en dos frases como máximo.
             Si corresponde, incluye una expresión matemática corta.
             Formato requerido: LaTeX para expresiones matemáticas, con $...$ en línea.
             """
