@@ -1,8 +1,7 @@
 Conversation:
 {{history}}
 
-Retrieved Context:
-{{context}}
+{{contextBlock}}
 
 User question:
 {{question}}
