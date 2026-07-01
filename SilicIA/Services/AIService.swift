@@ -1142,17 +1142,29 @@ class AIService: ObservableObject {
     }
 
     private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
-            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
-            Répondez en français.
+            Tu produis une première estimation rapide avant la récupération web.
+            Réponds directement à la question de l'utilisateur en deux phrases maximum.
+            Ne reformule pas ces instructions et ne parle pas d'outils ou de contexte manquant.
+            Réponds en français.
+            """
+        case .spanish:
+            return """
+            Produces una primera estimación rápida antes de recuperar resultados web.
+            Responde directamente la pregunta del usuario en un máximo de dos frases.
+            No reformules estas instrucciones y no hables de herramientas ni de contexto faltante.
+            Responde en español.
+            """
+        case .english:
+            return """
+            You produce a quick first guess before web retrieval.
+            Answer the user question directly in at most two sentences.
+            Do not restate these instructions and do not mention tools or missing context.
+            Respond in English.
             """
         }
-
-        return """
-        You are a helpful chat assistant. Answer the user clearly and accurately.
-        Respond in English.
-        """
     }
 
     private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
@@ -1174,7 +1186,8 @@ class AIService: ObservableObject {
     }
 
     private func fallbackFirstGuessPrompt(for query: String, language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
             Question: \(query)
 
@@ -1184,17 +1197,27 @@ class AIService: ObservableObject {
             Si pertinent, inclus une expression mathématique courte.
             Format de sortie attendu : LaTeX pour les expressions mathématiques, avec $...$ en inline.
             """
+        case .spanish:
+            return """
+            Pregunta: \(query)
+
+            Responde de forma breve, precisa y factual.
+            Responde en español.
+            Responde en una frase como máximo.
+            Si corresponde, incluye una expresión matemática corta.
+            Formato requerido: LaTeX para expresiones matemáticas, con $...$ en línea.
+            """
+        case .english:
+            return """
+            Question: \(query)
+
+            Answer in a short, precise and factual manner.
+            Answer in English.
+            Answer in one sentence maximum.
+            If relevant, include a short mathematical expression.
+            Required output format: LaTeX for mathematical expressions, using $...$ inline.
+            """
         }
-
-        return """
-        Question: \(query)
-
-        Answer in a short, precise and factual manner.
-        Answer in English.
-        Answer in one sentence maximum.
-        If relevant, include a short mathematical expression.
-        Required output format: LaTeX for mathematical expressions, using $...$ inline.
-        """
     }
 
     private func fallbackSummaryPrompt(
