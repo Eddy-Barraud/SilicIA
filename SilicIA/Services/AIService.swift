@@ -1213,7 +1213,7 @@ class AIService: ObservableObject {
 
             Answer in a short, precise and factual manner.
             Answer in English.
-            Answer in one sentence maximum.
+            Answer in at most two sentences.
             If relevant, include a short mathematical expression.
             Required output format: LaTeX for mathematical expressions, using $...$ inline.
             """
