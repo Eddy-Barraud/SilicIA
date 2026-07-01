@@ -241,6 +241,7 @@ final class ChatService: ObservableObject {
         do {
             let instructions = buildInstructions(
                 for: language,
+                maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch
             )
@@ -476,7 +477,11 @@ final class ChatService: ObservableObject {
         assistantID: UUID,
         citations: String?
     ) async throws -> String {
-        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let instructions = buildInstructions(
+            for: language,
+            maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            useToolCalling: false
+        )
         let session = LanguageModelSession(instructions: instructions)
         let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens)
         let prompt = buildPrompt(
@@ -519,7 +524,11 @@ final class ChatService: ObservableObject {
         assistantID: UUID,
         citations: String?
     ) async throws -> String {
-        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let instructions = buildInstructions(
+            for: language,
+            maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            useToolCalling: false
+        )
         let session = LanguageModelSession(instructions: instructions)
         let prompt = buildToolTranscriptRecoveryPrompt(
             for: message,
@@ -1194,6 +1203,10 @@ final class ChatService: ObservableObject {
         // This leaves headroom for the model to wrap up and, crucially, to
         // close any equation it opened instead of being cut mid-formula.
         let conservativeOutputCharacters = max(150, Int(Double(maxOutputCharacters) * 0.65))
+        let contextBlock = localizedChatContextBlock(
+            from: selectedContext,
+            language: language
+        )
 
         return PromptLoader.loadPrompt(
             mode: "normal",
@@ -1202,6 +1215,7 @@ final class ChatService: ObservableObject {
             replacements: [
                 "history": history,
                 "context": selectedContext,
+                "contextBlock": contextBlock,
                 "question": userMessage,
                 "maxOutputCharacters": "\(conservativeOutputCharacters)",
                 "maxOutputTokens": "\(maxOutputTokens)"
@@ -1230,10 +1244,19 @@ final class ChatService: ObservableObject {
     /// tone and language conventions don't drift between the two modes.
     private func buildInstructions(
         for language: ModelLanguage,
+        maxOutputCharacters: Int,
         useToolCalling: Bool = false,
         webSearchAvailable: Bool = false
     ) -> String {
-        let base = PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
+        let base = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "chat",
+            variant: "instructions",
+            language: language,
+            replacements: [
+                "maxOutputCharacters": "\(maxOutputCharacters)"
+            ]
+        )
             ?? fallbackChatInstructions(for: language)
         guard useToolCalling else { return base }
         return base + "\n\n" + toolCallingInstructionsAppendix(
@@ -1469,19 +1492,29 @@ final class ChatService: ObservableObject {
     }
 
     private func fallbackChatInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
             Vous êtes un assistant de chat utile. Répondez clairement et précisément.
             Utilisez le contexte récupéré lorsqu'il est pertinent et indiquez vos incertitudes si le contexte est insuffisant.
-            Répondez dans la même langue que la question de l'utilisateur (ici: français).
+            Si aucun contexte récupéré n'est fourni, répondez depuis vos connaissances sans vous plaindre du manque de contexte.
+            Répondez dans la même langue que la question de l'utilisateur.
+            """
+        case .spanish:
+            return """
+            Usted es un asistente de chat útil. Responda con claridad y precisión.
+            Utilice el contexto recuperado cuando sea pertinente e indique sus incertidumbres si el contexto es insuficiente.
+            Si no se proporciona contexto recuperado, responda con su propio conocimiento y no se queje por la falta de contexto.
+            Responda en el mismo idioma que la pregunta del usuario.
+            """
+        case .english:
+            return """
+            You are a helpful chat assistant. Answer the user clearly and accurately.
+            Use retrieved context when relevant and mention uncertainty when context is insufficient.
+            If no retrieved context is provided, answer from your own knowledge and do not complain about missing context.
+            Respond in the same language as the user's latest question.
             """
         }
-
-        return """
-        You are a helpful chat assistant. Answer the user clearly and accurately.
-        Use retrieved context when relevant and mention uncertainty when context is insufficient.
-        Respond in the same language as the user's latest question.
-        """
     }
 
     private func fallbackChatPrompt(
@@ -1492,15 +1525,14 @@ final class ChatService: ObservableObject {
         maxOutputCharacters: Int,
         maxOutputTokens: Int
     ) -> String {
-        if language == .french {
+        let contextBlock = localizedChatContextBlock(from: selectedContext, language: language)
+        switch language {
+        case .french:
             return """
             Conversation :
             \(history)
 
-            Contexte récupéré :
-            \(selectedContext)
-
-            Question de l'utilisateur :
+            \(contextBlock)Question de l'utilisateur :
             \(userMessage)
 
             Réponds de façon concise et pratique.
@@ -1513,28 +1545,56 @@ final class ChatService: ObservableObject {
             - Utilise un LaTeX simple compatible avec le rendu de l'application.
             - N'utilise jamais d'environnements \\begin{.
             """
+        case .spanish:
+            return """
+            Conversación:
+            \(history)
+
+            \(contextBlock)Pregunta del usuario:
+            \(userMessage)
+
+            Responde de forma concisa y práctica.
+            Límite de salida: \(maxOutputTokens) tokens como máximo (aproximadamente \(maxOutputCharacters) caracteres).
+            Cuando sea pertinente, incluye expresiones o fórmulas matemáticas.
+            Formato de salida requerido: LaTeX para expresiones matemáticas.
+            Reglas de formato matemático:
+            - Usa $...$ para matemáticas inline.
+            - Usa \\[...\\] para bloques matemáticos.
+            - Usa LaTeX simple compatible con el renderizador de la aplicación.
+            - Nunca uses entornos con \\begin{.
+            """
+        case .english:
+            return """
+            Conversation:
+            \(history)
+
+            \(contextBlock)User question:
+            \(userMessage)
+
+            Answer in a concise and practical way.
+            Output limit: \(maxOutputTokens) tokens maximum (about \(maxOutputCharacters) characters).
+            When relevant, include mathematical expressions or formulas.
+            Required output format: LaTeX for mathematical expressions.
+            Math format requirements:
+            - Use $...$ for inline math.
+            - Use \\[...\\] for block math.
+            - Use simple LaTeX compatible with the app renderer.
+            - Never use environments with \\begin{.
+            """
         }
+    }
 
-        return """
-        Conversation:
-        \(history)
-
-        Retrieved Context:
-        \(selectedContext)
-
-        User question:
-        \(userMessage)
-
-        Answer in a concise and practical way.
-        Output limit: \(maxOutputTokens) tokens maximum (about \(maxOutputCharacters) characters).
-        When relevant, include mathematical expressions or formulas.
-        Required output format: LaTeX for mathematical expressions.
-        Math format requirements:
-        - Use $...$ for inline math.
-        - Use \\[...\\] for block math.
-        - Use simple LaTeX compatible with the app renderer.
-        - Never use environments with \\begin{.
-        """
+    private func localizedChatContextBlock(from selectedContext: String, language: ModelLanguage) -> String {
+        let trimmedContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContext.isEmpty else { return "" }
+        switch language {
+        case .french:
+            return "Contexte récupéré :\n\(trimmedContext)\n\n"
+        case .spanish:
+            return "Contexto recuperado:\n\(trimmedContext)\n\n"
+        case .english:
+            return "Retrieved Context:\n\(trimmedContext)\n\n"
+        }
     }
     private func debugLog(_ message: String) {
         #if DEBUG

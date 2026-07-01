@@ -542,10 +542,22 @@ class AIService: ObservableObject {
     /// a tool that isn't attached.
     private func buildInstructions(
         for language: ModelLanguage,
+        isDeepProfile: Bool,
+        maxOutputTokens: Int,
         useToolCalling: Bool = false,
         webSearchAvailable: Bool = true
     ) -> String {
-        let base = PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
+        let base = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "search",
+            variant: "instructions",
+            language: language,
+            replacements: [
+                "maxOutputTokens": "\(maxOutputTokens)",
+                "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
+                "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+            ]
+        )
             ?? fallbackSummaryInstructions(for: language)
         guard useToolCalling else { return base }
         return base + "\n\n" + ToolKit.instructionsAppendix(
@@ -968,6 +980,8 @@ class AIService: ObservableObject {
             // does not accumulate and overflow the context window.
             let instructions = buildInstructions(
                 for: language,
+                isDeepProfile: profile == .deep,
+                maxOutputTokens: maxTokens,
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
             )
@@ -1005,7 +1019,7 @@ class AIService: ObservableObject {
                             // doesn't reach into an enclosing mutable `self`
                             // binding (which Swift 6 flags as capturing a var in
                             // concurrently-executing code).
-                            Task { @MainActor [weak self] in
+                            Task { @MainActor [weak self = self] in
                                 await self?.appendUniqueResults(results)
                             }
                         }
@@ -1142,17 +1156,29 @@ class AIService: ObservableObject {
     }
 
     private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
-            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
-            Répondez en français.
+            Tu produis une première estimation rapide avant la récupération web.
+            Réponds directement à la question de l'utilisateur en deux phrases maximum.
+            Ne reformule pas ces instructions et ne parle pas d'outils ou de contexte manquant.
+            Réponds en français.
+            """
+        case .spanish:
+            return """
+            Produces una primera estimación rápida antes de recuperar resultados web.
+            Responde directamente a la pregunta del usuario en un máximo de dos frases.
+            No reformules estas instrucciones y no hables de herramientas ni de contexto faltante.
+            Responde en español.
+            """
+        case .english:
+            return """
+            You produce a quick first guess before web retrieval.
+            Answer the user question directly in at most two sentences.
+            Do not restate these instructions and do not mention tools or missing context.
+            Respond in English.
             """
         }
-
-        return """
-        You are a helpful chat assistant. Answer the user clearly and accurately.
-        Respond in English.
-        """
     }
 
     private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
@@ -1174,27 +1200,38 @@ class AIService: ObservableObject {
     }
 
     private func fallbackFirstGuessPrompt(for query: String, language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
             Question: \(query)
 
             Réponds de manière courte, précise et factuelle.
             Réponds en français.
-            Réponds en une phrase maximum.
+            Réponds en deux phrases maximum.
             Si pertinent, inclus une expression mathématique courte.
             Format de sortie attendu : LaTeX pour les expressions mathématiques, avec $...$ en inline.
             """
+        case .spanish:
+            return """
+            Pregunta: \(query)
+
+            Responde de forma breve, precisa y factual.
+            Responde en español.
+            Responde en dos frases como máximo.
+            Si corresponde, incluye una expresión matemática corta.
+            Formato requerido: LaTeX para expresiones matemáticas, con $...$ en línea.
+            """
+        case .english:
+            return """
+            Question: \(query)
+
+            Answer in a short, precise and factual manner.
+            Answer in English.
+            Answer in at most two sentences.
+            If relevant, include a short mathematical expression.
+            Required output format: LaTeX for mathematical expressions, using $...$ inline.
+            """
         }
-
-        return """
-        Question: \(query)
-
-        Answer in a short, precise and factual manner.
-        Answer in English.
-        Answer in one sentence maximum.
-        If relevant, include a short mathematical expression.
-        Required output format: LaTeX for mathematical expressions, using $...$ inline.
-        """
     }
 
     private func fallbackSummaryPrompt(

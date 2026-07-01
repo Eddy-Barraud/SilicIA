@@ -20,6 +20,16 @@ enum ModelLanguage: String, CaseIterable, Codable {
         case .spanish: return "es"
         }
     }
+
+    static func systemPreferred(preferredLanguages: [String] = Locale.preferredLanguages) -> ModelLanguage {
+        for identifier in preferredLanguages {
+            let lowered = identifier.lowercased()
+            if lowered.hasPrefix("fr") { return .french }
+            if lowered.hasPrefix("es") { return .spanish }
+            if lowered.hasPrefix("en") { return .english }
+        }
+        return .english
+    }
 }
 
 /// User-configurable settings controlling search and summary behavior.
@@ -52,7 +62,7 @@ struct AppSettings: Codable, Equatable {
     var useWebVision: Bool = false
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
-    var language: ModelLanguage = .english
+    var language: ModelLanguage = .systemPreferred()
     private var _useToolCalling: Bool = false
     /// Experimental: when true, ChatService runs the model with on-demand
     /// `searchContext` + `calculate` tools instead of stuffing pre-selected
