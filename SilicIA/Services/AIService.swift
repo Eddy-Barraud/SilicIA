@@ -1153,7 +1153,7 @@ class AIService: ObservableObject {
         case .spanish:
             return """
             Produces una primera estimación rápida antes de recuperar resultados web.
-            Responde directamente la pregunta del usuario en un máximo de dos frases.
+            Responde directamente a la pregunta del usuario en un máximo de dos frases.
             No reformules estas instrucciones y no hables de herramientas ni de contexto faltante.
             Responde en español.
             """
