@@ -542,10 +542,22 @@ class AIService: ObservableObject {
     /// a tool that isn't attached.
     private func buildInstructions(
         for language: ModelLanguage,
+        isDeepProfile: Bool,
+        maxOutputTokens: Int,
         useToolCalling: Bool = false,
         webSearchAvailable: Bool = true
     ) -> String {
-        let base = PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
+        let base = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "search",
+            variant: "instructions",
+            language: language,
+            replacements: [
+                "maxOutputTokens": "\(maxOutputTokens)",
+                "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
+                "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+            ]
+        )
             ?? fallbackSummaryInstructions(for: language)
         guard useToolCalling else { return base }
         return base + "\n\n" + ToolKit.instructionsAppendix(
@@ -968,6 +980,8 @@ class AIService: ObservableObject {
             // does not accumulate and overflow the context window.
             let instructions = buildInstructions(
                 for: language,
+                isDeepProfile: profile == .deep,
+                maxOutputTokens: maxTokens,
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
             )
