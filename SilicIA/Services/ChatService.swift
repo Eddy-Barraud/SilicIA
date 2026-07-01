@@ -241,6 +241,7 @@ final class ChatService: ObservableObject {
         do {
             let instructions = buildInstructions(
                 for: language,
+                maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch
             )
@@ -476,7 +477,11 @@ final class ChatService: ObservableObject {
         assistantID: UUID,
         citations: String?
     ) async throws -> String {
-        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let instructions = buildInstructions(
+            for: language,
+            maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            useToolCalling: false
+        )
         let session = LanguageModelSession(instructions: instructions)
         let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens)
         let prompt = buildPrompt(
@@ -519,7 +524,11 @@ final class ChatService: ObservableObject {
         assistantID: UUID,
         citations: String?
     ) async throws -> String {
-        let instructions = buildInstructions(for: language, useToolCalling: false)
+        let instructions = buildInstructions(
+            for: language,
+            maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            useToolCalling: false
+        )
         let session = LanguageModelSession(instructions: instructions)
         let prompt = buildToolTranscriptRecoveryPrompt(
             for: message,
@@ -1235,10 +1244,19 @@ final class ChatService: ObservableObject {
     /// tone and language conventions don't drift between the two modes.
     private func buildInstructions(
         for language: ModelLanguage,
+        maxOutputCharacters: Int,
         useToolCalling: Bool = false,
         webSearchAvailable: Bool = false
     ) -> String {
-        let base = PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
+        let base = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "chat",
+            variant: "instructions",
+            language: language,
+            replacements: [
+                "maxOutputCharacters": "\(maxOutputCharacters)"
+            ]
+        )
             ?? fallbackChatInstructions(for: language)
         guard useToolCalling else { return base }
         return base + "\n\n" + toolCallingInstructionsAppendix(
