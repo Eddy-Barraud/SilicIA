@@ -1005,7 +1005,7 @@ class AIService: ObservableObject {
                             // doesn't reach into an enclosing mutable `self`
                             // binding (which Swift 6 flags as capturing a var in
                             // concurrently-executing code).
-                            Task { @MainActor [weak self] in
+                            Task { @MainActor [weak self = self] in
                                 await self?.appendUniqueResults(results)
                             }
                         }
