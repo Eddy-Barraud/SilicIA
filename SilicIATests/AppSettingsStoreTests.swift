@@ -38,6 +38,7 @@ final class AppSettingsStoreTests: XCTestCase {
     }
 
     func testSharedIsASingleInstance() {
+    func testSingletonAndObservation() {
         XCTAssertTrue(AppSettingsStore.shared === AppSettingsStore.shared)
     }
 
@@ -77,6 +78,18 @@ final class AppSettingsStoreTests: XCTestCase {
 
     /// Several independent fields all persist together.
     func testMultipleFieldUpdatesAllPersist() {
+    func testMutationsPersistAutomatically() {
+        // Individual field update & read-after-write
+        AppSettingsStore.shared.settings.temperature = 0.77
+        XCTAssertEqual(AppSettings.load().temperature, 0.77, accuracy: 0.0001)
+
+        AppSettingsStore.shared.settings.language = .spanish
+        XCTAssertEqual(AppSettings.load().language, .spanish)
+
+        AppSettingsStore.shared.settings.maxResponseTokens = 321
+        XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
+
+        // Multiple field updates persist together
         AppSettingsStore.shared.settings.useToolCalling = true
         AppSettingsStore.shared.settings.useWebVision = true
         AppSettingsStore.shared.settings.maxContextTokens = 1234

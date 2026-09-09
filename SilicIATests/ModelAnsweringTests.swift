@@ -7,6 +7,8 @@
 //  conversation shapes that previously broke: the same question repeated
 //  1/2/3 times, and several distinct questions in one chat. Also exercises
 //  the tool-calling path (governor + loop breaker) end to end.
+//  ChatService.sendMessage and assert it answers cleanly across multi-turn
+//  conversations and tool-calling mode.
 //
 //  These require Apple Intelligence to be available on the test host. When
 //  it isn't (most CI), every test SKIPS rather than fails — so the suite
@@ -70,6 +72,7 @@ final class ModelAnsweringTests: XCTestCase {
 
     /// Asserts the most recent turn produced a clean, non-empty assistant
     /// answer.
+    /// Asserts the most recent turn produced a clean, non-empty assistant answer.
     private func assertLastAnswerClean(file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertNil(chatService.errorMessage, "model surfaced an error", file: file, line: line)
         XCTAssertEqual(chatService.messages.last?.role, .assistant, file: file, line: line)
@@ -78,6 +81,7 @@ final class ModelAnsweringTests: XCTestCase {
     }
 
     // MARK: - Same question, 1 / 2 / 3 times
+    // MARK: - Multi-turn conversation
 
     func testSingleQuestionAnswersWithoutError() async {
         await ask("What is the capital of France?")
@@ -104,16 +108,20 @@ final class ModelAnsweringTests: XCTestCase {
     // MARK: - Several distinct questions in one chat
 
     func testThreeDifferentQuestionsInSameChat() async {
+    func testMultiTurnChatAnswersWithoutError() async {
         let questions = [
             "What is 12 times 8?",
             "Name a primary colour.",
             "What gas do plants absorb?"
+            "What is the capital of France?",
+            "Name one landmark in that city."
         ]
         for q in questions {
             await ask(q)
             assertLastAnswerClean()
         }
         XCTAssertEqual(chatService.messages.count, 6)
+        XCTAssertEqual(chatService.messages.count, 4) // 2 turns × (user + assistant)
     }
 
     // MARK: - Tool-calling path (governor + loop breaker)

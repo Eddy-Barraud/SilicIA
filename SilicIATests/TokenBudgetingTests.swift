@@ -2,6 +2,9 @@
 //  TokenBudgetingTests.swift
 //  SilicIATests
 //
+//  Unit tests for TokenBudgeting clamping, estimation formulas,
+//  and context window overflow guards.
+//
 
 import XCTest
 @testable import SilicIA
@@ -12,10 +15,24 @@ final class TokenBudgetingTests: XCTestCase {
         let result = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 1)
         XCTAssertGreaterThanOrEqual(result, 1)
     }
+    func testTokenClamping() {
+        // Output tokens clamp to [1, contextWindowLimit]
+        XCTAssertGreaterThanOrEqual(TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 1), 1)
+        XCTAssertLessThanOrEqual(TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 999_999), TokenBudgeting.contextWindowLimit)
+        XCTAssertEqual(TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 1000), 1000)
 
     func testClampedOutputTokensMax() {
         let result = TokenBudgeting.clampedOutputTokens(requestedMaxTokens: 999_999)
         XCTAssertLessThanOrEqual(result, TokenBudgeting.contextWindowLimit)
+        // Context tokens clamp to AppSettings range
+        let range = AppSettings.maxContextTokensRange
+        let minCtx = TokenBudgeting.clampedContextTokens(requestedContextTokens: 1, maxOutputTokens: 1500, settingsRange: range)
+        let maxCtx = TokenBudgeting.clampedContextTokens(requestedContextTokens: 999_999, maxOutputTokens: 1500, settingsRange: range)
+        let midCtx = TokenBudgeting.clampedContextTokens(requestedContextTokens: 1000, maxOutputTokens: 1500, settingsRange: range)
+        XCTAssertGreaterThanOrEqual(minCtx, range.lowerBound)
+        XCTAssertLessThanOrEqual(maxCtx, range.upperBound)
+        XCTAssertGreaterThanOrEqual(midCtx, range.lowerBound)
+        XCTAssertLessThanOrEqual(midCtx, range.upperBound)
     }
 
     func testClampedOutputTokensMid() {
@@ -52,8 +69,10 @@ final class TokenBudgetingTests: XCTestCase {
     }
 
     func testEstimatedTokensForApproxWordsMin() {
+    func testTokenAndCharacterEstimations() {
         XCTAssertGreaterThanOrEqual(TokenBudgeting.estimatedTokens(forApproxWords: 0), 0)
     }
+        XCTAssertGreaterThan(TokenBudgeting.estimatedTokens(forApproxWords: 300), 0)
 
     func testEstimatedTokensForApproxWordsMid() {
         let result = TokenBudgeting.estimatedTokens(forApproxWords: 300)
@@ -71,6 +90,7 @@ final class TokenBudgetingTests: XCTestCase {
     func testEstimatedOutputSentencesMin() {
         XCTAssertGreaterThanOrEqual(TokenBudgeting.estimatedOutputSentences(forTokens: 0), 1)
     }
+        XCTAssertGreaterThan(TokenBudgeting.estimatedOutputSentences(forTokens: 1000), 0)
 
     func testEstimatedOutputSentencesMid() {
         let result = TokenBudgeting.estimatedOutputSentences(forTokens: 1000)
@@ -91,16 +111,27 @@ final class TokenBudgetingTests: XCTestCase {
     /// budget per call — twice the response cap, comfortably under the
     /// window-aware ceiling.
     func testToolBudgetScalesAtTwoxAtDefault() {
+    func testToolBudgetScalesAndClampsAtFloor() {
+        // Default response cap (500t) scales 2x to 1000t
         XCTAssertEqual(TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 500), 1000)
     }
 
     /// Tiny response cap (50t) must hit the floor so a tool reply isn't
     /// starved to nothing.
     func testToolBudgetClampedAtFloor() {
+        // Tiny response cap clamps to floor
         XCTAssertEqual(
             TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 50),
             TokenBudgeting.toolOutputTokenBudgetFloor
         )
+
+        for responseCap in [1, 50, 500, 1000, 1500] {
+            XCTAssertGreaterThanOrEqual(
+                TokenBudgeting.toolOutputTokenBudget(forResponseTokens: responseCap),
+                TokenBudgeting.toolOutputTokenBudgetFloor,
+                "Floor not honoured at responseCap=\(responseCap)"
+            )
+        }
     }
 
     /// The critical safety property: instructions + prompt overhead + the
@@ -126,6 +157,7 @@ final class TokenBudgetingTests: XCTestCase {
                 oneToolTurn,
                 TokenBudgeting.contextWindowLimit,
                 "A single tool reply at responseCap=\(responseCap) overflows the window: \(oneToolTurn) > \(TokenBudgeting.contextWindowLimit)"
+                "A single tool reply at responseCap=\(responseCap) overflows: \(oneToolTurn) > \(TokenBudgeting.contextWindowLimit)"
             )
         }
     }
@@ -146,6 +178,7 @@ final class TokenBudgetingTests: XCTestCase {
                 twoToolTurn,
                 TokenBudgeting.contextWindowLimit,
                 "Two tool replies at responseCap=\(responseCap) overflow the window: \(twoToolTurn)"
+                "Two tool replies at responseCap=\(responseCap) overflow: \(twoToolTurn)"
             )
         }
     }
@@ -162,13 +195,16 @@ final class TokenBudgetingTests: XCTestCase {
         for responseCap in [500, 1500, 3500, 9999] {
             let clamped = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: responseCap)
             let reservedBesidesResponse = TokenBudgeting.instructionTokens
+            let reserved = TokenBudgeting.instructionTokens
                 + TokenBudgeting.toolCallingOverheadTokens
                 + TokenBudgeting.promptOverheadTokens
                 + TokenBudgeting.minContextTokens
             XCTAssertLessThanOrEqual(
                 clamped + reservedBesidesResponse,
+                clamped + reserved,
                 TokenBudgeting.contextWindowLimit,
                 "Tool response clamp at \(responseCap) leaves no room for overhead + min context"
+                "Tool response clamp at \(responseCap) leaves no room for overhead"
             )
         }
         // And it must never EXCEED the plain clamp (it only ever reserves more).

@@ -11,6 +11,9 @@ final class ImageAnalysisServiceTests: XCTestCase {
 
     func testTwoColumnArticleBlockReadsLeftColumnThenRightColumn() {
         let observations: [LayoutObservation] = [
+    func testLayoutReconstructionTwoColumnAndTabular() {
+        // Two-column article: read left column, then right column
+        let columnObservations: [LayoutObservation] = [
             LayoutObservation(
                 text: "Left column line one contains enough prose to look like a journal sentence.",
                 boundingBox: CGRect(x: 0.08, y: 0.80, width: 0.34, height: 0.03)
@@ -31,8 +34,10 @@ final class ImageAnalysisServiceTests: XCTestCase {
 
         let text = ImageAnalysisService.reconstructLayout(from: observations)
 
+        let columnText = ImageAnalysisService.reconstructLayout(from: columnObservations)
         XCTAssertTrue(
             text.contains(
+            columnText.contains(
                 """
                 Left column line one contains enough prose to look like a journal sentence. Left column line two continues the left-hand narrative before the right side starts.
 
@@ -40,11 +45,14 @@ final class ImageAnalysisServiceTests: XCTestCase {
                 """
             ),
             "Two-column article block was not rendered column-major:\n\(text)"
+            "Two-column article block was not rendered column-major:\n\(columnText)"
         )
     }
 
     func testTabularRowsStayRowMajor() {
         let observations: [LayoutObservation] = [
+        // Tabular rows: stay row-major
+        let tableObservations: [LayoutObservation] = [
             LayoutObservation(text: "Description", boundingBox: CGRect(x: 0.08, y: 0.80, width: 0.22, height: 0.03)),
             LayoutObservation(text: "Qty", boundingBox: CGRect(x: 0.42, y: 0.80, width: 0.08, height: 0.03)),
             LayoutObservation(text: "Price", boundingBox: CGRect(x: 0.62, y: 0.80, width: 0.10, height: 0.03)),
@@ -55,9 +63,12 @@ final class ImageAnalysisServiceTests: XCTestCase {
 
         let text = ImageAnalysisService.reconstructLayout(from: observations)
 
+        let tableText = ImageAnalysisService.reconstructLayout(from: tableObservations)
         XCTAssertTrue(
             text.contains("Description    Qty    Price\nAmortisseurs    2    154,17"),
             "Table-like rows should stay row-major:\n\(text)"
+            tableText.contains("Description    Qty    Price\nAmortisseurs    2    154,17"),
+            "Table-like rows should stay row-major:\n\(tableText)"
         )
     }
 

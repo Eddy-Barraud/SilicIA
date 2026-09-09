@@ -13,6 +13,15 @@ final class ModelLanguageTests: XCTestCase {
             ModelLanguage.systemPreferred(preferredLanguages: ["fr-FR", "en-US"]),
             .french
         )
+    func testSystemPreferredLanguageResolution() {
+        let cases: [([String], ModelLanguage)] = [
+            (["fr-FR", "en-US"], .french),
+            (["es-ES", "en-US"], .spanish),
+            (["de-DE", "it-IT"], .english),
+        ]
+        for (input, expected) in cases {
+            XCTAssertEqual(ModelLanguage.systemPreferred(preferredLanguages: input), expected)
+        }
     }
 
     func testSystemPreferredPicksSpanish() {

@@ -30,6 +30,7 @@ final class RAGSearchToolTests: XCTestCase {
     }
 
     func testDuplicateSearchContextCallReturnsRefusalInsteadOfThrowing() async throws {
+    func testDuplicateSearchContextCallBehavior() async throws {
         let chunk = RAGChunk(
             source: "PDF: fixture page 6",
             text: "Equation 6 states log(CMC) = A - B Nc and the caption explains Nc is the number of carbons.",
@@ -41,6 +42,11 @@ final class RAGSearchToolTests: XCTestCase {
 
         _ = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
         let duplicate = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
+        // Without transcriptRecorder: returns soft refusal message
+        var softTool = RAGSearchTool(chunks: [chunk], tokenBudget: 200)
+        softTool.governor = ToolCallGovernor()
+        _ = try await softTool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
+        let duplicate = try await softTool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
 
         XCTAssertTrue(
             duplicate.localizedCaseInsensitiveContains("do NOT repeat".lowercased()) ||
@@ -59,11 +65,17 @@ final class RAGSearchToolTests: XCTestCase {
         var tool = RAGSearchTool(chunks: [chunk], tokenBudget: 200)
         tool.governor = ToolCallGovernor()
         tool.transcriptRecorder = ToolTranscriptRecorder()
+        // With transcriptRecorder: throws ToolError.duplicate
+        var hardTool = RAGSearchTool(chunks: [chunk], tokenBudget: 200)
+        hardTool.governor = ToolCallGovernor()
+        hardTool.transcriptRecorder = ToolTranscriptRecorder()
+        _ = try await hardTool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
 
         _ = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
 
         do {
             _ = try await tool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
+            _ = try await hardTool.call(arguments: .init(query: "what is Nc in equation 6", maxResults: 1))
             XCTFail("Expected duplicate governed call to abort when recovery recorder is present")
         } catch let error as ToolError {
             guard case .duplicate(let toolName, let count) = error else {

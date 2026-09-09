@@ -24,6 +24,7 @@ final class MonetizationTests: XCTestCase {
     }
 
     func testFirstLaunchCapturesFoundingUser() {
+    func testFoundingUserRegistrationAndIdempotence() {
         let defaults = makeDefaults()
         XCTAssertFalse(FoundingUserStore.isFoundingUser(defaults: defaults))
         XCTAssertNil(FoundingUserStore.firstLaunchDate(defaults: defaults))
@@ -31,6 +32,7 @@ final class MonetizationTests: XCTestCase {
         FoundingUserStore.registerLaunchIfNeeded(defaults: defaults)
 
         // Dormant phase (paywallEverShipped == false) ⇒ grandfathered.
+        // Dormant phase (paywallEverShipped == false) => grandfathered.
         XCTAssertTrue(FoundingUserStore.isFoundingUser(defaults: defaults))
         XCTAssertNotNil(FoundingUserStore.firstLaunchDate(defaults: defaults))
     }
@@ -39,6 +41,7 @@ final class MonetizationTests: XCTestCase {
         let defaults = makeDefaults()
         FoundingUserStore.registerLaunchIfNeeded(defaults: defaults)
         let firstDate = FoundingUserStore.firstLaunchDate(defaults: defaults)
+        XCTAssertNotNil(firstDate)
 
         // A later launch must not overwrite the recorded first-launch date.
         FoundingUserStore.registerLaunchIfNeeded(defaults: defaults)
@@ -51,10 +54,12 @@ final class MonetizationTests: XCTestCase {
     func testDormantEntitlementsUnlockEverything() {
         // A non-founding, non-premium user still gets full access while the
         // paywall is dormant — proving v1 gates nothing.
+    func testDormantEntitlementsAndLimits() {
         let entitlements = Entitlements(
             purchaseManager: PurchaseManager(),
             isFoundingUser: false
         )
+        // Full access while paywall is dormant
         XCTAssertTrue(entitlements.hasPremiumAccess)
         XCTAssertTrue(entitlements.canUseDeepSearch)
         XCTAssertTrue(entitlements.canAttachDocuments)
@@ -71,6 +76,7 @@ final class MonetizationTests: XCTestCase {
         )
         // While dormant, requested values pass through untouched even when
         // they exceed the free-tier limits.
+        // Clamps are no-ops while dormant
         XCTAssertEqual(entitlements.clampedMaxResponseTokens(2000), 2000)
         XCTAssertEqual(entitlements.clampedResultsPerProvider(5), 5)
     }
@@ -78,6 +84,7 @@ final class MonetizationTests: XCTestCase {
     /// Sanity check that the free-tier constants match the product spec, so
     /// a stray edit to either number is caught.
     func testFreeTierLimitConstants() {
+        // Free-tier constants check
         XCTAssertEqual(Entitlements.freeMaxResponseTokens, 500)
         XCTAssertEqual(Entitlements.freeMaxResultsPerProvider, 1)
     }

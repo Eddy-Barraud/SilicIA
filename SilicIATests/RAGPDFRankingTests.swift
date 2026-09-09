@@ -12,7 +12,15 @@ final class RAGPDFRankingTests: XCTestCase {
         let result = await rankingResult(for: "explain equation 5")
         guard let best = result?.rankedChunks.first else {
             return XCTFail("No ranked chunks produced for full-article query")
+    /// Tests that RAG context ranking correctly prefers the exact equation page,
+    /// figure caption page, or explicitly requested page from a real PDF document.
+    /// Runs a single OCR pass over the fixture to keep test execution fast.
+    func testPDFContextRankingForEquationsAndFigures() async {
+        let chunks = makeFixtureChunks()
+        guard !chunks.isEmpty else {
+            return XCTFail("Fixture PDF chunks could not be loaded")
         }
+        let service = RAGContextService()
 
         XCTAssertEqual(best.chunk.pdfPage, 6,
                        "Query should select page 6, got page \(String(describing: best.chunk.pdfPage)) with score \(best.relevanceScore)")
@@ -26,12 +34,27 @@ final class RAGPDFRankingTests: XCTestCase {
             "Top-ranked page did not contain the expected eq-5 formula line.\nTop page text:\n\(best.chunk.text)"
         )
     }
+        // 1. Equation 5 lookup prefers page 6
+        let eqResult = await service.selectContext(chunks: chunks, query: "explain equation 5", maxOutputTokens: 1024)
+        guard let eqBest = eqResult.rankedChunks.first else {
+            return XCTFail("No ranked chunks produced for equation-5 query")
+        }
+        XCTAssertEqual(eqBest.chunk.pdfPage, 6, "Equation 5 query should select page 6")
+        let eqText = normalizeForComparison(eqBest.chunk.text)
+        XCTAssertTrue(eqText.contains(normalizeForComparison("relationship of eq 5 for ionic surfactants")))
+        XCTAssertTrue(eqText.contains("BCion") || eqText.contains("BC_ion"))
 
     func testDescribeFigure5PrefersFigure5Page() async {
         let result = await rankingResult(for: "describe figure 5")
         guard let best = result?.rankedChunks.first else {
+        // 2. Figure 5 lookup prefers page 7
+        let figResult = await service.selectContext(chunks: chunks, query: "describe figure 5", maxOutputTokens: 1024)
+        guard let figBest = figResult.rankedChunks.first else {
             return XCTFail("No ranked chunks produced for figure-5 query")
         }
+        XCTAssertEqual(figBest.chunk.pdfPage, 7, "Figure 5 query should select page 7")
+        let figText = normalizeForComparison(figBest.chunk.text)
+        XCTAssertTrue(figText.contains(normalizeForComparison("Figure 5. Chain length dependence of CMC values")))
 
         XCTAssertEqual(best.chunk.pdfPage, 7,
                        "Query should select the PDF page that contains Figure 5, got page \(String(describing: best.chunk.pdfPage)) with score \(best.relevanceScore)")
@@ -50,6 +73,10 @@ final class RAGPDFRankingTests: XCTestCase {
         let result = await rankingResult(for: "describe figure on page 8")
         guard let best = result?.rankedChunks.first else {
             return XCTFail("No ranked chunks produced for page-8 figure query")
+        // 3. Explicit page 8 request prefers page 8
+        let pageResult = await service.selectContext(chunks: chunks, query: "describe figure on page 8", maxOutputTokens: 1024)
+        guard let pageBest = pageResult.rankedChunks.first else {
+            return XCTFail("No ranked chunks produced for page-8 query")
         }
 
         XCTAssertEqual(best.chunk.pdfPage, 8,
@@ -59,6 +86,9 @@ final class RAGPDFRankingTests: XCTestCase {
             normalized.contains(normalizeForComparison("Figure S6-34")),
             "Top-ranked page did not contain the expected figure cue from page 8.\nTop page text:\n\(best.chunk.text)"
         )
+        XCTAssertEqual(pageBest.chunk.pdfPage, 8, "Explicit page 8 request should select page 8")
+        let pageText = normalizeForComparison(pageBest.chunk.text)
+        XCTAssertTrue(pageText.contains(normalizeForComparison("Figure S6-34")))
     }
 
     private func rankingResult(for query: String) async -> RAGSelectionResult? {

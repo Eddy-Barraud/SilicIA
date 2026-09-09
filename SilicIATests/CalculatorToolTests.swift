@@ -6,6 +6,7 @@
 //  pure arithmetic + input-validation surface — the actual Foundation
 //  Models hand-off (model decides to call the tool) is integration-tested
 //  manually since it requires the on-device LM.
+//  Unit tests for the Foundation Models `CalculatorTool`.
 //
 
 import XCTest
@@ -27,26 +28,73 @@ final class CalculatorToolTests: XCTestCase {
     func testIntegerAddition() async throws {
         let output = try await tool.call(arguments: .init(expression: "2 + 3"))
         XCTAssertEqual(output, "5")
+    func testBasicArithmetic() async throws {
+        let cases: [(String, String)] = [
+            ("2 + 3", "5"),
+            ("12 * 12", "144"),
+            ("10 / 4", "2.5"),
+            ("(1 + 2) * 3", "9"),
+            ("-5 + 3", "-2")
+        ]
+        for (expression, expected) in cases {
+            let output = try await tool.call(arguments: .init(expression: expression))
+            XCTAssertEqual(output, expected, "Failed for '\(expression)'")
+        }
     }
 
     func testIntegerMultiplication() async throws {
         let output = try await tool.call(arguments: .init(expression: "12 * 12"))
         XCTAssertEqual(output, "144")
+    func testDecimalAndCommaFormatting() async throws {
+        let cases: [(String, String)] = [
+            ("1,5 * 2", "3"),
+            ("64,24 * 2", "128.48"),
+            ("77.08 * 2", "154.16")
+        ]
+        for (expression, expected) in cases {
+            let output = try await tool.call(arguments: .init(expression: expression))
+            XCTAssertEqual(output, expected, "Failed for '\(expression)'")
+        }
     }
 
     func testDivisionWithDecimal() async throws {
         let output = try await tool.call(arguments: .init(expression: "10 / 4"))
         XCTAssertEqual(output, "2.5")
+    func testRejectsInvalidSyntax() async throws {
+        let invalidExpressions = [
+            "FUNCTION(123, 'abs')",
+            "self.value",
+            "   "
+        ]
+        for expr in invalidExpressions {
+            let output = try await tool.call(arguments: .init(expression: expr))
+            XCTAssertTrue(output.hasPrefix("Error"), "Expected error for '\(expr)', got: \(output)")
+        }
     }
 
     func testParentheses() async throws {
         let output = try await tool.call(arguments: .init(expression: "(1 + 2) * 3"))
         XCTAssertEqual(output, "9")
     }
+    func testFactorialEvaluationAndPrecisionCap() async throws {
+        // Valid factorials
+        let cases: [(String, String)] = [
+            ("0!", "1"),
+            ("5!", "120"),
+            ("3! + 4!", "30"),
+            ("15!", "1307674368000")
+        ]
+        for (expression, expected) in cases {
+            let result = try await tool.call(arguments: .init(expression: expression))
+            XCTAssertEqual(result, expected, "Failed for '\(expression)'")
+        }
 
     func testUnaryMinus() async throws {
         let output = try await tool.call(arguments: .init(expression: "-5 + 3"))
         XCTAssertEqual(output, "-2")
+        // 16! crosses precision cap
+        let overCap = try await tool.call(arguments: .init(expression: "16!"))
+        XCTAssertTrue(overCap.hasPrefix("Error"), "16! should exceed precision cap: \(overCap)")
     }
 
     // MARK: - Locale-friendly inputs
@@ -141,6 +189,8 @@ final class CalculatorToolTests: XCTestCase {
         // Use an expression the allow-list rejects so each call would
         // otherwise return the same Error message — perfect feedstock for
         // the model's retry loop.
+    func testLoopGuard() async throws {
+        // Triggers on repeated identical bad expressions
         let badExpression = "abc!"
         var sawStop = false
         for _ in 0..<6 {
@@ -153,6 +203,7 @@ final class CalculatorToolTests: XCTestCase {
         XCTAssertTrue(sawStop,
                       "Loop guard did not engage after repeated identical calls")
     }
+        XCTAssertTrue(sawStop, "Loop guard did not engage on repeated identical calls")
 
     /// Different expressions in a row must NOT trigger the loop guard —
     /// otherwise legitimate sequences (e.g. multiple steps of a long
@@ -163,10 +214,17 @@ final class CalculatorToolTests: XCTestCase {
             let output = try await tool.call(arguments: .init(expression: expr))
             XCTAssertFalse(output.contains("STOP CALLING THIS TOOL"),
                            "Loop guard wrongly fired on distinct expression \(expr): \(output)")
+        // Does NOT trigger on distinct expressions
+        CalculatorTool.resetLoopGuardForTesting()
+        for i in 1...7 {
+            let output = try await tool.call(arguments: .init(expression: "\(i)+\(i)"))
+            XCTAssertFalse(output.contains("STOP CALLING THIS TOOL"))
         }
     }
 
     func testGovernorDuplicateReturnsRefusalInsteadOfThrowing() async throws {
+    func testGovernorIntegration() async throws {
+        // Soft refusal on duplicate without recorder
         var governedTool = CalculatorTool()
         governedTool.governor = ToolCallGovernor()
 
@@ -177,6 +235,7 @@ final class CalculatorToolTests: XCTestCase {
             duplicate.localizedCaseInsensitiveContains("do not repeat") ||
             duplicate.localizedCaseInsensitiveContains("write your final answer now"),
             "Duplicate governed calculator call should return a soft refusal, got: \(duplicate)"
+            duplicate.localizedCaseInsensitiveContains("write your final answer now")
         )
     }
 
@@ -187,9 +246,16 @@ final class CalculatorToolTests: XCTestCase {
 
         _ = try await governedTool.call(arguments: .init(expression: "10 / 4"))
 
+        // Throws duplicate ToolError with recovery recorder
+        var recordedTool = CalculatorTool()
+        recordedTool.governor = ToolCallGovernor()
+        recordedTool.transcriptRecorder = ToolTranscriptRecorder()
+        _ = try await recordedTool.call(arguments: .init(expression: "10 / 4"))
         do {
             _ = try await governedTool.call(arguments: .init(expression: "10 / 4"))
             XCTFail("Expected duplicate governed calculator call to abort when recovery recorder is present")
+            _ = try await recordedTool.call(arguments: .init(expression: "10 / 4"))
+            XCTFail("Expected duplicate ToolError")
         } catch let error as ToolError {
             guard case .duplicate(let toolName, let count) = error else {
                 return XCTFail("Expected duplicate ToolError, got \(error)")

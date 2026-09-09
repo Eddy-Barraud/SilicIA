@@ -18,13 +18,26 @@ final class RAGChunkerTests: XCTestCase {
         let chunks = await chunker.chunk(text: "", source: "test", maxChunkTokens: 100, overlapTokens: 10)
         XCTAssertTrue(chunks.isEmpty)
     }
+    func testBasicChunkingBoundaries() async {
+        // Empty & whitespace inputs return empty chunks
+        let empty = await chunker.chunk(text: "", source: "test", maxChunkTokens: 100, overlapTokens: 10)
+        XCTAssertTrue(empty.isEmpty)
 
     func testWhitespaceOnlyReturnsEmpty() async {
         let chunks = await chunker.chunk(text: "   \n\t  ", source: "test", maxChunkTokens: 100, overlapTokens: 10)
         XCTAssertTrue(chunks.isEmpty)
+        let whitespace = await chunker.chunk(text: "   \n\t  ", source: "test", maxChunkTokens: 100, overlapTokens: 10)
+        XCTAssertTrue(whitespace.isEmpty)
+
+        // Short input produces a single chunk
+        let text = "Hello world"
+        let short = await chunker.chunk(text: text, source: "test", maxChunkTokens: 200, overlapTokens: 10)
+        XCTAssertEqual(short.count, 1)
+        XCTAssertEqual(short.first?.text, text)
     }
 
     func testVeryLongInputProducesMultipleChunks() async {
+    func testLongInputProducesBoundedChunks() async {
         let word = "word "
         let longText = String(repeating: word, count: 1000)
         let maxChunkTokens = 50
@@ -40,10 +53,12 @@ final class RAGChunkerTests: XCTestCase {
         for chunk in chunks {
             XCTAssertLessThanOrEqual(chunk.text.count, maxChunkChars,
                 "Chunk size \(chunk.text.count) exceeds max \(maxChunkChars)")
+            XCTAssertLessThanOrEqual(chunk.text.count, maxChunkChars)
         }
     }
 
     func testNextChunkStartsOnWholeSentenceBoundary() async {
+    func testSentenceBoundaryHandling() async {
         let text = """
         Sentence one uses enough extra words to consume part of the chunk budget without filling it completely.
         Sentence two carries the chargedrepulsiveparameters keyword and should become the overlapping sentence.
@@ -53,6 +68,7 @@ final class RAGChunkerTests: XCTestCase {
         guard chunks.count >= 2 else {
             XCTFail("Expected at least 2 chunks for overlap test")
             return
+            return XCTFail("Expected at least 2 chunks for overlap test")
         }
         XCTAssertTrue(
             chunks[0].text.hasSuffix("."),
@@ -63,12 +79,22 @@ final class RAGChunkerTests: XCTestCase {
             "Expected next chunk to restart on the whole sentence, got: \(chunks[1].text)"
         )
     }
+        XCTAssertTrue(chunks[0].text.hasSuffix("."))
+        XCTAssertTrue(chunks[1].text.hasPrefix("Sentence two carries the chargedrepulsiveparameters keyword"))
 
     func testShortInputProducesSingleChunk() async {
         let text = "Hello world"
         let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 200, overlapTokens: 10)
         XCTAssertEqual(chunks.count, 1)
         XCTAssertEqual(chunks[0].text, text)
+        // Avoid mid-word heads
+        let filler = String(repeating: "aa ", count: 53)
+        let midWordText = "\(filler)chargedrepulsiveparameters tailword.\nNext sentence adds enough trailing text."
+        let midChunks = await chunker.chunk(text: midWordText, source: "test", maxChunkTokens: 70, overlapTokens: 10)
+        XCTAssertGreaterThanOrEqual(midChunks.count, 2)
+        XCTAssertFalse(midChunks.dropFirst().contains(where: {
+            $0.text.hasPrefix("chargedrepulsiveparameters") || $0.text.hasPrefix("epulsiveparameters")
+        }))
     }
 
     func testSourceAndMetadataPreserved() async {
@@ -126,6 +152,10 @@ final class RAGChunkerTests: XCTestCase {
             chunks.dropFirst().contains { $0.text.hasPrefix("epulsion parameters") || $0.text.hasPrefix("bAE/RT |") },
             "A later chunk restarted mid-word or mid-table-cell: \(chunks.map(\.text))"
         )
+        XCTAssertTrue(chunks.contains { $0.text.contains("|") })
+        XCTAssertFalse(chunks.dropFirst().contains {
+            $0.text.hasPrefix("epulsion parameters") || $0.text.hasPrefix("bAE/RT |")
+        })
     }
 
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {

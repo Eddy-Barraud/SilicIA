@@ -46,6 +46,7 @@ final class ViewRenderingTests: XCTestCase {
     }
 
     func testContentViewRenders() throws {
+    func testMainViewsRenderWithoutCrashing() throws {
         let container = try makeContainer()
         assertRenders(
             ContentView(
@@ -98,6 +99,8 @@ final class ViewRenderingTests: XCTestCase {
     /// The progressive LaTeX view renders in both the mid-stream and the
     /// finished states (with inline + display math present).
     func testStreamingLaTeXTextRendersWhileStreaming() {
+    func testStreamingAndLocalizedViewsRender() throws {
+        // Progressive LaTeX rendering in mid-stream and complete states
         assertRenders(
             StreamingLaTeXText(
                 text: "The solution is $x = 1$. Next we compute \\[ y = 2 \\] and",
@@ -118,6 +121,7 @@ final class ViewRenderingTests: XCTestCase {
     /// Each tab renders in every supported language (drives the localized
     /// tab-bar labels through the real localization path).
     func testContentViewRendersInAllLanguages() throws {
+        // Localized tabs across all supported languages
         let container = try makeContainer()
         let original = AppSettingsStore.shared.settings
         defer { AppSettingsStore.shared.settings = original }

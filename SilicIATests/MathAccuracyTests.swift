@@ -4,6 +4,9 @@
 //
 //  Regression suite for the deterministic pieces of the math-accuracy
 //  pipeline:
+//  Regression suite for deterministic math-accuracy and document structure pipelines:
+//  number integrity during chunking, table extraction, header propagation, and
+//  relevance scoring.
 //
 //  - RAGChunker preserves multi-digit numbers across chunk boundaries.
 //  - RAGChunker prefers sentence / paragraph boundaries when within range.
@@ -24,11 +27,13 @@ import XCTest
 final class MathAccuracyTests: XCTestCase {
 
     // MARK: - Chunker: number-integrity
+    // MARK: - Chunker Number & Boundary Integrity
 
     /// A multi-digit number with thousands separators must not be split
     /// across two chunks — the model silently corrupts numbers when half
     /// of the digits land in a different chunk.
     func testChunkerKeepsThousandsSeparatedNumberIntact() async {
+    func testChunkerNumberAndBoundaryIntegrity() async {
         let chunker = RAGChunker()
         // Pre/post strings sized to force the ideal boundary near the
         // middle of "8,432,567".
@@ -67,6 +72,10 @@ final class MathAccuracyTests: XCTestCase {
         let intact = chunks.contains { $0.text.contains("3.14159265") }
         XCTAssertTrue(intact, "Decimal number was split. Chunks: \(chunks.map(\.text))")
     }
+        // 1. Multi-digit number with thousands separator
+        let thousandsText = "\(String(repeating: "x", count: 200)) 8,432,567 \(String(repeating: "y", count: 200))"
+        let thousandsChunks = await chunker.chunk(text: thousandsText, source: "test", maxChunkTokens: 70, overlapTokens: 0)
+        XCTAssertTrue(thousandsChunks.contains { $0.text.contains("8,432,567") })
 
     /// When a sentence-ending period sits within the walkback range, the
     /// chunker should prefer it over a mid-sentence split.
@@ -74,6 +83,12 @@ final class MathAccuracyTests: XCTestCase {
         let chunker = RAGChunker()
         // Build text where the byte-count ideal end lands mid-second-sentence,
         // but a sentence boundary exists ~10% earlier.
+        // 2. Decimal number
+        let decimalText = "\(String(repeating: "a", count: 200)) 3.14159265 \(String(repeating: "b", count: 200))"
+        let decimalChunks = await chunker.chunk(text: decimalText, source: "test", maxChunkTokens: 70, overlapTokens: 0)
+        XCTAssertTrue(decimalChunks.contains { $0.text.contains("3.14159265") })
+
+        // 3. Sentence boundary preferred
         let s1 = "The first sentence has some content here that goes on for a while to fill space."
         let s2 = "Now begins a fresh second sentence with completely different unrelated content."
         let text = s1 + " " + s2
@@ -86,6 +101,8 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertTrue(first.text.hasSuffix("."),
                       "First chunk should end on a sentence boundary; got: '\(first.text)'")
     }
+        let sentenceChunks = await chunker.chunk(text: "\(s1) \(s2)", source: "test", maxChunkTokens: 30, overlapTokens: 0)
+        XCTAssertTrue(sentenceChunks.first?.text.hasSuffix(".") == true)
 
     /// Paragraph breaks (`\n\n`) should beat sentence breaks when both are
     /// in the walkback window. Fixture sized so the byte-count ideal end
@@ -96,6 +113,8 @@ final class MathAccuracyTests: XCTestCase {
         // p1 ~213 chars, p2 ~148 chars; \n\n at offset 213-214.
         let p1 = String(repeating: "Paragraph one fills with content for the test. ", count: 4)
             + "Paragraph one ends clean."
+        // 4. Paragraph boundary preferred
+        let p1 = String(repeating: "Paragraph one fills with content for the test. ", count: 4) + "Paragraph one ends clean."
         let p2 = String(repeating: "Paragraph two has more content here. ", count: 4)
         let text = p1 + "\n\n" + p2
         // maxChunkChars = max(200, 80*3) = 240 — hardEnd lands ~26 chars
@@ -107,9 +126,12 @@ final class MathAccuracyTests: XCTestCase {
         }
         XCTAssertTrue(first.text.hasSuffix("clean."),
                       "First chunk should end at the paragraph break; got: '\(first.text)'")
+        let paragraphChunks = await chunker.chunk(text: "\(p1)\n\n\(p2)", source: "test", maxChunkTokens: 80, overlapTokens: 0)
+        XCTAssertTrue(paragraphChunks.first?.text.hasSuffix("clean.") == true)
     }
 
     // MARK: - Whitespace normalization
+    // MARK: - Whitespace Normalization
 
     /// Single newlines must survive `normalizeWhitespace` so the chunker
     /// can use them as table-row boundaries.
@@ -121,6 +143,12 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertTrue(normalized.contains("row 2\n\nrow 3"),
                       "Double newline between paragraphs should survive normalization")
     }
+    func testNormalizeWhitespace() {
+        // Preserves single and double newlines
+        let inputNewlines = "row 1\nrow 2\n\nrow 3"
+        let normNewlines = RAGChunker.normalizeWhitespace(inputNewlines)
+        XCTAssertTrue(normNewlines.contains("row 1\nrow 2"))
+        XCTAssertTrue(normNewlines.contains("row 2\n\nrow 3"))
 
     /// HTML scraping leaves `\n   \n   \n` patterns when `<br>` translates
     /// to a space — each blank-looking line survived as its own newline and
@@ -132,6 +160,8 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertEqual(normalized, "line A\n\nline B",
                        "Blank lines containing only whitespace should collapse to a single paragraph break, got: \(normalized.debugDescription)")
     }
+        // Collapses blank lines containing only whitespace
+        XCTAssertEqual(RAGChunker.normalizeWhitespace("line A\n \n \n \nline B"), "line A\n\nline B")
 
     /// A single intentional blank line (paragraph break) must SURVIVE so
     /// the chunker keeps it as a high-quality boundary candidate.
@@ -140,15 +170,20 @@ final class MathAccuracyTests: XCTestCase {
         let normalized = RAGChunker.normalizeWhitespace(input)
         XCTAssertEqual(normalized, "para 1\n\npara 2")
     }
+        // Preserves single paragraph break
+        XCTAssertEqual(RAGChunker.normalizeWhitespace("para 1\n\npara 2"), "para 1\n\npara 2")
 
     /// Runs of horizontal whitespace are still collapsed to a single space.
     func testNormalizeWhitespaceCollapsesHorizontalRuns() {
         let input = "lots\t  of    \t spaces"
         let normalized = RAGChunker.normalizeWhitespace(input)
         XCTAssertEqual(normalized, "lots of spaces")
+        // Collapses horizontal spaces and tabs
+        XCTAssertEqual(RAGChunker.normalizeWhitespace("lots\t  of    \t spaces"), "lots of spaces")
     }
 
     // MARK: - Numeric relevance scoring
+    // MARK: - Numeric & Reference Relevance Scoring
 
     /// A query mentioning a specific number prefers a chunk that contains
     /// that exact number over an otherwise-equivalent chunk that doesn't.
@@ -157,6 +192,7 @@ final class MathAccuracyTests: XCTestCase {
         let withNumber = "The 2020 census recorded a population total of 67432198 residents."
         let withoutNumber = "The census reported population data covering many years and demographics."
 
+    func testNumericAndReferenceRelevanceBoosts() {
         let options = RAGSelectionOptions.default
         let boostA = RAGContextService.numericRelevanceBoost(text: withNumber, query: query, options: options)
         let boostB = RAGContextService.numericRelevanceBoost(text: withoutNumber, query: query, options: options)
@@ -164,6 +200,14 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertGreaterThan(boostA, boostB,
                              "Chunk containing the queried year should score higher than one without it")
     }
+        // Exact numeric match boosts score
+        let numQuery = "What is the population in 2020 according to the census?"
+        let withNum = "The 2020 census recorded a population total of 67432198 residents."
+        let withoutNum = "The census reported population data covering many years and demographics."
+        XCTAssertGreaterThan(
+            RAGContextService.numericRelevanceBoost(text: withNum, query: numQuery, options: options),
+            RAGContextService.numericRelevanceBoost(text: withoutNum, query: numQuery, options: options)
+        )
 
     /// A query with numerical intent but no specific number ("how many",
     /// "average", etc.) still lifts chunks containing any number.
@@ -171,10 +215,21 @@ final class MathAccuracyTests: XCTestCase {
         let query = "How many residents live there on average?"
         let withNumber = "Studies report an average of 4321 residents in the area."
         let withoutNumber = "Studies generally report that many residents live in the area."
+        // General numerical intent boost
+        let intentQuery = "How many residents live there on average?"
+        XCTAssertGreaterThan(
+            RAGContextService.numericRelevanceBoost(text: withNum, query: intentQuery, options: options),
+            RAGContextService.numericRelevanceBoost(text: withoutNum, query: intentQuery, options: options)
+        )
 
         let options = RAGSelectionOptions.default
         let boostA = RAGContextService.numericRelevanceBoost(text: withNumber, query: query, options: options)
         let boostB = RAGContextService.numericRelevanceBoost(text: withoutNumber, query: query, options: options)
+        // Non-numeric query gets 0 boost
+        XCTAssertEqual(
+            RAGContextService.numericRelevanceBoost(text: "Photosynthesis converts light.", query: "What is photosynthesis", options: options),
+            0, accuracy: 0.0001
+        )
 
         XCTAssertGreaterThan(boostA, boostB,
                              "Query with numerical intent should prefer the chunk that contains a number")
@@ -225,6 +280,12 @@ final class MathAccuracyTests: XCTestCase {
             text: "Figure 5. Chain length dependence of CMC values for several surfactant families.",
             url: nil,
             pdfPage: 8
+        // Equation reference boost
+        let eqMatching = "eq 5 for ionic surfactants: ln(CMC) = ln(CMC_0) - A ln(1 + BC_ion)"
+        let eqNonMatching = "Table 1 methodology. Equation 2 defines a different parameter."
+        XCTAssertGreaterThan(
+            RAGContextService.equationRelevanceBoost(text: eqMatching, query: "explain equation 5", options: options),
+            RAGContextService.equationRelevanceBoost(text: eqNonMatching, query: "explain equation 5", options: options)
         )
         let wrongFigure = RAGChunk(
             source: "PDF: fixture page 8",
@@ -248,9 +309,18 @@ final class MathAccuracyTests: XCTestCase {
                              "Chunk matching both figure number and page should outrank figure-only match")
         XCTAssertGreaterThan(exact, pageOnly,
                              "Chunk matching both figure number and page should outrank page-only match")
+        // Figure reference boost
+        let figQuery = "describe figure 5 on page 8"
+        let exactChunk = RAGChunk(source: "PDF p8", text: "Figure 5. Chain length dependence.", url: nil, pdfPage: 8)
+        let wrongPageChunk = RAGChunk(source: "PDF p7", text: "Figure 5. Chain length dependence.", url: nil, pdfPage: 7)
+        let wrongFigChunk = RAGChunk(source: "PDF p8", text: "Figure 4. Evolution of CMC.", url: nil, pdfPage: 8)
+        let exactBoost = RAGContextService.figureRelevanceBoost(chunk: exactChunk, query: figQuery, options: options)
+        XCTAssertGreaterThan(exactBoost, RAGContextService.figureRelevanceBoost(chunk: wrongPageChunk, query: figQuery, options: options))
+        XCTAssertGreaterThan(exactBoost, RAGContextService.figureRelevanceBoost(chunk: wrongFigChunk, query: figQuery, options: options))
     }
 
     // MARK: - Temporal intent detection
+    // MARK: - Intent Detection
 
     /// "actualité ... cette semaine" / "today" / "este mes" must flag so
     /// the WebSearchTool knows to suppress Wikipedia for the call —
@@ -258,10 +328,13 @@ final class MathAccuracyTests: XCTestCase {
     /// (e.g. "Crise des subprimes") for a query about "this week" because
     /// of bag-of-words keyword overlap.
     func testTemporalIntentDetectedAcrossLanguages() {
+    func testIntentDetection() {
+        // Temporal intent
         XCTAssertTrue(RAGContextService.hasTemporalIntent("what's the latest news"))
         XCTAssertTrue(RAGContextService.hasTemporalIntent("breaking story today"))
         XCTAssertTrue(RAGContextService.hasTemporalIntent("actualité des marchés financiers cette semaine"))
         XCTAssertTrue(RAGContextService.hasTemporalIntent("dernières tendances IA"))
+        XCTAssertTrue(RAGContextService.hasTemporalIntent("actualité des marchés cette semaine"))
         XCTAssertTrue(RAGContextService.hasTemporalIntent("noticias de hoy sobre el clima"))
         XCTAssertTrue(RAGContextService.hasTemporalIntent("últimas tendencias en moda"))
     }
@@ -270,6 +343,7 @@ final class MathAccuracyTests: XCTestCase {
     /// the temporal heuristic, otherwise we'd suppress Wikipedia on
     /// content it's actually well-suited for.
     func testDefinitionalQueriesAreNotTemporal() {
+        // Definitional (non-temporal)
         XCTAssertFalse(RAGContextService.hasTemporalIntent("what is photosynthesis"))
         XCTAssertFalse(RAGContextService.hasTemporalIntent("qu'est-ce qu'un masque chirurgical"))
         XCTAssertFalse(RAGContextService.hasTemporalIntent("definición de macroeconomía"))
@@ -279,6 +353,7 @@ final class MathAccuracyTests: XCTestCase {
     /// `hasNumericalIntent` should fire on EN/FR/ES quantity cues so the
     /// boost works across the supported languages.
     func testNumericalIntentDetectionMultilingual() {
+        // Numerical intent
         XCTAssertTrue(RAGContextService.hasNumericalIntent("how many people live there"))
         XCTAssertTrue(RAGContextService.hasNumericalIntent("combien d'habitants"))
         XCTAssertTrue(RAGContextService.hasNumericalIntent("cuántos habitantes hay"))
@@ -287,10 +362,12 @@ final class MathAccuracyTests: XCTestCase {
     }
 
     // MARK: - WebScraping: HTML tables → Markdown
+    // MARK: - HTML Table Extraction
 
     /// A standalone `<table>` block converts to a Markdown pipe table with
     /// a header separator row, preserving cell text verbatim.
     func testHTMLTableConvertsToMarkdownPipeTable() {
+    func testHTMLTableConversion() {
         let html = """
         <table>
           <tr><th>Year</th><th>Population</th></tr>
@@ -321,6 +398,9 @@ final class MathAccuracyTests: XCTestCase {
           <tr><th>Metric</th><th>Value</th></tr>
           <tr><td>Population</td><td>8,432,567</td></tr>
           <tr><td>Area km²</td><td>105.4</td></tr>
+          <tr><th>Year</th><th>Population</th></tr>
+          <tr><td>2010</td><td>8,432,567</td></tr>
+          <tr><td>2020</td><td>105.4</td></tr>
         </table>
         </body></html>
         """
@@ -332,6 +412,11 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertTrue(replaced.contains("|"),
                       "Markdown pipe markers missing from extracted table: \n\(replaced)")
     }
+        let converted = WebScrapingService.extractAndReplaceTables(html)
+        XCTAssertTrue(converted.contains("| Year | Population |"))
+        XCTAssertTrue(converted.contains("| --- | --- |"))
+        XCTAssertTrue(converted.contains("8,432,567"))
+        XCTAssertTrue(converted.contains("105.4"))
 
     /// HTML without a `<table>` block is passed through unchanged so we
     /// don't pay any cost on pages that have no tables.
@@ -339,9 +424,13 @@ final class MathAccuracyTests: XCTestCase {
         let html = "<p>Just a paragraph. No tables here.</p>"
         let result = WebScrapingService.extractAndReplaceTables(html)
         XCTAssertEqual(result, html)
+        // Passthrough when no tables
+        let prose = "<p>Just a paragraph.</p>"
+        XCTAssertEqual(WebScrapingService.extractAndReplaceTables(prose), prose)
     }
 
     // MARK: - Whitespace-aligned table detection (PDF path)
+    // MARK: - Whitespace-Aligned Table Conversion
 
     /// A multi-column invoice row aligned with multi-space gaps should
     /// convert to a Markdown pipe table — exactly the regression motivating
@@ -350,6 +439,7 @@ final class MathAccuracyTests: XCTestCase {
     /// must no longer collapse to a flat sequence of numbers the model
     /// can't map back to column headers.
     func testWhitespaceAlignedTableConvertsToMarkdown() {
+    func testWhitespaceAlignedTableConversion() {
         let pdf = """
         Description           Qté   Prix HT   TVA   Prix TTC   Total
         Amortisseurs          2     64,24     20%   77,08      154,17
@@ -363,6 +453,9 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertTrue(converted.contains("| --- |"),
                       "Markdown header-separator missing in: \n\(converted)")
     }
+        XCTAssertTrue(converted.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |"))
+        XCTAssertTrue(converted.contains("| Amortisseurs | 2 | 64,24 | 20% | 77,08 | 154,17 |"))
+        XCTAssertTrue(converted.contains("| --- |"))
 
     /// Multi-word cell headers ("Prix HT", "Prix TTC") must survive — the
     /// splitter has to glue on single spaces and only break on 2+ spaces.
@@ -380,11 +473,13 @@ final class MathAccuracyTests: XCTestCase {
     /// Plain prose with occasional double-spaces must NOT get reformatted
     /// as a table — false positives would mangle ordinary reading text.
     func testProseIsNotConvertedToTable() {
+        // Prose with occasional double space must not convert
         let prose = "This is a paragraph.  It has two sentences with a double space.\nA second line follows."
         let converted = RAGChunker.convertWhitespaceAlignedTables(prose)
         XCTAssertFalse(converted.contains("|"),
                        "Prose paragraph was wrongly converted to a Markdown table: \n\(converted)")
     }
+        XCTAssertFalse(RAGChunker.convertWhitespaceAlignedTables(prose).contains("|"))
 
     /// Single tabular row alone (no peer row) shouldn't trigger conversion —
     /// would produce a header without data.
@@ -393,11 +488,15 @@ final class MathAccuracyTests: XCTestCase {
         let converted = RAGChunker.convertWhitespaceAlignedTables(line)
         XCTAssertFalse(converted.contains("|"),
                        "Standalone wide-gap line was wrongly converted: \n\(converted)")
+        // Standalone tabular line without peer row must not convert
+        XCTAssertFalse(RAGChunker.convertWhitespaceAlignedTables("Field 1    Field 2    Field 3").contains("|"))
     }
 
     /// End-to-end through the chunker: after conversion + chunking, the
     /// Amortisseurs row remains a contiguous unit and the price "154,17"
     /// sits in the same chunk as the row's other cells.
+    // MARK: - End-to-End Amortisseurs Row Survival
+
     func testAmortisseursRowSurvivesChunkingIntact() async {
         let pdf = """
         Devis voiture 208
@@ -415,15 +514,20 @@ final class MathAccuracyTests: XCTestCase {
             maxChunkTokens: 200,
             overlapTokens: 20
         )
+        let chunks = await RAGChunker().chunk(text: converted, source: "test", maxChunkTokens: 200, overlapTokens: 20)
         let priceChunk = chunks.first { $0.text.contains("Amortisseurs") }
         XCTAssertNotNil(priceChunk, "No chunk contains the Amortisseurs row")
         XCTAssertTrue(priceChunk?.text.contains("154,17") == true,
                       "Amortisseurs total price 154,17 missing from its chunk: \(priceChunk?.text ?? "nil")")
         XCTAssertTrue(priceChunk?.text.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |") == true,
                       "Header row missing from the same chunk as Amortisseurs row — model loses column context: \(priceChunk?.text ?? "nil")")
+        XCTAssertNotNil(priceChunk)
+        XCTAssertTrue(priceChunk?.text.contains("154,17") == true)
+        XCTAssertTrue(priceChunk?.text.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |") == true)
     }
 
     // MARK: - Table header propagation across chunks
+    // MARK: - Table Header Propagation Across Chunks
 
     /// A chunk containing only data rows should get the most-recent table
     /// header prepended, so the model can still tell which column is which.
@@ -484,6 +588,7 @@ final class MathAccuracyTests: XCTestCase {
     /// header. This is the bug that made the model answer with the wrong
     /// column (6,65 € for "prix coupelle") even though chunks looked good.
     func testHeaderPropagationPicksMatchingColumnCount() {
+    func testTableHeaderPropagation() {
         let withTwoHeaders = RAGChunk(
             source: "test", text: """
             Header info before any tables.
@@ -515,6 +620,8 @@ final class MathAccuracyTests: XCTestCase {
         XCTAssertFalse(result[1].text.contains("| Numéro | Date | Code | Mode | TVA |"),
                        "5-col ID header leaked into a 6-col data-row chunk: \n\(result[1].text)")
     }
+        XCTAssertTrue(result[1].text.hasPrefix("| Code | Description | Qté | P.U. HT | Montant HT | TVA |"))
+        XCTAssertFalse(result[1].text.contains("| Numéro | Date | Code | Mode | TVA |"))
 
     /// A chunk with neither header nor data rows is left alone — no
     /// spurious header inserted into prose.
@@ -534,9 +641,18 @@ final class MathAccuracyTests: XCTestCase {
         let result = RAGChunker.preserveTableHeadersAcrossChunks([withHeader, prose])
         XCTAssertEqual(result[1].text, "Just a paragraph of text with no table content.",
                        "Prose chunk was wrongly modified: \(result[1].text)")
+        // Orphan leading separator stripped
+        let orphan = RAGChunk(source: "test", text: "| --- | --- |\n| X | Y |", url: nil, pdfPage: 1)
+        let orphanResult = RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, orphan])
+        XCTAssertFalse(orphanResult[1].text.hasPrefix("| --- |"))
+
+        // Prose chunk unchanged
+        let prose = RAGChunk(source: "test", text: "Plain text with no table.", url: nil, pdfPage: 1)
+        XCTAssertEqual(RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, prose])[1].text, "Plain text with no table.")
     }
 
     // MARK: - Scientific table: OCR-split equation cells
+    // MARK: - Scientific OCR Table Conversion
 
     /// When Vision OCR splits a table's equation cell into multiple
     /// observations (e.g. "aww =" and "kBT/(2a0)(k-1Nm - 1)" become
@@ -551,6 +667,9 @@ final class MathAccuracyTests: XCTestCase {
         // "aww =" and "kBT/(2a0)(k^-1Nm - 1)" are two fragments from the
         // same equation cell, joined by 4 spaces by reconstructLayout.
         let visionOCROutput = """
+    func testScientificTableConversion() {
+        // Equation cell fragments merged into modal 3 columns
+        let splitEquation = """
         repulsive parameter    origin    equation
         water/water    water compressibility    aww =    kBT/(2a0)(k^-1Nm - 1)
         like/like    same as water    aii = aww
@@ -577,11 +696,17 @@ final class MathAccuracyTests: XCTestCase {
                       waterRow?.contains("aww = kBT/(2a0)(k^-1Nm - 1)") == true,
                       "Equation fragments not merged in row: \(waterRow ?? "nil")")
     }
+        let converted = RAGChunker.convertWhitespaceAlignedTables(splitEquation)
+        XCTAssertTrue(converted.contains("| repulsive parameter | origin | equation |"))
+        XCTAssertTrue(converted.contains("| water/water | water compressibility |"))
+        XCTAssertFalse(converted.contains("| aww = |"))
 
     /// A table where all rows have a consistent column count must still
     /// produce the correct Markdown — modal == max in this case.
     func testScientificTableWithConsistentColumnCount() {
         let visionOCROutput = """
+        // Consistent column count produces proper table
+        let consistent = """
         repulsive parameter    origin    equation
         water/water    water compressibility    aww = kBT/(2a0)(k^-1 Nm - 1)
         like/like    same as water    aii = aww
@@ -595,6 +720,9 @@ final class MathAccuracyTests: XCTestCase {
                       "Separator row missing: \n\(converted)")
         XCTAssertTrue(converted.contains("| water/water | water compressibility | aww = kBT/(2a0)(k^-1 Nm - 1) |"),
                       "water/water row malformed: \n\(converted)")
+        let convConsistent = RAGChunker.convertWhitespaceAlignedTables(consistent)
+        XCTAssertTrue(convConsistent.contains("| repulsive parameter | origin | equation |"))
+        XCTAssertTrue(convConsistent.contains("| water/water | water compressibility | aww = kBT/(2a0)(k^-1 Nm - 1) |"))
     }
 
     // MARK: - Test helpers

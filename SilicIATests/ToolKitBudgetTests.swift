@@ -18,6 +18,9 @@ final class ToolKitBudgetTests: XCTestCase {
     /// ceiling, so webSearch uses the full shared budget — the ceiling only
     /// bites on richer profiles (see below).
     func testWebSearchCapEqualsSharedBudgetAtDefault() {
+    @MainActor
+    func testWebSearchBudgetCeilingAtDefaultAndRicherProfiles() {
+        // Default profile: shared budget equals cap (1000t)
         let shared = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 500)
         XCTAssertEqual(shared, TokenBudgeting.webSearchReplyTokenCap,
                        "At the default profile the cap should match the shared budget (1000t)")
@@ -29,16 +32,34 @@ final class ToolKitBudgetTests: XCTestCase {
     @MainActor
     func testWebSearchCapBitesOnRicherProfile() {
         let (tools, sharedBudget, _) = ToolKit.assemble(
+        let (defaultTools, defaultSharedBudget, _) = ToolKit.assemble(
+            config: makeConfig(webSearchAvailable: true),
+            responseTokens: 500
+        )
+        let defaultWebTool = defaultTools.compactMap { $0 as? WebSearchTool }.first
+        let defaultRagTool = defaultTools.compactMap { $0 as? RAGSearchTool }.first
+        XCTAssertNotNil(defaultWebTool)
+        XCTAssertNotNil(defaultRagTool)
+        XCTAssertEqual(defaultWebTool?.tokenBudget, min(defaultSharedBudget, TokenBudgeting.webSearchReplyTokenCap))
+        XCTAssertEqual(defaultRagTool?.tokenBudget, defaultSharedBudget)
+
+        // Richer profile: shared budget exceeds cap, webSearch is held to ceiling
+        let (richTools, richSharedBudget, _) = ToolKit.assemble(
             config: makeConfig(webSearchAvailable: true),
             responseTokens: 600
         )
         XCTAssertGreaterThan(sharedBudget, TokenBudgeting.webSearchReplyTokenCap,
+        XCTAssertGreaterThan(richSharedBudget, TokenBudgeting.webSearchReplyTokenCap,
                              "Need a profile where the shared budget exceeds the cap for this test to be meaningful")
         let webTool = tools.compactMap { $0 as? WebSearchTool }.first
         let ragTool = tools.compactMap { $0 as? RAGSearchTool }.first
         XCTAssertEqual(webTool?.tokenBudget, TokenBudgeting.webSearchReplyTokenCap,
+        let richWebTool = richTools.compactMap { $0 as? WebSearchTool }.first
+        let richRagTool = richTools.compactMap { $0 as? RAGSearchTool }.first
+        XCTAssertEqual(richWebTool?.tokenBudget, TokenBudgeting.webSearchReplyTokenCap,
                        "webSearch should be held to the ceiling")
         XCTAssertEqual(ragTool?.tokenBudget, sharedBudget,
+        XCTAssertEqual(richRagTool?.tokenBudget, richSharedBudget,
                        "searchContext should keep the full shared budget")
     }
 
