@@ -240,12 +240,14 @@ final class ChatService: ObservableObject {
         var toolTranscriptRecorder: ToolTranscriptRecorder?
         do {
             let hasContext = !finalSelectedContext.isEmpty
+            let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
             let instructions = buildInstructions(
                 for: language,
                 maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
                 hasContext: hasContext,
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch,
+                webSearchAvailable: useToolCalling && webSearchAvailable,
                 hasCorpus: !chunks.isEmpty
             )
             // Tool-calling branch: hand the model `searchContext` over the
@@ -332,6 +334,8 @@ final class ChatService: ObservableObject {
                     for: message,
                     language: language,
                     groundingContext: toolGroundingContext
+                    groundingContext: toolGroundingContext,
+                    webSearchAvailable: webSearchAvailable
                 )
             } else {
                 prompt = buildPrompt(
@@ -366,8 +370,11 @@ final class ChatService: ObservableObject {
             } else {
                 finalContent = latestPartial
             }
+            let sanitizedFinalContent = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(finalContent)
+            updateAssistantMessage(id: assistantID, content: sanitizedFinalContent, citations: citations)
 
             persistMessage(role: "assistant", content: finalContent, citations: citations)
+            persistMessage(role: "assistant", content: sanitizedFinalContent, citations: citations)
         } catch is CancellationError {
             // User pressed Stop. Preserve whatever streamed so far — losing
             // half a useful answer to a cancel click would be worse than
@@ -511,6 +518,9 @@ final class ChatService: ObservableObject {
             updateAssistantMessage(id: assistantID, content: latestPartial, citations: citations)
         }
         return latestPartial
+        let sanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+        updateAssistantMessage(id: assistantID, content: sanitized, citations: citations)
+        return sanitized
     }
 
     /// Recovery path for tool-calling turns that already gathered useful
@@ -558,6 +568,9 @@ final class ChatService: ObservableObject {
             updateAssistantMessage(id: assistantID, content: latestPartial, citations: citations)
         }
         return latestPartial
+        let sanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+        updateAssistantMessage(id: assistantID, content: sanitized, citations: citations)
+        return sanitized
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
@@ -1327,6 +1340,8 @@ final class ChatService: ObservableObject {
         for userMessage: String,
         language: ModelLanguage,
         groundingContext: String = ""
+        groundingContext: String = "",
+        webSearchAvailable: Bool = false
     ) -> String {
         // Prior user turns only (exclude the just-appended current message
         // and every assistant answer).
@@ -1339,6 +1354,8 @@ final class ChatService: ObservableObject {
             priorUserQuestions: Array(priorQuestions),
             language: language,
             groundingContext: groundingContext
+            groundingContext: groundingContext,
+            webSearchAvailable: webSearchAvailable
         )
     }
 
@@ -1387,6 +1404,8 @@ final class ChatService: ObservableObject {
         priorUserQuestions: [String],
         language: ModelLanguage,
         groundingContext: String = ""
+        groundingContext: String = "",
+        webSearchAvailable: Bool = false
     ) -> String {
         let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasGrounding = !trimmedGrounding.isEmpty
@@ -1403,18 +1422,27 @@ final class ChatService: ObservableObject {
             answerImperative = hasGrounding
                 ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
                 : "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
+                : (webSearchAvailable
+                    ? "Réponds clairement à la question suivante. Si des détails techniques, de la documentation ou des faits récents sont nécessaires, utilise d'abord webSearch. Sinon, réponds directement à partir de tes connaissances (ou utilise calculate/currentDateTime si besoin) :"
+                    : "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :")
             earlierLabel = "Questions précédentes de l'utilisateur :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             answerImperative = hasGrounding
                 ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
                 : "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
+                : (webSearchAvailable
+                    ? "Responde claramente a la siguiente pregunta. Si se requieren detalles técnicos, documentación o datos actualizados, utiliza primero webSearch. De lo contrario, responde directamente a partir de tus conocimientos (o utiliza calculate/currentDateTime si es necesario):"
+                    : "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:")
             earlierLabel = "Preguntas anteriores del usuario:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             answerImperative = hasGrounding
                 ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
                 : "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
+                : (webSearchAvailable
+                    ? "Answer the following question clearly. If technical details, documentation, or up-to-date facts are needed, use webSearch first. Otherwise, answer directly from your knowledge (or use calculate/currentDateTime if needed):"
+                    : "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:")
             earlierLabel = "Earlier user questions:"
             groundingHeader = "Context from the attached documents:"
         }

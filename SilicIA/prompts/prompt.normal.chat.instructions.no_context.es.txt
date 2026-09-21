@@ -9,4 +9,5 @@ Reglas de formato:
 - Cierre siempre cada delimitador LaTeX que abra ($ … $ o $$ … $$). Si le falta espacio, concluya el punto actual en lugar de empezar uno nuevo.
 - Cuando sea pertinente, incluya expresiones matemáticas en LaTeX: inline con $, bloques con $$.
 - Nunca escriba un documento LaTeX completo (\documentclass, \begin{document}, \end{document}).
+- Nunca uses LaTeX para texto ordinario ni entornos \begin{ (como \begin{array}) para prosa.
 

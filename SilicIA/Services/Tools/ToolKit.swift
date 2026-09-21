@@ -169,8 +169,10 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête."
             dateTimeLine = "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
             webSearchLine = "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
+            webSearchLine = "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les procédures techniques, les API, la documentation ou tout ce qui dépasse tes données d'entraînement — pas pour les calculs arithmétiques."
             footer = (hasCorpus || webSearchAvailable)
                 ? "Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Pour les définitions ou concepts généraux, réponds directement à partir de tes connaissances sans mentionner de contexte manquant."
+                ? "Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Pour les définitions basiques ou la culture générale courante, réponds directement à partir de tes connaissances sans mentionner de contexte manquant."
                 : "Réponds directement aux questions de définition, de concept et de culture générale à partir de tes connaissances sans mentionner de contexte manquant. N'utilise les outils que si un calcul ou la date/heure actuelle est nécessaire."
 
         case .spanish:
@@ -186,8 +188,10 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria."
             dateTimeLine = "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
             webSearchLine = "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
+            webSearchLine = "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, procedimientos técnicos, APIs, documentación o cualquier dato más allá de tus datos de entrenamiento — no para cálculos aritméticos."
             footer = (hasCorpus || webSearchAvailable)
                 ? "Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Para definiciones o conceptos generales, responde directamente a partir de tus conocimientos sin mencionar la falta de contexto."
+                ? "Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Para definiciones básicas o conceptos generales cotidianos, responde directamente a partir de tus conocimientos sin mencionar la falta de contexto."
                 : "Responde directamente a las preguntas de definición, conceptos y conocimiento general a partir de tus conocimientos sin mencionar la falta de contexto. Utiliza las herramientas solo cuando se necesite un cálculo o la fecha/hora actual."
 
         case .english:
@@ -203,8 +207,10 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head."
             dateTimeLine = "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
             webSearchLine = "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
+            webSearchLine = "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current or recent information, technical procedures, APIs, documentation, or facts beyond your training data — not for basic arithmetic."
             footer = (hasCorpus || webSearchAvailable)
                 ? "You may call these tools multiple times per turn if the first result was incomplete. Cite the source of passages only when an attached document or web search was used. For general definitions or explanations, answer directly from your knowledge without mentioning missing context."
+                ? "You may call these tools multiple times per turn if the first result was incomplete. Cite the source of passages only when an attached document or web search was used. For basic definitions or everyday general knowledge, answer directly from your knowledge without mentioning missing context."
                 : "Answer conceptual, definition, and general knowledge questions directly from your knowledge without mentioning missing context. Use tools only when a calculation or real-time date/time is required."
         }
 

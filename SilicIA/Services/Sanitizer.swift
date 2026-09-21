@@ -43,7 +43,7 @@ enum ModelOutputLaTeXSanitizer {
 
     /// Final sanitization of accumulated text
     static func finalizeSanitizedText(_ text: String) -> String {
-        var sanitized = text
+        var sanitized = unwrapProseArrayEnvironments(in: text)
         // Escape currency `$` BEFORE any other transformation so subsequent
         // passes don't accidentally treat `$1025.75` as the start of an
         // unterminated inline-math block (which silently swallows the rest
@@ -55,9 +55,10 @@ enum ModelOutputLaTeXSanitizer {
         return sanitized
     }
 
-    /// Removes full LaTeX document wrappers that the renderer does not expect.
+    /// Removes full LaTeX document wrappers and unwraps fake prose array environments.
     static func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleaned = unwrapProseArrayEnvironments(in: cleaned)
 
         if let beginRange = cleaned.range(of: "\\begin{document}"),
            let endRange = cleaned.range(of: "\\end{document}"),
@@ -72,6 +73,61 @@ enum ModelOutputLaTeXSanitizer {
         cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Unwraps fake LaTeX math arrays that models sometimes use to wrap ordinary prose or bullet points
+    /// (e.g. `\[\begin{array}{l} \text{...} \\ \text{...} \end{array}\]`).
+    static func unwrapProseArrayEnvironments(in text: String) -> String {
+        guard text.contains("\\begin{array}") else { return text }
+        let pattern = #"(?s)(?:\\\[\s*)?\\begin\{array\}\{[^}]*\}\s*(.*?)\s*(?:\\end\{array\}\s*(?:\\\])?|\\\])"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard !matches.isEmpty else { return text }
+
+        var output = text
+        for match in matches.reversed() {
+            guard let contentRange = Range(match.range(at: 1), in: output),
+                  let wholeRange = Range(match.range(at: 0), in: output) else { continue }
+            let body = String(output[contentRange])
+            guard body.contains(#"\text{"#) || body.contains(#"\bullet"#) else { continue }
+
+            let rows = body.components(separatedBy: "\\\\")
+            var unwrappedRows: [String] = []
+            for row in rows {
+                var cleanedRow = row.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanedRow.isEmpty else { continue }
+                let isBullet = cleanedRow.contains(#"\bullet"#)
+                cleanedRow = cleanedRow.replacingOccurrences(of: #"\bullet"#, with: "")
+
+                cleanedRow = unwrapTextCommands(in: cleanedRow)
+                cleanedRow = cleanedRow.replacingOccurrences(of: #"\}+\s*$"#, with: "", options: .regularExpression)
+                cleanedRow = cleanedRow.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !cleanedRow.isEmpty else { continue }
+
+                if isBullet {
+                    unwrappedRows.append("- \(cleanedRow)")
+                } else {
+                    unwrappedRows.append(cleanedRow)
+                }
+            }
+            let replacement = unwrappedRows.joined(separator: "\n\n")
+            output.replaceSubrange(wholeRange, with: replacement)
+        }
+        return output
+    }
+
+    private static func unwrapTextCommands(in text: String) -> String {
+        let pattern = #"\\text\{((?:[^{}]|\{[^{}]*\})*)\}"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        var result = text
+        while let match = regex.firstMatch(in: result, range: NSRange(result.startIndex..., in: result)) {
+            guard let contentRange = Range(match.range(at: 1), in: result),
+                  let wholeRange = Range(match.range(at: 0), in: result) else { break }
+            let content = String(result[contentRange])
+            result.replaceSubrange(wholeRange, with: content)
+        }
+        return result
     }
 
     /// Escapes `$` characters that the model used as a currency symbol next

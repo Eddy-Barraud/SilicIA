@@ -102,4 +102,15 @@ final class ToolCallingPromptTests: XCTestCase {
         XCTAssertTrue(promptFR.contains("Résultats d'outils déjà obtenus :"))
         XCTAssertTrue(promptFR.contains("N'appelle plus aucun outil."))
     }
+
+    func testUngroundedWebSearchPromptLocalization() {
+        let promptEN = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .english, webSearchAvailable: true)
+        XCTAssertTrue(promptEN.contains("use webSearch first"))
+
+        let promptFR = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .french, webSearchAvailable: true)
+        XCTAssertTrue(promptFR.contains("utilise d'abord webSearch"))
+
+        let promptES = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .spanish, webSearchAvailable: true)
+        XCTAssertTrue(promptES.contains("utiliza primero webSearch"))
+    }
 }

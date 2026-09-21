@@ -598,6 +598,7 @@ class AIService: ObservableObject {
             Sujet ou question : \(query)
 
             \(corpusHint)
+            Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext` ou `webSearch`).
             Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
             Si la question nécessite un calcul, utilise `calculate`.
 
@@ -606,12 +607,16 @@ class AIService: ObservableObject {
             2. \(keyPoints) points clés.
             Limite : \(maxOutputTokens) tokens.
             Format de sortie requis : LaTeX.
+            Format de sortie attendu : texte clair en Markdown.
+            Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
+            N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \\begin{ (comme \\begin{array}).
             """
         case .spanish:
             return """
             Tema o pregunta: \(query)
 
             \(corpusHint)
+            Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext` o `webSearch`).
             Si la pregunta es temporalmente relativa ('hoy', 'pronto', 'próximo'), llama a `currentDateTime` ANTES de cualquier otra tarea.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
@@ -620,12 +625,16 @@ class AIService: ObservableObject {
             2. \(keyPoints) puntos clave.
             Límite: \(maxOutputTokens) tokens.
             Formato de salida requerido: LaTeX.
+            Formato de salida esperado: texto claro en Markdown.
+            Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
+            Nunca uses LaTeX para texto ordinario ni utilices entornos \\begin{ (como \\begin{array}).
             """
         case .english:
             return """
             Topic or question: \(query)
 
             \(corpusHint)
+            If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext` or `webSearch`) first.
             If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
             If the question requires a calculation, use `calculate`.
 
@@ -634,6 +643,9 @@ class AIService: ObservableObject {
             2. \(keyPoints) key points.
             Limit: \(maxOutputTokens) tokens.
             Required output format: LaTeX.
+            Expected output format: clear Markdown prose.
+            When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
+            Never wrap non-mathematical text in LaTeX and never use \\begin{ environments (such as \\begin{array}).
             """
         }
     }

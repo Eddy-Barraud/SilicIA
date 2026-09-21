@@ -74,4 +74,27 @@ final class SanitizerTests: XCTestCase {
         XCTAssertTrue(finalized.contains(#"\$1025.75"#))
         XCTAssertFalse(finalized.contains(#"\$a_3"#))
     }
+
+    func testUnwrapProseArrayEnvironments() {
+        let input = """
+        \\[\\begin{array}{l}
+        \\text{SwiftData is an iOS framework introduced by Apple for seamless data management.} \\\\
+        \\text{The setup involves integrating SwiftData into an Xcode project.} \\\\
+        \\end{array}\\]
+
+        \\[\\begin{array}{l}
+        \\bullet \\text{Add SwiftData via Xcode: File > Add Packages > SwiftData repository.}} \\\\
+        \\bullet \\text{Create Core Data-like structures using @NSManaged and custom properties.}} \\\\
+        \\bullet \\text{Configure persistence with NSPersistentContainer and context management.}}
+        \\]
+        """
+        let sanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(input)
+        XCTAssertFalse(sanitized.contains("\\begin{array}"))
+        XCTAssertFalse(sanitized.contains("\\end{array}"))
+        XCTAssertFalse(sanitized.contains("\\text{"))
+        XCTAssertTrue(sanitized.contains("SwiftData is an iOS framework introduced by Apple"))
+        XCTAssertTrue(sanitized.contains("- Add SwiftData via Xcode: File > Add Packages > SwiftData repository."))
+        XCTAssertTrue(sanitized.contains("- Create Core Data-like structures using @NSManaged and custom properties."))
+        XCTAssertTrue(sanitized.contains("- Configure persistence with NSPersistentContainer and context management."))
+    }
 }

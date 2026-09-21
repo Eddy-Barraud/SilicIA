@@ -160,4 +160,31 @@ final class ModelAnsweringTests: XCTestCase {
             "Summary missing expected entity keywords: \(nonToolSummary.summary)"
         )
     }
+
+    func testSwiftDataSetupProducesMarkdownWithoutArrayLaTeX() async {
+        let aiService = AIService()
+        let summary = await aiService.summarize(
+            query: "How to set up SwiftData step by step",
+            results: [],
+            maxScrapingResults: 0,
+            maxScrapingChars: 0,
+            temperature: 0.3,
+            maxTokens: 300,
+            language: .english,
+            profile: .fast,
+            useToolCalling: true,
+            generateAnswer: true
+        )
+        let text = summary.summary
+        XCTAssertFalse(text.isEmpty, "Summary was empty")
+        XCTAssertFalse(text.contains(#"\begin{array}"#), "Summary wrapped output in \\begin{array}: \(text)")
+        XCTAssertFalse(text.contains(#"\end{array}"#), "Summary wrapped output in \\end{array}: \(text)")
+        XCTAssertFalse(text.contains(#"\text{"#), "Summary contained unwrapped \\text{ commands: \(text)")
+        XCTAssertFalse(text.contains(#"\bullet"#), "Summary contained raw LaTeX \\bullet: \(text)")
+        let lower = text.lowercased()
+        XCTAssertTrue(
+            lower.contains("swiftdata") || lower.contains("model"),
+            "Summary did not mention SwiftData: \(text)"
+        )
+    }
 }

@@ -8,3 +8,4 @@ Formatting rules:
 - Always close every LaTeX delimiter you open ($ … $ or $$ … $$). If running low on space, conclude the current point instead of starting a new formula.
 - When relevant, include mathematical expressions with LaTeX: inline with $, display blocks with $$.
 - Never output a full LaTeX document (\documentclass, \begin{document}, \end{document}).
+- Never wrap plain text in LaTeX or use \begin{ environments (such as \begin{array}) for prose.
