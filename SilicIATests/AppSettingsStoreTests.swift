@@ -37,32 +37,9 @@ final class AppSettingsStoreTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testSharedIsASingleInstance() {
     func testSingletonAndObservation() {
         XCTAssertTrue(AppSettingsStore.shared === AppSettingsStore.shared)
-    }
 
-    /// Mutating a field writes through to UserDefaults (AppSettings.load()
-    /// sees it) — no explicit save() call needed.
-    func testMutationPersistsAutomatically() {
-        AppSettingsStore.shared.settings.temperature = 0.77
-        XCTAssertEqual(AppSettings.load().temperature, 0.77, accuracy: 0.0001)
-
-        AppSettingsStore.shared.settings.language = .spanish
-        XCTAssertEqual(AppSettings.load().language, .spanish)
-    }
-
-    /// The in-memory value is updated immediately (read-after-write).
-    func testReadAfterWriteReflectsNewValue() {
-        AppSettingsStore.shared.settings.maxResponseTokens = 321
-        XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
-    }
-
-    /// A mutation is observable so SwiftUI readers re-render — this is what
-    /// propagates a language switch to the top tab bar. Verified via the
-    /// Observation framework's `withObservationTracking`, which fires its
-    /// `onChange` synchronously when a tracked property is mutated.
-    func testMutationIsObservable() {
         var fired = false
         withObservationTracking {
             _ = AppSettingsStore.shared.settings
@@ -76,8 +53,6 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertTrue(fired, "mutating settings should notify observation trackers")
     }
 
-    /// Several independent fields all persist together.
-    func testMultipleFieldUpdatesAllPersist() {
     func testMutationsPersistAutomatically() {
         // Individual field update & read-after-write
         AppSettingsStore.shared.settings.temperature = 0.77

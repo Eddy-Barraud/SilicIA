@@ -3,7 +3,6 @@ import XCTest
 
 final class ToolTranscriptRecorderTests: XCTestCase {
 
-    func testRenderedTranscriptKeepsRecentSuccessfulEntriesWithinBudget() async {
     func testRenderedTranscriptBudgetingAndEmptyState() async {
         let emptyRecorder = ToolTranscriptRecorder()
         let emptyRendered = await emptyRecorder.renderedTranscript(characterBudget: 200)
@@ -20,11 +19,5 @@ final class ToolTranscriptRecorderTests: XCTestCase {
         XCTAssertFalse(rendered.contains("searchContext"),
                        "Oldest entry should be dropped first when only two recent entries fit")
         XCTAssertLessThanOrEqual(rendered.count, 220)
-    }
-
-    func testRenderedTranscriptIsEmptyWithoutEntries() async {
-        let recorder = ToolTranscriptRecorder()
-        let rendered = await recorder.renderedTranscript(characterBudget: 200)
-        XCTAssertEqual(rendered, "")
     }
 }

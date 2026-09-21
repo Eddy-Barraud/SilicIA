@@ -642,7 +642,7 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
+                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
                         } else {
                             Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
                                 .foregroundColor(.secondary)
@@ -749,7 +749,7 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            ProgressiveLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
+                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
                         }
                     }
                     .padding()

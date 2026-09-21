@@ -18,45 +18,9 @@ import WebKit
 @MainActor
 /// Fetches and extracts readable text content from web pages.
 class WebScrapingService: ObservableObject {
-    /// App-specific User-Agent identifying SilicIA. Update version/contact as needed.
-    /// Format recommendation: AppName/Version (Platform; Device) Engine; +ContactURL
-    nonisolated private static let userAgent: String = {
-        // You can optionally make these dynamic using Bundle info and UIDevice.
-        let appName = "SilicIA"
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
-        #if os(iOS)
-        let platform = "iOS"
-        #elseif os(macOS)
-        let platform = "macOS"
-        #elseif os(watchOS)
-        let platform = "watchOS"
-        #elseif os(tvOS)
-        let platform = "tvOS"
-        #elseif os(visionOS)
-        let platform = "visionOS"
-        #else
-        let platform = "AppleOS"
-        #endif
-        let device = {
-            #if os(iOS)
-            return UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-            #elseif os(macOS)
-            return "Mac"
-            #elseif os(watchOS)
-            return "AppleWatch"
-            #elseif os(tvOS)
-            return "AppleTV"
-            #elseif os(visionOS)
-            return "visionOS"
-            #else
-            return "Device"
-            #endif
-        }()
-        // Include WebKit engine hint and a contact URL per good scraping etiquette
-        let engine = "AppleWebKit/605.1.15"
-        let contact = "+https://github.com/Eddy-Barraud/SilicIA/discussions"
-        return "\(appName)/\(appVersion) (\(platform); \(device)) \(engine); \(contact)"
-    }()
+    nonisolated private static var userAgent: String {
+        NetworkConstants.defaultUserAgent
+    }
 
     @Published var isScrapingContent = false
 
@@ -142,6 +106,7 @@ class WebScrapingService: ObservableObject {
         "ndash": "\u{2013}",
         "hellip": "\u{2026}"
     ]
+
 
     /// Creates a scraping session configured for resilient low-overhead requests.
     init() {
@@ -632,6 +597,7 @@ class WebScrapingService: ObservableObject {
     /// Single-pass entity decoder: walks `&...;` references in order and
     /// substitutes named, decimal-numeric (`&#nnn;`), and hex-numeric
     /// (`&#xNN;`) entities. Unknown references pass through unchanged.
+    /// Single-pass entity decoder: delegates to HTMLSanitizer.
     nonisolated private static func decodeHTMLEntities(_ text: String) -> String {
         guard let regex = htmlEntityRegex else { return text }
         let nsRange = NSRange(text.startIndex..., in: text)
@@ -662,6 +628,7 @@ class WebScrapingService: ObservableObject {
             result.append(contentsOf: text[cursor...])
         }
         return result
+        HTMLSanitizer.decodeEntities(text)
     }
 
     /// Decodes a single entity body (the part between `&` and `;`).

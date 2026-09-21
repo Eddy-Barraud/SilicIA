@@ -14,18 +14,11 @@ final class RAGChunkerTests: XCTestCase {
 
     private let chunker = RAGChunker()
 
-    func testEmptyInputReturnsEmpty() async {
-        let chunks = await chunker.chunk(text: "", source: "test", maxChunkTokens: 100, overlapTokens: 10)
-        XCTAssertTrue(chunks.isEmpty)
-    }
     func testBasicChunkingBoundaries() async {
         // Empty & whitespace inputs return empty chunks
         let empty = await chunker.chunk(text: "", source: "test", maxChunkTokens: 100, overlapTokens: 10)
         XCTAssertTrue(empty.isEmpty)
 
-    func testWhitespaceOnlyReturnsEmpty() async {
-        let chunks = await chunker.chunk(text: "   \n\t  ", source: "test", maxChunkTokens: 100, overlapTokens: 10)
-        XCTAssertTrue(chunks.isEmpty)
         let whitespace = await chunker.chunk(text: "   \n\t  ", source: "test", maxChunkTokens: 100, overlapTokens: 10)
         XCTAssertTrue(whitespace.isEmpty)
 
@@ -36,28 +29,19 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertEqual(short.first?.text, text)
     }
 
-    func testVeryLongInputProducesMultipleChunks() async {
     func testLongInputProducesBoundedChunks() async {
         let word = "word "
         let longText = String(repeating: word, count: 1000)
         let maxChunkTokens = 50
         let chunks = await chunker.chunk(text: longText, source: "test", maxChunkTokens: maxChunkTokens, overlapTokens: 0)
         XCTAssertGreaterThan(chunks.count, 1)
-    }
 
-    func testEachChunkRespectMaxSize() async {
-        let longText = String(repeating: "x", count: 3000)
-        let maxChunkTokens = 100
-        let chunks = await chunker.chunk(text: longText, source: "test", maxChunkTokens: maxChunkTokens, overlapTokens: 0)
         let maxChunkChars = max(200, maxChunkTokens * 3)
         for chunk in chunks {
-            XCTAssertLessThanOrEqual(chunk.text.count, maxChunkChars,
-                "Chunk size \(chunk.text.count) exceeds max \(maxChunkChars)")
             XCTAssertLessThanOrEqual(chunk.text.count, maxChunkChars)
         }
     }
 
-    func testNextChunkStartsOnWholeSentenceBoundary() async {
     func testSentenceBoundaryHandling() async {
         let text = """
         Sentence one uses enough extra words to consume part of the chunk budget without filling it completely.
@@ -66,27 +50,11 @@ final class RAGChunkerTests: XCTestCase {
         """
         let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 18, overlapTokens: 20)
         guard chunks.count >= 2 else {
-            XCTFail("Expected at least 2 chunks for overlap test")
-            return
             return XCTFail("Expected at least 2 chunks for overlap test")
         }
-        XCTAssertTrue(
-            chunks[0].text.hasSuffix("."),
-            "Expected first chunk to end on a complete sentence, got: \(chunks[0].text)"
-        )
-        XCTAssertTrue(
-            chunks[1].text.hasPrefix("Sentence two carries the chargedrepulsiveparameters keyword"),
-            "Expected next chunk to restart on the whole sentence, got: \(chunks[1].text)"
-        )
-    }
         XCTAssertTrue(chunks[0].text.hasSuffix("."))
         XCTAssertTrue(chunks[1].text.hasPrefix("Sentence two carries the chargedrepulsiveparameters keyword"))
 
-    func testShortInputProducesSingleChunk() async {
-        let text = "Hello world"
-        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 200, overlapTokens: 10)
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertEqual(chunks[0].text, text)
         // Avoid mid-word heads
         let filler = String(repeating: "aa ", count: 53)
         let midWordText = "\(filler)chargedrepulsiveparameters tailword.\nNext sentence adds enough trailing text."
@@ -104,22 +72,6 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertEqual(chunks[0].source, "mysource")
         XCTAssertEqual(chunks[0].url, url)
         XCTAssertEqual(chunks[0].pdfPage, 3)
-    }
-
-    func testSentenceChunkingAvoidsMidWordHeads() async {
-        let filler = String(repeating: "aa ", count: 53)
-        let text = """
-        \(filler)chargedrepulsiveparameters tailword.
-        Next sentence adds enough trailing text to force a second chunk.
-        """
-
-        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 70, overlapTokens: 10)
-
-        XCTAssertGreaterThanOrEqual(chunks.count, 2)
-        XCTAssertTrue(
-            !chunks.dropFirst().contains(where: { $0.text.hasPrefix("chargedrepulsiveparameters") || $0.text.hasPrefix("epulsiveparameters") }),
-            "A later chunk restarted inside the first sentence: \(chunks.map(\.text))"
-        )
     }
 
     func testFixturePDFDoesNotRestartMidWordOrTableCell() async {
@@ -144,14 +96,6 @@ final class RAGChunkerTests: XCTestCase {
         )
 
         XCTAssertGreaterThanOrEqual(chunks.count, 2)
-        XCTAssertTrue(
-            chunks.contains { $0.text.contains("|") },
-            "Expected chunked fixture output to retain at least one Markdown table block"
-        )
-        XCTAssertFalse(
-            chunks.dropFirst().contains { $0.text.hasPrefix("epulsion parameters") || $0.text.hasPrefix("bAE/RT |") },
-            "A later chunk restarted mid-word or mid-table-cell: \(chunks.map(\.text))"
-        )
         XCTAssertTrue(chunks.contains { $0.text.contains("|") })
         XCTAssertFalse(chunks.dropFirst().contains {
             $0.text.hasPrefix("epulsion parameters") || $0.text.hasPrefix("bAE/RT |")

@@ -45,7 +45,6 @@ final class ViewRenderingTests: XCTestCase {
         XCTAssertNotNil(rootView, file: file, line: line)
     }
 
-    func testContentViewRenders() throws {
     func testMainViewsRenderWithoutCrashing() throws {
         let container = try makeContainer()
         assertRenders(
@@ -57,18 +56,10 @@ final class ViewRenderingTests: XCTestCase {
             )
             .modelContainer(container)
         )
-    }
-
-    func testSearchViewRenders() throws {
-        let container = try makeContainer()
         assertRenders(
             SearchView(chatService: ChatService())
                 .modelContainer(container)
         )
-    }
-
-    func testChatViewRenders() throws {
-        let container = try makeContainer()
         assertRenders(
             ChatView(
                 sharedURLs: .constant([]),
@@ -78,10 +69,6 @@ final class ViewRenderingTests: XCTestCase {
             )
             .modelContainer(container)
         )
-    }
-
-    func testConversationsListViewRenders() throws {
-        let container = try makeContainer()
         assertRenders(
             ConversationsListView(
                 onLoadConversation: { _ in },
@@ -89,16 +76,9 @@ final class ViewRenderingTests: XCTestCase {
             )
             .modelContainer(container)
         )
-    }
-
-    /// The inline notice shown when Apple Intelligence is unavailable.
-    func testModelAvailabilityNoticeRenders() {
         assertRenders(ModelAvailabilityNotice(reason: .notEnabled, language: .english))
     }
 
-    /// The progressive LaTeX view renders in both the mid-stream and the
-    /// finished states (with inline + display math present).
-    func testStreamingLaTeXTextRendersWhileStreaming() {
     func testStreamingAndLocalizedViewsRender() throws {
         // Progressive LaTeX rendering in mid-stream and complete states
         assertRenders(
@@ -107,20 +87,13 @@ final class ViewRenderingTests: XCTestCase {
                 isStreaming: true
             )
         )
-    }
-
-    func testStreamingLaTeXTextRendersWhenComplete() {
         assertRenders(
             StreamingLaTeXText(
                 text: "The solution is $x = 1$. The total is $5.00.",
                 isStreaming: false
             )
         )
-    }
 
-    /// Each tab renders in every supported language (drives the localized
-    /// tab-bar labels through the real localization path).
-    func testContentViewRendersInAllLanguages() throws {
         // Localized tabs across all supported languages
         let container = try makeContainer()
         let original = AppSettingsStore.shared.settings

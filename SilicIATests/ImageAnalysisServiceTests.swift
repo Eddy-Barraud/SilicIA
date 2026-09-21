@@ -9,8 +9,6 @@ import AppKit
 
 final class ImageAnalysisServiceTests: XCTestCase {
 
-    func testTwoColumnArticleBlockReadsLeftColumnThenRightColumn() {
-        let observations: [LayoutObservation] = [
     func testLayoutReconstructionTwoColumnAndTabular() {
         // Two-column article: read left column, then right column
         let columnObservations: [LayoutObservation] = [
@@ -32,11 +30,8 @@ final class ImageAnalysisServiceTests: XCTestCase {
             )
         ]
 
-        let text = ImageAnalysisService.reconstructLayout(from: observations)
-
         let columnText = ImageAnalysisService.reconstructLayout(from: columnObservations)
         XCTAssertTrue(
-            text.contains(
             columnText.contains(
                 """
                 Left column line one contains enough prose to look like a journal sentence. Left column line two continues the left-hand narrative before the right side starts.
@@ -44,13 +39,9 @@ final class ImageAnalysisServiceTests: XCTestCase {
                 Right column line one also contains enough prose to be treated as article text. Right column line two should only appear after the full left column has been emitted.
                 """
             ),
-            "Two-column article block was not rendered column-major:\n\(text)"
             "Two-column article block was not rendered column-major:\n\(columnText)"
         )
-    }
 
-    func testTabularRowsStayRowMajor() {
-        let observations: [LayoutObservation] = [
         // Tabular rows: stay row-major
         let tableObservations: [LayoutObservation] = [
             LayoutObservation(text: "Description", boundingBox: CGRect(x: 0.08, y: 0.80, width: 0.22, height: 0.03)),
@@ -61,12 +52,8 @@ final class ImageAnalysisServiceTests: XCTestCase {
             LayoutObservation(text: "154,17", boundingBox: CGRect(x: 0.62, y: 0.74, width: 0.10, height: 0.03))
         ]
 
-        let text = ImageAnalysisService.reconstructLayout(from: observations)
-
         let tableText = ImageAnalysisService.reconstructLayout(from: tableObservations)
         XCTAssertTrue(
-            text.contains("Description    Qty    Price\nAmortisseurs    2    154,17"),
-            "Table-like rows should stay row-major:\n\(text)"
             tableText.contains("Description    Qty    Price\nAmortisseurs    2    154,17"),
             "Table-like rows should stay row-major:\n\(tableText)"
         )

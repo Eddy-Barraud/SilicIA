@@ -17,21 +17,13 @@ final class ToolKitBudgetTests: XCTestCase {
     /// At the default (fast) profile the shared budget equals the webSearch
     /// ceiling, so webSearch uses the full shared budget — the ceiling only
     /// bites on richer profiles (see below).
-    func testWebSearchCapEqualsSharedBudgetAtDefault() {
     @MainActor
     func testWebSearchBudgetCeilingAtDefaultAndRicherProfiles() {
         // Default profile: shared budget equals cap (1000t)
         let shared = TokenBudgeting.toolOutputTokenBudget(forResponseTokens: 500)
         XCTAssertEqual(shared, TokenBudgeting.webSearchReplyTokenCap,
                        "At the default profile the cap should match the shared budget (1000t)")
-    }
 
-    /// On a richer profile the shared budget exceeds the ceiling, so
-    /// webSearch is held to the ceiling while the other tools get the full
-    /// shared budget.
-    @MainActor
-    func testWebSearchCapBitesOnRicherProfile() {
-        let (tools, sharedBudget, _) = ToolKit.assemble(
         let (defaultTools, defaultSharedBudget, _) = ToolKit.assemble(
             config: makeConfig(webSearchAvailable: true),
             responseTokens: 500
@@ -48,17 +40,12 @@ final class ToolKitBudgetTests: XCTestCase {
             config: makeConfig(webSearchAvailable: true),
             responseTokens: 600
         )
-        XCTAssertGreaterThan(sharedBudget, TokenBudgeting.webSearchReplyTokenCap,
         XCTAssertGreaterThan(richSharedBudget, TokenBudgeting.webSearchReplyTokenCap,
                              "Need a profile where the shared budget exceeds the cap for this test to be meaningful")
-        let webTool = tools.compactMap { $0 as? WebSearchTool }.first
-        let ragTool = tools.compactMap { $0 as? RAGSearchTool }.first
-        XCTAssertEqual(webTool?.tokenBudget, TokenBudgeting.webSearchReplyTokenCap,
         let richWebTool = richTools.compactMap { $0 as? WebSearchTool }.first
         let richRagTool = richTools.compactMap { $0 as? RAGSearchTool }.first
         XCTAssertEqual(richWebTool?.tokenBudget, TokenBudgeting.webSearchReplyTokenCap,
                        "webSearch should be held to the ceiling")
-        XCTAssertEqual(ragTool?.tokenBudget, sharedBudget,
         XCTAssertEqual(richRagTool?.tokenBudget, richSharedBudget,
                        "searchContext should keep the full shared budget")
     }
@@ -77,29 +64,6 @@ final class ToolKitBudgetTests: XCTestCase {
             useDuckDuckGo: true,
             useWikipedia: true
         )
-    }
-
-    /// webSearch is assembled with `min(sharedBudget, webSearchReplyTokenCap)`,
-    /// while searchContext keeps the full shared budget.
-    @MainActor
-    func testWebSearchToolGetsCappedBudgetOthersDoNot() {
-        let responseTokens = 500
-        let (tools, sharedBudget, _) = ToolKit.assemble(
-            config: makeConfig(webSearchAvailable: true),
-            responseTokens: responseTokens
-        )
-
-        let webTool = tools.compactMap { $0 as? WebSearchTool }.first
-        let ragTool = tools.compactMap { $0 as? RAGSearchTool }.first
-
-        XCTAssertNotNil(webTool)
-        XCTAssertNotNil(ragTool)
-
-        let expectedWebBudget = min(sharedBudget, TokenBudgeting.webSearchReplyTokenCap)
-        XCTAssertEqual(webTool?.tokenBudget, expectedWebBudget,
-                       "webSearch should be capped at the dedicated ceiling")
-        XCTAssertEqual(ragTool?.tokenBudget, sharedBudget,
-                       "searchContext should keep the full shared budget")
     }
 
     /// When web search is disabled the kit omits the webSearch tool entirely.

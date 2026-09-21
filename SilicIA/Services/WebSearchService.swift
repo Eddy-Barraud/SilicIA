@@ -22,66 +22,9 @@ class WebSearchService: ObservableObject {
     /// Default Wikipedia per-query cap when callers do not override.
     nonisolated static let defaultWikipediaLimit = 2
 
-    // MARK: - Cached HTML regexes
-
-    /// Matches any HTML tag — used by `htmlToPlainText` to strip markup.
-    nonisolated private static let htmlTagRegex: NSRegularExpression? = {
-        try? NSRegularExpression(pattern: "<[^>]+>", options: [])
-    }()
-
-    /// Matches numeric HTML entities (`&#nnn;`) — used by `htmlToPlainText`.
-    nonisolated private static let numericEntityRegex: NSRegularExpression? = {
-        try? NSRegularExpression(pattern: "&#(\\d+);", options: [])
-    }()
-
-    /// Named HTML entities replaced as plain ASCII before numeric ones are decoded.
-    nonisolated private static let namedHTMLEntities: [(String, String)] = [
-        ("&amp;", "&"),
-        ("&lt;", "<"),
-        ("&gt;", ">"),
-        ("&quot;", "\""),
-        ("&#x27;", "'"),
-        ("&#39;", "'"),
-        ("&apos;", "'"),
-        ("&nbsp;", " "),
-        ("&mdash;", "-"),
-        ("&ndash;", "-"),
-        ("&hellip;", "..."),
-        ("&laquo;", "\""),
-        ("&raquo;", "\"")
-    ]
-
     /// Strip HTML tags and decode common HTML entities from a raw HTML string.
     nonisolated private static func htmlToPlainText(_ html: String) -> String {
-        var result = html
-        if let regex = htmlTagRegex {
-            result = regex.stringByReplacingMatches(
-                in: result,
-                range: NSRange(result.startIndex..., in: result),
-                withTemplate: ""
-            )
-        }
-
-        for (entity, char) in namedHTMLEntities {
-            result = result.replacingOccurrences(of: entity, with: char)
-        }
-
-        if let numericRegex = numericEntityRegex {
-            let matches = numericRegex.matches(
-                in: result,
-                range: NSRange(result.startIndex..., in: result)
-            ).reversed()
-            for match in matches {
-                if let range = Range(match.range(at: 1), in: result),
-                   let codePoint = Int(result[range]),
-                   let scalar = Unicode.Scalar(codePoint),
-                   let fullRange = Range(match.range, in: result) {
-                    result = result.replacingCharacters(in: fullRange, with: String(scalar))
-                }
-            }
-        }
-
-        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+        HTMLSanitizer.htmlToPlainText(html).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Extract the inner HTML for the first element matching a class name and tag.
@@ -102,41 +45,9 @@ class WebSearchService: ObservableObject {
         return String(html[contentRange])
     }
 
-    private static let userAgent: String = {
-        let appName = "SilicIA"
-        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
-        #if os(iOS)
-        let platform = "iOS"
-        #elseif os(macOS)
-        let platform = "macOS"
-        #elseif os(watchOS)
-        let platform = "watchOS"
-        #elseif os(tvOS)
-        let platform = "tvOS"
-        #elseif os(visionOS)
-        let platform = "visionOS"
-        #else
-        let platform = "AppleOS"
-        #endif
-        let device = {
-            #if os(iOS)
-            return UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-            #elseif os(macOS)
-            return "Mac"
-            #elseif os(watchOS)
-            return "AppleWatch"
-            #elseif os(tvOS)
-            return "AppleTV"
-            #elseif os(visionOS)
-            return "visionOS"
-            #else
-            return "Device"
-            #endif
-        }()
-        let engine = "AppleWebKit/605.1.15"
-        let contact = "+https://github.com/Eddy-Barraud/SilicIA/discussions"
-        return "\(appName)/\(appVersion) (\(platform); \(device)) \(engine); \(contact)"
-    }()
+    nonisolated private static var userAgent: String {
+        NetworkConstants.defaultUserAgent
+    }
 
     private static let wikipediaPagePathAllowed: CharacterSet = {
         var allowed = CharacterSet.urlPathAllowed

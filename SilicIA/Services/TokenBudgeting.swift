@@ -35,26 +35,13 @@ nonisolated enum TokenBudgeting {
     ///     prose — which the framework injects into the model's transcript
     ///     (~400 tokens for the four-tool kit).
     /// Used to shrink the pre-baked grounding context (see
-    /// `maxToolGroundingCharacters`) so prompt + tool schemas + output still
+    /// `maxHybridToolGroundingCharacters`) so prompt + tool schemas + output still
     /// fit the 4096-token window when we ground a tool-calling turn.
     static let toolCallingOverheadTokens = 600
 
-    /// Character budget for the pre-baked grounding context injected into a
-    /// tool-calling prompt. Mirrors `maxContextCharacters` but reserves the
-    /// additional `toolCallingOverheadTokens` so the grounding text plus the
-    /// tool schemas plus the model's response coexist within the window.
-    static func maxToolGroundingCharacters(maxOutputTokens: Int) -> Int {
-        maxContextCharacters(
-            maxOutputTokens: maxOutputTokens,
-            contextUtilizationFactor: 1.0,
-            instructionTokens: instructionTokens + toolCallingOverheadTokens
-        )
-    }
-
     /// Character budget for HYBRID tool-calling chat prompts that both
     /// pre-bake some grounding context and still need room for at least one
-    /// subsequent tool reply in the same turn. Unlike
-    /// `maxToolGroundingCharacters`, this reserves a concrete tool-reply
+    /// subsequent tool reply in the same turn. This reserves a concrete tool-reply
     /// budget as well as the schema/appendix overhead.
     static func maxHybridToolGroundingCharacters(
         maxOutputTokens: Int,
@@ -254,9 +241,6 @@ nonisolated enum TokenBudgeting {
         max(0, Int(ceil(Double(max(characters, 0)) / Double(avgCharsPerToken))))
     }
 
-    static func estimatedContextCharacters(forWords words: Int) -> Int {
-        max(words, 0) * avgCharsPerWord
-    }
 
     static func truncateToApproxWordCount(_ text: String, maxWords: Int) -> String {
         guard maxWords > 0 else { return "" }

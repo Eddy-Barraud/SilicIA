@@ -3,7 +3,6 @@ import XCTest
 
 final class ChatServicePDFChunkPolicyTests: XCTestCase {
 
-    func testShortPDFPageStaysWholeWhenItFitsContextWindow() async {
     func testPDFPageChunkPolicy() async {
         // Fits within context budget: stays whole
         let pageText = """
@@ -11,7 +10,6 @@ final class ChatServicePDFChunkPolicyTests: XCTestCase {
         In the absence of alternative information for initializing the optimization of ion-water interactions, Nieto-Draghi et al.43 proposed that partial osmotic pressures could be used as initial values.
         """
 
-        let chunks = await ChatService.makePDFPageChunks(
         let singleChunks = await ChatService.makePDFPageChunks(
             text: pageText,
             source: "PDF: fixture page 1",
@@ -21,15 +19,6 @@ final class ChatServicePDFChunkPolicyTests: XCTestCase {
         XCTAssertEqual(singleChunks.count, 1, "A single page that fits the context budget should stay whole")
         XCTAssertEqual(singleChunks.first?.text, pageText.trimmingCharacters(in: .whitespacesAndNewlines))
 
-        XCTAssertEqual(chunks.count, 1, "A single page that fits the context budget should stay whole")
-        XCTAssertEqual(chunks.first?.text, pageText.trimmingCharacters(in: .whitespacesAndNewlines))
-    }
-
-    func testOversizedPDFPageFallsBackToChunking() async {
-        let pageText = String(repeating: "Long sentence content that keeps filling the page without ending too quickly. ", count: 300)
-
-        let chunks = await ChatService.makePDFPageChunks(
-            text: pageText,
         // Oversized page: falls back to chunking
         let oversizedText = String(repeating: "Long sentence content that keeps filling the page without ending too quickly. ", count: 300)
         let multiChunks = await ChatService.makePDFPageChunks(
@@ -38,9 +27,6 @@ final class ChatServicePDFChunkPolicyTests: XCTestCase {
             pdfPage: 1,
             maxContextTokens: 300
         )
-
-        XCTAssertGreaterThan(chunks.count, 1, "Oversized pages should still be chunked")
-        XCTAssertTrue(chunks.allSatisfy { $0.pdfPage == 1 })
         XCTAssertGreaterThan(multiChunks.count, 1, "Oversized pages should still be chunked")
         XCTAssertTrue(multiChunks.allSatisfy { $0.pdfPage == 1 })
     }

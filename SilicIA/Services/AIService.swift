@@ -77,20 +77,6 @@ class AIService: ObservableObject {
     private static let fastSummaryScrapingCharacterCap = 4500
 
     // MARK: - Cached LaTeX-sanitizer regexes
-    //
-    // The summary post-processor strips full-document LaTeX wrappers that the
-    // renderer doesn't expect. The two patterns below are run on every summary
-    // and were previously recompiled per call; cache them here.
-
-    private static let documentClassRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"(?m)^\s*\\documentclass(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-        options: []
-    )
-    private static let usePackageRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"(?m)^\s*\\usepackage(?:\[[^\]]*\])?\{[^}]*\}\s*$"#,
-        options: []
-    )
-
     private func debugLog(_ message: String) {
         #if DEBUG
         print("[AIService] \(message)")
@@ -134,7 +120,7 @@ class AIService: ObservableObject {
                 var latestPartial = ""
                 let responseStream = session.streamResponse(to: prompt, options: options)
                 for try await snapshot in responseStream {
-                    let partial = sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
+                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !partial.isEmpty, partial != latestPartial else { continue }
                     latestPartial = partial
@@ -152,7 +138,7 @@ class AIService: ObservableObject {
 
             if content.isEmpty { return "" }
 
-            return sanitizeLaTeXDocumentWrappers(content)
+            return ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(content)
         } catch {
             // FoundationModels failed (likely Apple Intelligence unavailable —
             // the app's launch check surfaces this to the user). Return empty
@@ -243,7 +229,7 @@ class AIService: ObservableObject {
             let response = try await session.respond(to: prompt, options: options)
             let text = String(describing: response.content)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return sanitizeLaTeXDocumentWrappers(text)
+            return ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
         } catch {
             return ""
         }
@@ -800,35 +786,6 @@ class AIService: ObservableObject {
         return false
     }
 
-    /// Removes full LaTeX document wrappers that the renderer does not expect.
-    private func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        if let beginRange = cleaned.range(of: "\\begin{document}"),
-           let endRange = cleaned.range(of: "\\end{document}"),
-           beginRange.upperBound <= endRange.lowerBound {
-            cleaned = String(cleaned[beginRange.upperBound..<endRange.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        // Use the cached regexes instead of recompiling on every call.
-        cleaned = Self.applyRegex(Self.documentClassRegex, to: cleaned)
-        cleaned = Self.applyRegex(Self.usePackageRegex, to: cleaned)
-        // The remaining two are plain string replaces — no regex needed.
-        cleaned = cleaned.replacingOccurrences(of: "\\begin{document}", with: "")
-        cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
-
-        return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Applies a cached regex over the full string, replacing each match with the empty string.
-    /// No-op when the regex failed to compile.
-    private static func applyRegex(_ regex: NSRegularExpression?, to text: String) -> String {
-        guard let regex else { return text }
-        let range = NSRange(text.startIndex..., in: text)
-        return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: "")
-    }
-
     /// Generates the final summary through Foundation Models with context budgeting.
     /// Generates a search summary with resilience around the on-device
     /// model's transient failures — notably the intermittent
@@ -1136,7 +1093,7 @@ class AIService: ObservableObject {
                 var latestPartial = ""
                 let responseStream = session.streamResponse(to: prompt, options: options)
                 for try await snapshot in responseStream {
-                    let partial = sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
+                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !partial.isEmpty, partial != latestPartial else { continue }
                     latestPartial = partial
