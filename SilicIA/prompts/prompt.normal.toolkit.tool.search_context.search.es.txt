@@ -1,0 +1,2 @@
+- `searchContext(query)`: busca en el corpus de páginas web ya recuperadas y devuelve los pasajes relevantes con su fuente.
+

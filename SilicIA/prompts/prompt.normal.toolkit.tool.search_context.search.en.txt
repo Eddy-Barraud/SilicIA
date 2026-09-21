@@ -1,0 +1,2 @@
+- `searchContext(query)`: search the already-fetched web corpus and return relevant passages with their source.
+

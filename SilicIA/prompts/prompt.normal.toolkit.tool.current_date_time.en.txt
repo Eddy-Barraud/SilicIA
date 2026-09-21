@@ -1,0 +1,2 @@
+- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock.
+

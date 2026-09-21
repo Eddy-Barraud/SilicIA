@@ -39,10 +39,15 @@ struct PromptLoader {
         return nil
     }
 
+    private final class BundleToken {}
+
     private static func loadPrompt(named name: String) -> String? {
+        let codeBundle = Bundle(for: BundleToken.self)
         let candidateURLs: [URL?] = [
             Bundle.main.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
-            Bundle.main.url(forResource: name, withExtension: "txt")
+            Bundle.main.url(forResource: name, withExtension: "txt"),
+            codeBundle.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
+            codeBundle.url(forResource: name, withExtension: "txt")
         ]
 
         for url in candidateURLs.compactMap({ $0 }) {

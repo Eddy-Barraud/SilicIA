@@ -571,27 +571,94 @@ class AIService: ObservableObject {
         maxOutputTokens: Int
     ) -> String {
         let keyPoints = isDeepProfile ? (language == .french ? "4 à 6" : "4 to 6") : (language == .french ? "1 à 3" : "1 to 3")
-        let corpusHint: String
-        if corpusChunkCount > 0 {
-            switch language {
-            case .french: corpusHint = "\(corpusChunkCount) extraits de pages web ont déjà été récupérés pour cette requête : interroge-les via `searchContext` AVANT de tomber sur le web ouvert."
-            case .spanish: corpusHint = "\(corpusChunkCount) fragmentos de páginas web ya se han recuperado para esta consulta: consúltalos con `searchContext` ANTES de recurrir a la web abierta."
-            case .english: corpusHint = "\(corpusChunkCount) web-page chunks have already been fetched for this query — query them via `searchContext` BEFORE falling back to the open web."
-            }
-        } else {
-            switch language {
-            case .french: corpusHint = webSearchAvailable
-                ? "Aucun extrait n'a été pré-récupéré. Utilise `webSearch` pour obtenir l'information."
-                : "Aucun extrait n'a été pré-récupéré et la recherche web est désactivée. Réponds depuis tes connaissances."
-            case .spanish: corpusHint = webSearchAvailable
-                ? "No hay fragmentos pre-recuperados. Usa `webSearch` para obtener la información."
-                : "No hay fragmentos pre-recuperados y la búsqueda web está desactivada. Responde con tus conocimientos."
-            case .english: corpusHint = webSearchAvailable
-                ? "No chunks were pre-fetched. Use `webSearch` to get the information."
-                : "No chunks were pre-fetched and web search is disabled. Answer from your own knowledge."
-            }
+        let corpusHint = loadSearchCorpusHint(
+            chunkCount: corpusChunkCount,
+            webSearchAvailable: webSearchAvailable,
+            language: language
+        )
+
+        if let loaded = PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "search",
+            variant: "tool_calling",
+            language: language,
+            replacements: [
+                "query": query,
+                "corpusHint": corpusHint,
+                "keyPoints": keyPoints,
+                "maxOutputTokens": "\(maxOutputTokens)"
+            ]
+        ) {
+            return loaded
         }
 
+        return fallbackToolCallingSearchPrompt(
+            query: query,
+            corpusHint: corpusHint,
+            keyPoints: keyPoints,
+            maxOutputTokens: maxOutputTokens,
+            language: language
+        )
+    }
+
+    private static func loadSearchCorpusHint(
+        chunkCount: Int,
+        webSearchAvailable: Bool,
+        language: ModelLanguage
+    ) -> String {
+        if chunkCount > 0 {
+            if let loaded = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "corpus_hint.cached",
+                language: language,
+                replacements: ["count": "\(chunkCount)"]
+            ) {
+                return loaded
+            }
+            switch language {
+            case .french: return "\(chunkCount) extraits de pages web ont déjà été récupérés pour cette requête : interroge-les via `searchContext` AVANT de tomber sur le web ouvert."
+            case .spanish: return "\(chunkCount) fragmentos de páginas web ya se han recuperado para esta consulta: consúltalos con `searchContext` ANTES de recurrir a la web abierta."
+            case .english: return "\(chunkCount) web-page chunks have already been fetched for this query — query them via `searchContext` BEFORE falling back to the open web."
+            }
+        } else if webSearchAvailable {
+            if let loaded = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "corpus_hint.web",
+                language: language
+            ) {
+                return loaded
+            }
+            switch language {
+            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise `webSearch` pour obtenir l'information."
+            case .spanish: return "No hay fragmentos pre-recuperados. Usa `webSearch` para obtener la información."
+            case .english: return "No chunks were pre-fetched. Use `webSearch` to get the information."
+            }
+        } else {
+            if let loaded = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "corpus_hint.direct",
+                language: language
+            ) {
+                return loaded
+            }
+            switch language {
+            case .french: return "Aucun extrait n'a été pré-récupéré et la recherche web est désactivée. Réponds depuis tes connaissances."
+            case .spanish: return "No hay fragmentos pre-recuperados y la búsqueda web está desactivada. Responde con tus conocimientos."
+            case .english: return "No chunks were pre-fetched and web search is disabled. Answer from your own knowledge."
+            }
+        }
+    }
+
+    private static func fallbackToolCallingSearchPrompt(
+        query: String,
+        corpusHint: String,
+        keyPoints: String,
+        maxOutputTokens: Int,
+        language: ModelLanguage
+    ) -> String {
         switch language {
         case .french:
             return """
@@ -606,7 +673,6 @@ class AIService: ObservableObject {
             1. Une réponse directe ou une présentation générale du sujet.
             2. \(keyPoints) points clés.
             Limite : \(maxOutputTokens) tokens.
-            Format de sortie requis : LaTeX.
             Format de sortie attendu : texte clair en Markdown.
             Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
             N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \\begin{ (comme \\begin{array}).
@@ -624,7 +690,6 @@ class AIService: ObservableObject {
             1. Una respuesta directa o una descripción general del tema.
             2. \(keyPoints) puntos clave.
             Límite: \(maxOutputTokens) tokens.
-            Formato de salida requerido: LaTeX.
             Formato de salida esperado: texto claro en Markdown.
             Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
             Nunca uses LaTeX para texto ordinario ni utilices entornos \\begin{ (como \\begin{array}).
@@ -642,7 +707,6 @@ class AIService: ObservableObject {
             1. A direct answer or topic overview.
             2. \(keyPoints) key points.
             Limit: \(maxOutputTokens) tokens.
-            Required output format: LaTeX.
             Expected output format: clear Markdown prose.
             When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
             Never wrap non-mathematical text in LaTeX and never use \\begin{ environments (such as \\begin{array}).

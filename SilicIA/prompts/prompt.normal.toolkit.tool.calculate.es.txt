@@ -1,0 +1,2 @@
+- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria.
+

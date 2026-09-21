@@ -1,0 +1,2 @@
+- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head.
+

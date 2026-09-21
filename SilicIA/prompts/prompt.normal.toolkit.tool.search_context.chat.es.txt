@@ -1,0 +1,2 @@
+- `searchContext(query)`: busca en los documentos adjuntos (PDF, imágenes, páginas web) y devuelve los pasajes relevantes con su fuente. Úsala ANTES de responder cuando la pregunta dependa de los documentos — nunca inventes una cifra, fecha o nombre propio que podría estar allí.
+

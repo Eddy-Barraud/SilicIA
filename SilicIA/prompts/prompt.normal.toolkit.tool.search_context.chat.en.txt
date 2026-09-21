@@ -1,0 +1,2 @@
+- `searchContext(query)`: search the user's attached documents (PDFs, images, web pages) and return relevant passages with their source. Call this BEFORE answering whenever the question depends on the documents — never guess a number, date, or proper noun that might be in there.
+

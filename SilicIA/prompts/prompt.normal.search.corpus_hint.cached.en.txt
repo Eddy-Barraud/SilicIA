@@ -1,0 +1,2 @@
+{{count}} web-page chunks have already been fetched for this query — query them via `searchContext` BEFORE falling back to the open web.
+

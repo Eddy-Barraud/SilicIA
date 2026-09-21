@@ -1,0 +1,2 @@
+No hay fragmentos pre-recuperados. Usa `webSearch` para obtener la información.
+

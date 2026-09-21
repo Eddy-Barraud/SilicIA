@@ -1,0 +1,15 @@
+Sujet ou question : {{query}}
+
+{{corpusHint}}
+Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext` ou `webSearch`).
+Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
+Si la question nécessite un calcul, utilise `calculate`.
+
+Réponds avec :
+1. Une réponse directe ou une présentation générale du sujet.
+2. {{keyPoints}} points clés.
+Limite : {{maxOutputTokens}} tokens.
+Format de sortie attendu : texte clair en Markdown.
+Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
+N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \begin{ (comme \begin{array}).
+

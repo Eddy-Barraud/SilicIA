@@ -1,0 +1,2 @@
+- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, procedimientos técnicos, APIs, documentación o cualquier dato más allá de tus datos de entrenamiento — no para cálculos aritméticos.
+

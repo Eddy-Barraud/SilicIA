@@ -1,0 +1,15 @@
+Topic or question: {{query}}
+
+{{corpusHint}}
+If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext` or `webSearch`) first.
+If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
+If the question requires a calculation, use `calculate`.
+
+Respond with:
+1. A direct answer or topic overview.
+2. {{keyPoints}} key points.
+Limit: {{maxOutputTokens}} tokens.
+Expected output format: clear Markdown prose.
+When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
+Never wrap non-mathematical text in LaTeX and never use \begin{ environments (such as \begin{array}).
+

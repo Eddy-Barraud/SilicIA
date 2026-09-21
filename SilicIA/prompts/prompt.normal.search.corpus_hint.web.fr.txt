@@ -1,0 +1,2 @@
+Aucun extrait n'a été pré-récupéré. Utilise `webSearch` pour obtenir l'information.
+

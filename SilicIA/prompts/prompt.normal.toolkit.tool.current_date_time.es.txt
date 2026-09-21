@@ -1,0 +1,2 @@
+- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno.
+
