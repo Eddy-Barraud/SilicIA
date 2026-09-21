@@ -19,3 +19,4 @@ build/
 # Local signing override (do not commit your personal team/profile)
 Configs/LocalSigning.xcconfig
 
+.derivedData
