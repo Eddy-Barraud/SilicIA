@@ -595,42 +595,42 @@ class AIService: ObservableObject {
         switch language {
         case .french:
             return """
-            Question : \(query)
+            Sujet ou question : \(query)
 
             \(corpusHint)
             Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
             Si la question nécessite un calcul, utilise `calculate`.
 
             Réponds avec :
-            1. Une réponse directe.
+            1. Une réponse directe ou une présentation générale du sujet.
             2. \(keyPoints) points clés.
             Limite : \(maxOutputTokens) tokens.
             Format de sortie requis : LaTeX.
             """
         case .spanish:
             return """
-            Pregunta: \(query)
+            Tema o pregunta: \(query)
 
             \(corpusHint)
             Si la pregunta es temporalmente relativa ('hoy', 'pronto', 'próximo'), llama a `currentDateTime` ANTES de cualquier otra tarea.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
             Responde con:
-            1. Una respuesta directa.
+            1. Una respuesta directa o una descripción general del tema.
             2. \(keyPoints) puntos clave.
             Límite: \(maxOutputTokens) tokens.
             Formato de salida requerido: LaTeX.
             """
         case .english:
             return """
-            Question: \(query)
+            Topic or question: \(query)
 
             \(corpusHint)
             If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
             If the question requires a calculation, use `calculate`.
 
             Respond with:
-            1. A direct answer.
+            1. A direct answer or topic overview.
             2. \(keyPoints) key points.
             Limit: \(maxOutputTokens) tokens.
             Required output format: LaTeX.
@@ -1139,21 +1139,32 @@ class AIService: ObservableObject {
     }
 
     private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
+        switch language {
+        case .french:
             return """
             Tu produis un résumé web précis et concis.
             Réponds en français.
-            Donne une réponse directe, puis 1 à 3 points clés.
+            Donne une réponse directe ou une présentation générale du sujet, puis 1 à 3 points clés.
+            Ne te présente jamais, n'indique jamais quel modèle ou entreprise tu représentes. Commence directement par le contenu du résumé.
             Si une information est incertaine, indique-le clairement.
             """
+        case .spanish:
+            return """
+            Usted produce un resumen web preciso y conciso.
+            Responda en español.
+            Proporcione una respuesta directa o una descripción general del tema, luego 1 a 3 puntos clave.
+            Nunca se presente ni mencione qué modelo o empresa representa. Comience directamente con el contenido del resumen.
+            Si una información es incierta, indíquelo claramente.
+            """
+        case .english:
+            return """
+            You produce concise, accurate web summaries.
+            Respond in English.
+            Provide a direct answer or topic overview, then 1 to 3 key points.
+            Never introduce yourself or state what model or company you are from. Start directly with the summary content.
+            If information is uncertain, state it explicitly.
+            """
         }
-
-        return """
-        You produce concise, accurate web summaries.
-        Respond in English.
-        Give a direct answer, then 1 to 3 key points.
-        If information is uncertain, state it explicitly.
-        """
     }
 
     private func fallbackFirstGuessPrompt(for query: String, language: ModelLanguage) -> String {
@@ -1200,13 +1211,13 @@ class AIService: ObservableObject {
     ) -> String {
         if language == .french {
             return """
-            Question : \(query)
+            Sujet ou question : \(query)
 
             Contexte web :
             \(context)
 
             Réponds avec :
-            1. Une réponse directe.
+            1. Une réponse directe ou une présentation générale du sujet.
             2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
             Limite : \(maxOutputTokens) tokens maximum.
             Format de sortie attendu : LaTeX pour les expressions mathématiques.
@@ -1217,13 +1228,13 @@ class AIService: ObservableObject {
         }
 
         return """
-        Question: \(query)
+        Topic or question: \(query)
 
         Web context:
         \(context)
 
         Respond with:
-        1. A direct answer.
+        1. A direct answer or topic overview.
         2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
         Limit: \(maxOutputTokens) tokens maximum.
         Required output format: LaTeX for mathematical expressions.

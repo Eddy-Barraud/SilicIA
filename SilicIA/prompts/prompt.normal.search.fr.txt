@@ -1,4 +1,4 @@
-Question : {{query}}
-
 Contexte web :
 {{context}}
+
+Sujet ou question : {{query}}

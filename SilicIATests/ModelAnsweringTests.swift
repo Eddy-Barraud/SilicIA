@@ -121,4 +121,43 @@ final class ModelAnsweringTests: XCTestCase {
             "Model answer missing mathematical keywords: \(answer)"
         )
     }
+
+    func testKeywordQueryDoesNotLeakModelSelfIntroduction() async {
+        let aiService = AIService()
+        let firstGuess = await aiService.generateFirstGuess(query: "Michelin company", language: .english, maxTokens: 200)
+        XCTAssertFalse(
+            firstGuess.lowercased().contains("foundation model"),
+            "First guess leaked foundation model self-intro: \(firstGuess)"
+        )
+        XCTAssertFalse(
+            firstGuess.lowercased().contains("developed by apple"),
+            "First guess leaked developed by apple: \(firstGuess)"
+        )
+
+        let nonToolSummary = await aiService.summarize(
+            query: "Michelin company",
+            results: [],
+            maxScrapingResults: 0,
+            maxScrapingChars: 0,
+            temperature: 0.3,
+            maxTokens: 300,
+            language: .english,
+            profile: .fast,
+            useToolCalling: false,
+            generateAnswer: true
+        )
+        XCTAssertFalse(
+            nonToolSummary.summary.lowercased().contains("foundation model"),
+            "Summary leaked foundation model self-intro: \(nonToolSummary.summary)"
+        )
+        XCTAssertFalse(
+            nonToolSummary.summary.lowercased().contains("developed by apple"),
+            "Summary leaked developed by apple: \(nonToolSummary.summary)"
+        )
+        let lower = nonToolSummary.summary.lowercased()
+        XCTAssertTrue(
+            lower.contains("michelin") || lower.contains("tire") || lower.contains("guide"),
+            "Summary missing expected entity keywords: \(nonToolSummary.summary)"
+        )
+    }
 }
