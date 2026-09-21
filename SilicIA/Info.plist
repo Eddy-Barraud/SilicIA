@@ -1,57 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>MinimumOSVersion</key>
-  <string>26.0</string>
-  <key>CFBundleDisplayName</key>
-	<string>Ask about on SilicIA</string>
-	<key>CFBundleExecutable</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundleShortVersionString</key>
-	<string>$(MARKETING_VERSION)</string>
-	<key>CFBundleVersion</key>
-	<string>$(CURRENT_PROJECT_VERSION)</string>
-
-  <key>UIRequiredDeviceCapabilities</key>
-  <array>
-    <string>arm64</string>
-    <string>metal</string>
-  </array>
-
-  <!--
-    URL scheme registration so the share-extension can deep-link the
-    host app via `silicia://share?...`. Must live in the source
-    Info.plist because Xcode's `INFOPLIST_KEY_*` build settings only
-    inject scalar values, not arrays-of-dicts.
-  -->
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeRole</key>
-      <string>Editor</string>
-      <key>CFBundleURLName</key>
-      <string>fr.trevalim.SilicIA</string>
-      <key>CFBundleURLSchemes</key>
-      <array>
-        <string>SilicIA</string>
-      </array>
-    </dict>
-  </array>
-
-  <!--
-    iOS additionally requires the URL scheme to appear in
-    `LSApplicationQueriesSchemes` if the *app itself* will canOpenURL
-    against it (not strictly needed for incoming opens, but harmless).
-  -->
-  <key>LSApplicationQueriesSchemes</key>
-  <array>
-    <string>SilicIA</string>
-  </array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>fr.trevalim.SilicIA</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>SilicIA</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>SilicIA</string>
+	</array>
+	<key>MinimumOSVersion</key>
+	<string>26.0</string>
 </dict>
 </plist>
