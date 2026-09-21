@@ -847,7 +847,7 @@ actor RAGContextService {
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
             return RAGSelectionResult(
-                selectedContext: "No additional context provided.",
+                selectedContext: "",
                 rankedChunks: [],
                 selectedChunks: []
             )

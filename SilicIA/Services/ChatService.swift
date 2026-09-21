@@ -1402,20 +1402,20 @@ final class ChatService: ObservableObject {
             // already covers the question.
             answerImperative = hasGrounding
                 ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
-                : "Réponds clairement et directement à la question suivante. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
-            earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+                : "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
+            earlierLabel = "Questions précédentes de l'utilisateur :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             answerImperative = hasGrounding
                 ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
-                : "Responde de forma clara y directa a la siguiente pregunta. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
-            earlierLabel = "Preguntas anteriores del usuario (contexto):"
+                : "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
+            earlierLabel = "Preguntas anteriores del usuario:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             answerImperative = hasGrounding
                 ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
-                : "Answer the following question clearly and directly. Use available tools only if a calculation or real-time date/time is required:"
-            earlierLabel = "Earlier user questions (context):"
+                : "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
+            earlierLabel = "Earlier user questions:"
             groundingHeader = "Context from the attached documents:"
         }
 
@@ -1509,16 +1509,19 @@ final class ChatService: ObservableObject {
             case .french:
                 return """
                 Vous êtes un assistant de chat utile. Répondez clairement, précisément et directement à partir de vos connaissances générales.
+                Vous avez toute autorité pour définir et expliquer les concepts généraux, mathématiques, scientifiques et techniques. Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
                 Répondez dans la même langue que la question de l'utilisateur.
                 """
             case .spanish:
                 return """
                 Usted es un asistente de chat útil. Responda con claridad, precisión y directamente a partir de sus conocimientos generales.
+                Tiene plena autoridad para definir y explicar conceptos generales, matemáticos, científicos y técnicos. Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
                 Responda en el mismo idioma que la pregunta del usuario.
                 """
             case .english:
                 return """
                 You are a helpful chat assistant. Answer clearly, accurately, and directly from your general knowledge.
+                You have full authority to define and explain general knowledge, mathematical, scientific, and technical concepts. Never state "based on the provided context" and never apologize for lacking context or documents.
                 Respond in the same language as the user's latest question.
                 """
             }

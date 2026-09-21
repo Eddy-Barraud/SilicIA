@@ -94,5 +94,31 @@ final class ModelAnsweringTests: XCTestCase {
         await ask("Briefly, what is a factorial?", useToolCalling: true)
         XCTAssertEqual(chatService.messages.count, 2)
         assertLastAnswerClean()
+        let answer = chatService.messages.last?.content ?? ""
+        let lowerAnswer = answer.lowercased()
+        XCTAssertFalse(lowerAnswer.contains("context does not"), "Model mentioned 'context does not': \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("provided context"), "Model mentioned 'provided context': \(answer)")
+    }
+
+    func testToolCallingMathematicalQuestionDirectAnswerWithoutContext() async {
+        await ask("What is a cubic spline interpolation?", useToolCalling: true)
+        XCTAssertEqual(chatService.messages.count, 2)
+        assertLastAnswerClean()
+        let answer = chatService.messages.last?.content ?? ""
+        let lowerAnswer = answer.lowercased()
+
+        // Assert the model does NOT exhibit false refusal or context apology
+        XCTAssertFalse(lowerAnswer.contains("provided context"), "Model mentioned 'provided context': \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("context provided"), "Model mentioned 'context provided': \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("based on the context"), "Model mentioned 'based on the context': \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("cannot define"), "Model claimed it cannot define: \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("additional context or sources"), "Model asked for additional context: \(answer)")
+        XCTAssertFalse(lowerAnswer.contains("source:"), "Model output spurious source citation: \(answer)")
+
+        // Assert the model gave an informative answer with mathematical content
+        XCTAssertTrue(
+            lowerAnswer.contains("spline") || lowerAnswer.contains("polynomial") || lowerAnswer.contains("curve") || lowerAnswer.contains("interpolation"),
+            "Model answer missing mathematical keywords: \(answer)"
+        )
     }
 }

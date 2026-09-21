@@ -60,7 +60,7 @@ final class ToolCallingPromptTests: XCTestCase {
         let ungrounded = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: ["A?"], language: .english)
         let blankGrounding = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: ["A?"], language: .english, groundingContext: "   \n  ")
         XCTAssertEqual(ungrounded, blankGrounding)
-        XCTAssertTrue(ungrounded.contains("Answer the following question clearly and directly."))
+        XCTAssertTrue(ungrounded.contains("Answer the following question clearly and directly from your knowledge."))
         XCTAssertTrue(ungrounded.contains("Use available tools only if a calculation or real-time date/time is required:"))
     }
 
