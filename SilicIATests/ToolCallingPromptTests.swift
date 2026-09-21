@@ -56,10 +56,12 @@ final class ToolCallingPromptTests: XCTestCase {
         XCTAssertTrue(groundingPos < priorPos)
         XCTAssertTrue(priorPos < currentPos)
 
-        // Empty grounding is a no-op
+        // Empty grounding is a no-op and uses the direct non-coercive imperative
         let ungrounded = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: ["A?"], language: .english)
         let blankGrounding = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: ["A?"], language: .english, groundingContext: "   \n  ")
         XCTAssertEqual(ungrounded, blankGrounding)
+        XCTAssertTrue(ungrounded.contains("Answer the following question clearly and directly."))
+        XCTAssertTrue(ungrounded.contains("Use available tools only if a calculation or real-time date/time is required:"))
     }
 
     func testGroundingLocalization() {

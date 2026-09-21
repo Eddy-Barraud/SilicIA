@@ -51,10 +51,13 @@ final class ToolKitBudgetTests: XCTestCase {
     }
 
     @MainActor
-    private func makeConfig(webSearchAvailable: Bool) -> ToolKit.Configuration {
-        ToolKit.Configuration(
+    private func makeConfig(webSearchAvailable: Bool, hasCorpus: Bool = true) -> ToolKit.Configuration {
+        let chunks: [RAGChunk] = hasCorpus ? [
+            RAGChunk(source: "document.pdf", text: "Sample document passage for budgeting tests.", url: nil, pdfPage: 1)
+        ] : []
+        return ToolKit.Configuration(
             language: .english,
-            corpusChunks: [],
+            corpusChunks: chunks,
             webSearchAvailable: webSearchAvailable,
             webSearchService: WebSearchService(),
             webScraper: WebScrapingService(),
@@ -67,12 +70,22 @@ final class ToolKitBudgetTests: XCTestCase {
     }
 
     /// When web search is disabled the kit omits the webSearch tool entirely.
+    /// When no documents exist in corpus, the kit omits searchContext entirely.
     @MainActor
     func testNoWebSearchToolWhenUnavailable() {
         let (tools, _, _) = ToolKit.assemble(
-            config: makeConfig(webSearchAvailable: false),
+            config: makeConfig(webSearchAvailable: false, hasCorpus: true),
             responseTokens: 500
         )
         XCTAssertTrue(tools.compactMap { $0 as? WebSearchTool }.isEmpty)
+        XCTAssertFalse(tools.compactMap { $0 as? RAGSearchTool }.isEmpty)
+
+        let (noCorpusTools, _, _) = ToolKit.assemble(
+            config: makeConfig(webSearchAvailable: true, hasCorpus: false),
+            responseTokens: 500
+        )
+        XCTAssertFalse(noCorpusTools.compactMap { $0 as? WebSearchTool }.isEmpty)
+        XCTAssertTrue(noCorpusTools.compactMap { $0 as? RAGSearchTool }.isEmpty,
+                      "searchContext must be omitted when there are no corpus chunks")
     }
 }

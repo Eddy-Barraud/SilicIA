@@ -95,17 +95,21 @@ nonisolated enum ToolKit {
         )
         let transcriptRecorder = ToolTranscriptRecorder()
 
-        var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
-        ragTool.governor = governor
-        ragTool.transcriptRecorder = transcriptRecorder
+        var tools: [any Tool] = []
+        if !config.corpusChunks.isEmpty {
+            var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
+            ragTool.governor = governor
+            ragTool.transcriptRecorder = transcriptRecorder
+            tools.append(ragTool)
+        }
         var calcTool = CalculatorTool()
         calcTool.governor = governor
         calcTool.transcriptRecorder = transcriptRecorder
         var dateTool = DateTimeTool(language: config.language)
         dateTool.governor = governor
-        dateTool.transcriptRecorder = transcriptRecorder
+        tools.append(calcTool)
+        tools.append(dateTool)
 
-        var tools: [any Tool] = [ragTool, calcTool, dateTool]
         if config.webSearchAvailable {
             // webSearch gets a TIGHTER budget than the other tools: its
             // reply (several scraped pages) is the dominant transcript
@@ -137,11 +141,12 @@ nonisolated enum ToolKit {
     /// description; the other three tool descriptions are tone-agnostic.
     /// The `webSearch` entry is included only when the tool is actually
     /// in the kit so the model isn't told to call something that isn't
-    /// attached.
+    /// attached. `hasCorpus` controls whether `searchContext` is advertised.
     static func instructionsAppendix(
         for language: ModelLanguage,
         tone: ToolCallingTone,
-        webSearchAvailable: Bool
+        webSearchAvailable: Bool,
+        hasCorpus: Bool = true
     ) -> String {
         let header: String
         let searchContextLine: String
@@ -164,7 +169,7 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)` : évalue une expression arithmétique exactement. Utilise-le pour tout calcul non trivial — ne calcule jamais de tête."
             dateTimeLine = "- `currentDateTime(format?)` : renvoie la date et l'heure actuelles. Utilise-le AVANT de répondre dès que la question contient une référence temporelle relative (« aujourd'hui », « bientôt », « la semaine prochaine », « dans X jours », etc.) — tu n'as pas d'horloge interne."
             webSearchLine = "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les événements actuels, ou tout ce qui dépasse tes données d'entraînement — pas pour les définitions ou les calculs."
-            footer = "Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages utilisés dans ta réponse finale."
+            footer = "Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé."
 
         case .spanish:
             header = "Herramientas disponibles:"
@@ -179,7 +184,7 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)`: evalúa una expresión aritmética exactamente. Úsala para cualquier cálculo no trivial — nunca calcules de memoria."
             dateTimeLine = "- `currentDateTime(format?)`: devuelve la fecha y la hora actuales. Úsala ANTES de responder cuando la pregunta tenga una referencia temporal relativa ('hoy', 'pronto', 'la próxima semana', 'en X días', etc.) — no tienes reloj interno."
             webSearchLine = "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, eventos actuales o cualquier dato más allá de tus datos de entrenamiento — no para definiciones ni cálculos."
-            footer = "Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes utilizados en tu respuesta final."
+            footer = "Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web."
 
         case .english:
             header = "Available tools:"
@@ -194,10 +199,14 @@ nonisolated enum ToolKit {
             calculateLine = "- `calculate(expression)`: evaluate an arithmetic expression exactly. Use this for any non-trivial math — do not compute in your head."
             dateTimeLine = "- `currentDateTime(format?)`: get the current date and time. Call this BEFORE answering whenever the question contains relative time ('today', 'soon', 'next week', 'in X days', etc.) — you have no internal clock."
             webSearchLine = "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current/recent information or anything beyond your training data — not for definitions or arithmetic."
-            footer = "You may call these tools multiple times per turn if the first result was incomplete. Cite the source of any passages you used in your final answer."
+            footer = "You may call these tools multiple times per turn if the first result was incomplete. Cite the source of passages only when an attached document or web search was used."
         }
 
-        var lines: [String] = [header, searchContextLine, calculateLine, dateTimeLine]
+        var lines: [String] = [header]
+        if hasCorpus {
+            lines.append(searchContextLine)
+        }
+        lines.append(contentsOf: [calculateLine, dateTimeLine])
         if webSearchAvailable {
             lines.append(webSearchLine)
         }

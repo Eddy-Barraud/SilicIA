@@ -239,11 +239,14 @@ final class ChatService: ObservableObject {
         var streamingAssistantID: UUID?
         var toolTranscriptRecorder: ToolTranscriptRecorder?
         do {
+            let hasContext = !finalSelectedContext.isEmpty
             let instructions = buildInstructions(
                 for: language,
                 maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
+                hasContext: hasContext,
                 useToolCalling: useToolCalling,
-                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch
+                webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia) && includeWebSearch,
+                hasCorpus: !chunks.isEmpty
             )
             // Tool-calling branch: hand the model `searchContext` over the
             // pre-chunked corpus + `calculate` for exact arithmetic. The
@@ -477,9 +480,11 @@ final class ChatService: ObservableObject {
         assistantID: UUID,
         citations: String?
     ) async throws -> String {
+        let hasContext = !selectedContext.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let instructions = buildInstructions(
             for: language,
             maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            hasContext: hasContext,
             useToolCalling: false
         )
         let session = LanguageModelSession(instructions: instructions)
@@ -527,6 +532,7 @@ final class ChatService: ObservableObject {
         let instructions = buildInstructions(
             for: language,
             maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
+            hasContext: true,
             useToolCalling: false
         )
         let session = LanguageModelSession(instructions: instructions)
@@ -1238,30 +1244,34 @@ final class ChatService: ObservableObject {
     }
 
     /// Builds dynamic chat instructions matching the user's query language.
-    /// When `useToolCalling` is true, appends an extra paragraph telling
-    /// the model to call `searchContext` / `calculate` instead of
-    /// answering blind. The base instructions stay the same so the model's
-    /// tone and language conventions don't drift between the two modes.
+    /// When `hasContext` is false, loads context-free instructions that omit
+    /// any mention of documents or context to prevent false refusals.
+    /// When `useToolCalling` is true, appends an extra paragraph describing
+    /// available tools and when to use them.
     private func buildInstructions(
         for language: ModelLanguage,
         maxOutputCharacters: Int,
+        hasContext: Bool = true,
         useToolCalling: Bool = false,
-        webSearchAvailable: Bool = false
+        webSearchAvailable: Bool = false,
+        hasCorpus: Bool = true
     ) -> String {
+        let variant = hasContext ? "instructions" : "instructions.no_context"
         let base = PromptLoader.loadPrompt(
             mode: "normal",
             feature: "chat",
-            variant: "instructions",
+            variant: variant,
             language: language,
             replacements: [
                 "maxOutputCharacters": "\(maxOutputCharacters)"
             ]
         )
-            ?? fallbackChatInstructions(for: language)
+            ?? fallbackChatInstructions(for: language, hasContext: hasContext)
         guard useToolCalling else { return base }
         return base + "\n\n" + toolCallingInstructionsAppendix(
             for: language,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus
         )
     }
 
@@ -1270,12 +1280,14 @@ final class ChatService: ObservableObject {
     /// and search paths stay in lock-step on tool descriptions.
     private func toolCallingInstructionsAppendix(
         for language: ModelLanguage,
-        webSearchAvailable: Bool
+        webSearchAvailable: Bool,
+        hasCorpus: Bool = true
     ) -> String {
         ToolKit.instructionsAppendix(
             for: language,
             tone: .chat,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus
         )
     }
 
@@ -1390,19 +1402,19 @@ final class ChatService: ObservableObject {
             // already covers the question.
             answerImperative = hasGrounding
                 ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
-                : "Réponds à la question suivante en t'appuyant sur les outils disponibles :"
+                : "Réponds clairement et directement à la question suivante. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
             earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             answerImperative = hasGrounding
                 ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
-                : "Responde a la siguiente pregunta apoyándote en las herramientas disponibles:"
+                : "Responde de forma clara y directa a la siguiente pregunta. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
             earlierLabel = "Preguntas anteriores del usuario (contexto):"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             answerImperative = hasGrounding
                 ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
-                : "Answer the following question using the available tools:"
+                : "Answer the following question clearly and directly. Use available tools only if a calculation or real-time date/time is required:"
             earlierLabel = "Earlier user questions (context):"
             groundingHeader = "Context from the attached documents:"
         }
@@ -1491,27 +1503,43 @@ final class ChatService: ObservableObject {
             || description.contains("tool call limit")
     }
 
-    private func fallbackChatInstructions(for language: ModelLanguage) -> String {
+    private func fallbackChatInstructions(for language: ModelLanguage, hasContext: Bool = true) -> String {
+        if !hasContext {
+            switch language {
+            case .french:
+                return """
+                Vous êtes un assistant de chat utile. Répondez clairement, précisément et directement à partir de vos connaissances générales.
+                Répondez dans la même langue que la question de l'utilisateur.
+                """
+            case .spanish:
+                return """
+                Usted es un asistente de chat útil. Responda con claridad, precisión y directamente a partir de sus conocimientos generales.
+                Responda en el mismo idioma que la pregunta del usuario.
+                """
+            case .english:
+                return """
+                You are a helpful chat assistant. Answer clearly, accurately, and directly from your general knowledge.
+                Respond in the same language as the user's latest question.
+                """
+            }
+        }
         switch language {
         case .french:
             return """
             Vous êtes un assistant de chat utile. Répondez clairement et précisément.
-            Utilisez le contexte récupéré lorsqu'il est pertinent et indiquez vos incertitudes si le contexte est insuffisant.
-            Si aucun contexte récupéré n'est fourni, répondez depuis vos connaissances sans vous plaindre du manque de contexte.
+            Appuyez principalement vos réponses sur le contexte fourni. Si le contexte ne répond pas entièrement à la question, complétez avec vos connaissances avec précision.
             Répondez dans la même langue que la question de l'utilisateur.
             """
         case .spanish:
             return """
             Usted es un asistente de chat útil. Responda con claridad y precisión.
-            Utilice el contexto recuperado cuando sea pertinente e indique sus incertidumbres si el contexto es insuficiente.
-            Si no se proporciona contexto recuperado, responda con su propio conocimiento y no se queje por la falta de contexto.
+            Base sus respuestas principalmente en el contexto recuperado proporcionado. Si el contexto no responde completamente a la pregunta, complemente con sus conocimientos con precisión.
             Responda en el mismo idioma que la pregunta del usuario.
             """
         case .english:
             return """
             You are a helpful chat assistant. Answer the user clearly and accurately.
-            Use retrieved context when relevant and mention uncertainty when context is insufficient.
-            If no retrieved context is provided, answer from your own knowledge and do not complain about missing context.
+            Base your answers primarily on the retrieved context provided. If the context does not fully answer the question, supplement with your knowledge while maintaining accuracy.
             Respond in the same language as the user's latest question.
             """
         }
