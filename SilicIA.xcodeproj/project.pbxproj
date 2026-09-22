@@ -454,7 +454,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SilicIA/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Ask about on SilicIA";
+				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
@@ -521,7 +521,7 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = SilicIA/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Ask about on SilicIA";
+				INFOPLIST_KEY_CFBundleDisplayName = SilicIA;
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
