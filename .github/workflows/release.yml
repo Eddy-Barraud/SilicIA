@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*' # Triggers on release tags like v1.0.0
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -17,10 +18,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Select Latest Xcode Version
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: latest-stable
+      - name: Select Xcode
+        run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
+      - name: Xcode Version
+        run: xcodebuild -version
 
       - name: Install Apple Certificate (Developer ID Application)
         env:
@@ -62,13 +64,15 @@ jobs:
           
           echo "Using Signing Identity: $SIGNING_IDENTITY"
           echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> $GITHUB_ENV
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
 
       - name: Build & Archive App
         run: |
           xcodebuild clean archive \
-            -scheme Tiny-SFTP-server \
+            -project SilicIA.xcodeproj \
+            -scheme SilicIA \
             -destination "generic/platform=macOS" \
-            -archivePath "$RUNNER_TEMP/Tiny-SFTP-server.xcarchive" \
+            -archivePath "$RUNNER_TEMP/SilicIA.xcarchive" \
             -configuration Release \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="-"
@@ -76,34 +80,70 @@ jobs:
       - name: Export & Sign .app
         run: |
           mkdir -p "$RUNNER_TEMP/Export"
-          cp -R "$RUNNER_TEMP/Tiny-SFTP-server.xcarchive/Products/Applications/Tiny-SFTP-server.app" "$RUNNER_TEMP/Export/Tiny-SFTP-server.app"
-          
-          # Sign all frameworks, dylibs, and the main app binary with Developer ID & Hardened Runtime
-          codesign --force --deep --options runtime \
-            --keychain "$RUNNER_TEMP/build.keychain" \
+          cp -R "$RUNNER_TEMP/SilicIA.xcarchive/Products/Applications/SilicIA.app" "$RUNNER_TEMP/Export/SilicIA.app"
+          APP_PATH="$RUNNER_TEMP/Export/SilicIA.app"
+
+          # 1. Sign embedded resource bundles (e.g. MathJax)
+          if [ -d "$APP_PATH/Contents/Resources/MathJaxSwift_MathJaxSwift.bundle" ]; then
+            echo "Signing MathJax bundle..."
+            codesign --force --options runtime --timestamp \
+              --keychain "$KEYCHAIN_PATH" \
+              --sign "$SIGNING_IDENTITY" \
+              "$APP_PATH/Contents/Resources/MathJaxSwift_MathJaxSwift.bundle"
+          fi
+
+          # 2. Sign embedded app extensions with their specific entitlements
+          if [ -d "$APP_PATH/Contents/PlugIns/SilicIAShareExtension.appex" ]; then
+            echo "Signing SilicIAShareExtension.appex with entitlements..."
+            codesign --force --options runtime --timestamp \
+              --keychain "$KEYCHAIN_PATH" \
+              --entitlements "SilicIAShareExtension/SilicIAShareExtension.entitlements" \
+              --sign "$SIGNING_IDENTITY" \
+              "$APP_PATH/Contents/PlugIns/SilicIAShareExtension.appex"
+          fi
+
+          # 3. Sign any embedded frameworks or dylibs if present
+          if [ -d "$APP_PATH/Contents/Frameworks" ]; then
+            find "$APP_PATH/Contents/Frameworks" -type f \( -name "*.dylib" -o -perm +111 \) | while read -r lib; do
+              echo "Signing framework/dylib: $lib"
+              codesign --force --options runtime --timestamp \
+                --keychain "$KEYCHAIN_PATH" \
+                --sign "$SIGNING_IDENTITY" \
+                "$lib"
+            done
+          fi
+
+          # 4. Sign the main application bundle with its entitlements
+          echo "Signing main SilicIA.app with entitlements..."
+          codesign --force --options runtime --timestamp \
+            --keychain "$KEYCHAIN_PATH" \
+            --entitlements "SilicIA/SilicIA.entitlements" \
             --sign "$SIGNING_IDENTITY" \
-            --timestamp \
-            "$RUNNER_TEMP/Export/Tiny-SFTP-server.app"
+            "$APP_PATH"
+
+          # 5. Verify the full signature
+          echo "=== Verifying App Signature ==="
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 
       - name: Create DMG
         run: |
           mkdir -p "$RUNNER_TEMP/dmg-source"
-          cp -R "$RUNNER_TEMP/Export/Tiny-SFTP-server.app" "$RUNNER_TEMP/dmg-source/"
+          cp -R "$RUNNER_TEMP/Export/SilicIA.app" "$RUNNER_TEMP/dmg-source/"
           ln -s /Applications "$RUNNER_TEMP/dmg-source/Applications"
           
           mkdir -p "$RUNNER_TEMP/dmg-output"
-          hdiutil create -volname "Tiny SFTP Server" \
+          hdiutil create -volname "SilicIA" \
             -srcfolder "$RUNNER_TEMP/dmg-source" \
             -ov -format UDZO \
-            "$RUNNER_TEMP/dmg-output/Tiny-SFTP-server.dmg"
+            "$RUNNER_TEMP/dmg-output/SilicIA.dmg"
 
       - name: Sign DMG
         run: |
           codesign --force \
-            --keychain "$RUNNER_TEMP/build.keychain" \
+            --keychain "$KEYCHAIN_PATH" \
             --sign "$SIGNING_IDENTITY" \
             --timestamp \
-            "$RUNNER_TEMP/dmg-output/Tiny-SFTP-server.dmg"
+            "$RUNNER_TEMP/dmg-output/SilicIA.dmg"
 
       - name: Notarize DMG
         env:
@@ -111,7 +151,7 @@ jobs:
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          xcrun notarytool submit "$RUNNER_TEMP/dmg-output/Tiny-SFTP-server.dmg" \
+          xcrun notarytool submit "$RUNNER_TEMP/dmg-output/SilicIA.dmg" \
             --apple-id "$APPLE_ID" \
             --password "$APPLE_APP_SPECIFIC_PASSWORD" \
             --team-id "$APPLE_TEAM_ID" \
@@ -119,12 +159,12 @@ jobs:
 
       - name: Staple Notarization Ticket
         run: |
-          xcrun stapler staple "$RUNNER_TEMP/dmg-output/Tiny-SFTP-server.dmg"
+          xcrun stapler staple "$RUNNER_TEMP/dmg-output/SilicIA.dmg"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ runner.temp }}/dmg-output/Tiny-SFTP-server.dmg
+          files: ${{ runner.temp }}/dmg-output/SilicIA.dmg
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

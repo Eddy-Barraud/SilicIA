@@ -8,11 +8,11 @@
 import Foundation
 
 struct PromptLoader {
-    static func languageCode(for language: ModelLanguage) -> String {
+    nonisolated static func languageCode(for language: ModelLanguage) -> String {
         language.code
     }
 
-    static func loadPrompt(
+    nonisolated static func loadPrompt(
         mode: String,
         feature: String,
         variant: String? = nil,
@@ -41,7 +41,7 @@ struct PromptLoader {
 
     private final class BundleToken {}
 
-    private static func loadPrompt(named name: String) -> String? {
+    nonisolated private static func loadPrompt(named name: String) -> String? {
         let codeBundle = Bundle(for: BundleToken.self)
         let candidateURLs: [URL?] = [
             Bundle.main.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
@@ -63,7 +63,7 @@ struct PromptLoader {
         return nil
     }
 
-    private static func applyReplacements(in raw: String, replacements: [String: String]) -> String {
+    nonisolated private static func applyReplacements(in raw: String, replacements: [String: String]) -> String {
         replacements.reduce(raw) { partial, entry in
             partial.replacingOccurrences(of: "{{\(entry.key)}}", with: entry.value)
         }

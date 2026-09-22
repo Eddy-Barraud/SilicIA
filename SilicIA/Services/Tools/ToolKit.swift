@@ -28,7 +28,7 @@ import FoundationModels
 /// Per-conversation framing for the tool-usage appendix. Chat treats the
 /// model's input as a turn in a back-and-forth; search treats it as a
 /// research query against a freshly-fetched corpus.
-enum ToolCallingTone {
+nonisolated enum ToolCallingTone: Sendable, Equatable {
     case chat
     case search
 }

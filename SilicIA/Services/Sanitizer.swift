@@ -228,7 +228,7 @@ enum ModelOutputLaTeXSanitizer {
 
             let base = String(output[baseRange])
             let exponent = String(output[exponentRange])
-            output.replaceSubrange(wholeRange, with: "\\mathrm{\\(base)}^\\mathrm{\\(exponent)}")
+            output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
         }
         return output
     }

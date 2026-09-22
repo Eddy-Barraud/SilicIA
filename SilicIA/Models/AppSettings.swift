@@ -8,7 +8,7 @@
 import Foundation
 
 /// Supported output languages for generated model responses.
-enum ModelLanguage: String, CaseIterable, Codable {
+nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
     case french = "French"
     case english = "English"
     case spanish = "Spanish"

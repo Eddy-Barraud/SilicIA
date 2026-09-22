@@ -14,7 +14,7 @@ import UIKit
 enum NetworkConstants {
     /// App-specific User-Agent identifying SilicIA across HTTP requests.
     /// Format: AppName/Version (Platform; OS Version) Engine
-    static let defaultUserAgent: String = {
+    nonisolated static let defaultUserAgent: String = {
         let appName = "SilicIA"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.2"
         #if os(iOS)

@@ -628,7 +628,6 @@ class WebScrapingService: ObservableObject {
             result.append(contentsOf: text[cursor...])
         }
         return result
-        HTMLSanitizer.decodeEntities(text)
     }
 
     /// Decodes a single entity body (the part between `&` and `;`).
