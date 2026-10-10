@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import CoreGraphics
+import PDFKit
 #if os(iOS)
 import UIKit
 #endif
@@ -45,10 +46,11 @@ class WebScrapingService: ObservableObject {
     private static let scrapeConcurrency = 8
     private static let renderedScrapeConcurrency = 2
     private static let overfetchCount = 3
-    private static let webVisionViewport = CGSize(width: 1280, height: 1600)
-    private static let webVisionMaxRenderedPages: CGFloat = 3
+    /// Viewport dimensions in points (1080 x 1920 pt) for high-density desktop/mobile capture
+    private static let webVisionViewport = CGSize(width: 1080, height: 1920)
+    private static let webVisionMaxRenderedPages: Int = 3
     private static let webVisionLoadTimeoutNanoseconds: UInt64 = 15_000_000_000
-    private static let webVisionSettleNanoseconds: UInt64 = 800_000_000
+    private static let webVisionSettleNanoseconds: UInt64 = 200_000_000
 
     // MARK: - Cached HTML regexes (compiled once, reused per scrape)
 
@@ -402,14 +404,17 @@ class WebScrapingService: ObservableObject {
     private func scrapeRenderedContent(from url: URL, maxCharacters: Int) async -> String? {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        let webpagePreferences = WKWebpagePreferences()
+        webpagePreferences.allowsContentJavaScript = false
+        configuration.defaultWebpagePreferences = webpagePreferences
+
         let webView = WKWebView(frame: CGRect(origin: .zero, size: Self.webVisionViewport), configuration: configuration)
         webView.customUserAgent = Self.userAgent
 
         do {
             try await load(webView: webView, url: url)
             try await Task.sleep(nanoseconds: Self.webVisionSettleNanoseconds)
-            let contentRect = try await renderedContentRect(for: webView)
-            let pdfData = try await createPDF(from: webView, rect: contentRect)
+            let pdfData = try await createRenderedPDF(from: webView)
             let tempURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString)
                 .appendingPathExtension("pdf")
@@ -486,7 +491,7 @@ class WebScrapingService: ObservableObject {
                 width: max(CGFloat(truncating: metrics[0]), Self.webVisionViewport.width),
                 height: min(
                     max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height),
-                    Self.webVisionViewport.height * Self.webVisionMaxRenderedPages
+                    Self.webVisionViewport.height * CGFloat(Self.webVisionMaxRenderedPages)
                 )
             )
         )
@@ -502,6 +507,54 @@ class WebScrapingService: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Measures content and renders up to `webVisionMaxRenderedPages` discrete page slices (1080x1920 pt).
+    private func createRenderedPDF(from webView: WKWebView) async throws -> Data {
+        let raw = try await evaluateJavaScript(
+            on: webView,
+            script: """
+            Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, window.innerHeight)
+            """
+        )
+        let totalHeight: CGFloat
+        if let num = raw as? NSNumber {
+            totalHeight = CGFloat(truncating: num)
+        } else {
+            totalHeight = Self.webVisionViewport.height
+        }
+
+        let sliceWidth = Self.webVisionViewport.width
+        let sliceHeight = Self.webVisionViewport.height
+        let totalPages = max(1, min(Int(ceil(totalHeight / sliceHeight)), Self.webVisionMaxRenderedPages))
+
+        let masterDoc = PDFDocument()
+        for pageIndex in 0..<totalPages {
+            let pageY = CGFloat(pageIndex) * sliceHeight
+            let sliceRect = CGRect(x: 0, y: pageY, width: sliceWidth, height: sliceHeight)
+            let config = WKPDFConfiguration()
+            config.rect = sliceRect
+
+            let sliceData: Data = try await withCheckedThrowingContinuation { continuation in
+                webView.createPDF(configuration: config) { result in
+                    switch result {
+                    case .success(let data):
+                        continuation.resume(returning: data)
+                    case .failure(let error):
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+
+            if let sliceDoc = PDFDocument(data: sliceData), let page = sliceDoc.page(at: 0) {
+                masterDoc.insert(page, at: masterDoc.pageCount)
+            }
+        }
+
+        guard let combinedData = masterDoc.dataRepresentation() else {
+            throw RenderedScrapeError.invalidDocumentMetrics
+        }
+        return combinedData
     }
 
     private func createPDF(from webView: WKWebView, rect: CGRect) async throws -> Data {

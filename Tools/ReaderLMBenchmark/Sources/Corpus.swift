@@ -23,7 +23,8 @@ public enum CorpusLoader {
         
         let fullPageFiles = [
             ("Wikipedia Polyéthylène (Full page ~325KB)", "https://fr.wikipedia.org/wiki/Polyéthylène", "polyethylene.html"),
-            ("Allrecipes Marble Cake (Full page ~511KB)", "https://www.allrecipes.com/recipe/7891/marble-cake-i/", "marble_cake.html")
+            ("Allrecipes Marble Cake (Full page ~511KB)", "https://www.allrecipes.com/recipe/7891/marble-cake-i/", "marble_cake.html"),
+            ("Radio France Paradoxe de la tolérance (Full page ~345KB)", "https://www.radiofrance.fr/franceculture/le-paradoxe-de-la-tolerance-ou-les-limites-de-la-democratie-selon-karl-popper-6482256", "radiofrance_popper.html")
         ]
         
         for (name, url, filename) in fullPageFiles {

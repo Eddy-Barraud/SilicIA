@@ -51,6 +51,31 @@ enum ImageAnalysisService {
         let right: String?
     }
 
+    /// Warms up Apple Vision models (ANE/CoreML) in the background
+    /// so the first actual OCR or Web Vision call executes with zero cold-start delay.
+    static func warmup() {
+        Task.detached(priority: .utility) {
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            guard let context = CGContext(
+                data: nil,
+                width: 64,
+                height: 64,
+                bitsPerComponent: 8,
+                bytesPerRow: 64 * 4,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ), let dummyCG = context.makeImage() else { return }
+
+            let textRequest = makeTextRequest(languages: defaultRecognitionLanguages)
+            let classifyRequest = VNClassifyImageRequest()
+            let handler = VNImageRequestHandler(cgImage: dummyCG, options: [:])
+            try? handler.perform([textRequest, classifyRequest])
+            #if DEBUG
+            print("[ImageAnalysisService] Vision models warmed up successfully.")
+            #endif
+        }
+    }
+
     /// Runs OCR + classification on the image at `url`. Returns `nil` if the
     /// file cannot be decoded as an image at all.
     static func analyze(imageAt url: URL) async -> ImageAnalysisResult? {
@@ -460,19 +485,15 @@ enum ImageAnalysisService {
             .map { (label: $0.identifier, confidence: $0.confidence) }
     }
 
-    /// Renders `page` to a `CGImage` at approximately 300 DPI for Vision.
+    /// Renders `page` to a `CGImage` at 150 DPI for fast and accurate Vision OCR and classification.
     private static func renderedCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
-        let nativeLonger = max(pageSize.width, pageSize.height)
-        let targetLonger: CGFloat = 2500
-        let maxLonger: CGFloat = 4096
-        let scale = nativeLonger < targetLonger
-            ? targetLonger / nativeLonger
-            : (nativeLonger > maxLonger ? maxLonger / nativeLonger : 1)
+        // 150 DPI for high-efficiency Vision OCR (150 / 72 ≈ 2.083x)
+        let dpiScale: CGFloat = 150.0 / 72.0
         let targetSize = CGSize(
-            width: max(1, pageSize.width * scale),
-            height: max(1, pageSize.height * scale)
+            width: max(1, pageSize.width * dpiScale),
+            height: max(1, pageSize.height * dpiScale)
         )
         let image = page.thumbnail(of: targetSize, for: .mediaBox)
         #if os(macOS)
