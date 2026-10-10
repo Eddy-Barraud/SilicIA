@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SilicIA}/Tools/ReaderLMBenchmark",
+            "name": "Debug ReaderLMBenchmark (Tools/ReaderLMBenchmark)",
+            "target": "ReaderLMBenchmark",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug ReaderLMBenchmark (Tools/ReaderLMBenchmark)"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:SilicIA}/Tools/ReaderLMBenchmark",
+            "name": "Release ReaderLMBenchmark (Tools/ReaderLMBenchmark)",
+            "target": "ReaderLMBenchmark",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release ReaderLMBenchmark (Tools/ReaderLMBenchmark)"
+        }
+    ]
+}
