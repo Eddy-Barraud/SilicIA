@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		36D25B9F2F78168800B52C37 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */; };
+		36D25BA02F78168800B52C37 /* Readability in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD11 /* Readability */; };
+		36D25BA12F78168800B52C37 /* HTMLToMarkdown in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD21 /* HTMLToMarkdown */; };
 		B2C3D4E52F7A000100ABCDEF /* SilicIAShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = B2C3D4E22F7A000100ABCDEF /* SilicIAShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
@@ -88,6 +90,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				36D25B9F2F78168800B52C37 /* LaTeXSwiftUI in Frameworks */,
+				36D25BA02F78168800B52C37 /* Readability in Frameworks */,
+				36D25BA12F78168800B52C37 /* HTMLToMarkdown in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -150,6 +154,8 @@
 			name = SilicIA;
 			packageProductDependencies = (
 				7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */,
+				7A1C9D8B4E2F114500ABCD11 /* Readability */,
+				7A1C9D8B4E2F114500ABCD21 /* HTMLToMarkdown */,
 			);
 			productName = SilicIA;
 			productReference = 36D5D0B42F7190B80090D706 /* SilicIA.app */;
@@ -233,6 +239,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
+				7A1C9D8B4E2F114500ABCD12 /* XCRemoteSwiftPackageReference "swift-readability" */,
+				7A1C9D8B4E2F114500ABCD22 /* XCRemoteSwiftPackageReference "html-to-markdown-swift" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 36D5D0B52F7190B80090D706 /* Products */;
@@ -725,6 +733,22 @@
 				minimumVersion = 1.5.0;
 			};
 		};
+		7A1C9D8B4E2F114500ABCD12 /* XCRemoteSwiftPackageReference "swift-readability" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/Ryu0118/swift-readability.git";
+			requirement = {
+				kind = exactVersion;
+				version = 0.4.0;
+			};
+		};
+		7A1C9D8B4E2F114500ABCD22 /* XCRemoteSwiftPackageReference "html-to-markdown-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jaredhowland/html-to-markdown-swift.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.0;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -732,6 +756,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */;
 			productName = LaTeXSwiftUI;
+		};
+		7A1C9D8B4E2F114500ABCD11 /* Readability */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A1C9D8B4E2F114500ABCD12 /* XCRemoteSwiftPackageReference "swift-readability" */;
+			productName = Readability;
+		};
+		7A1C9D8B4E2F114500ABCD21 /* HTMLToMarkdown */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A1C9D8B4E2F114500ABCD22 /* XCRemoteSwiftPackageReference "html-to-markdown-swift" */;
+			productName = HTMLToMarkdown;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

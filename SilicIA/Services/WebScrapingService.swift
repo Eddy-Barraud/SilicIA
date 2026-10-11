@@ -15,6 +15,8 @@ import UIKit
 #if canImport(WebKit)
 import WebKit
 #endif
+import Readability
+import HTMLToMarkdown
 
 @MainActor
 /// Fetches and extracts readable text content from web pages.
@@ -120,7 +122,131 @@ class WebScrapingService: ObservableObject {
         self.session = URLSession(configuration: config)
     }
 
-    /// Scrape content from a single URL
+    private let readability = Readability()
+
+    /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
+    private func parseWikipediaURL(_ url: URL) -> (host: String, title: String)? {
+        guard let host = url.host?.lowercased(),
+              host.contains("wikipedia.org"),
+              url.path.hasPrefix("/wiki/") else {
+            return nil
+        }
+        let rawSlug = String(url.path.dropFirst("/wiki/".count))
+        guard !rawSlug.isEmpty, !rawSlug.contains(":") else {
+            // Skip special Wikipedia pages (Special:, File:, Talk:, etc.)
+            return nil
+        }
+        let decodedTitle = rawSlug.removingPercentEncoding ?? rawSlug
+        return (host, decodedTitle)
+    }
+
+    /// Fetches Wikipedia article HTML directly via MediaWiki action=parse API and converts it to Markdown.
+    private func fetchWikipediaMarkdownViaAPI(host: String, title: String, originalURL: URL) async throws -> (title: String, markdown: String) {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/w/api.php"
+        components.queryItems = [
+            URLQueryItem(name: "action", value: "parse"),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "page", value: title),
+            URLQueryItem(name: "prop", value: "text"),
+            URLQueryItem(name: "redirects", value: "1")
+        ]
+
+        guard let apiURL = components.url else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: apiURL)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await self.session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        struct MediaWikiParseResponse: Decodable {
+            struct ParseContent: Decodable {
+                let title: String?
+                let text: [String: String]?
+            }
+            let parse: ParseContent?
+        }
+
+        let decoded = try JSONDecoder().decode(MediaWikiParseResponse.self, from: data)
+        guard let parse = decoded.parse,
+              let htmlText = parse.text?["*"],
+              !htmlText.isEmpty else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        let parsedTitle = parse.title ?? title.replacingOccurrences(of: "_", with: " ")
+        let (_, markdown) = try await self.extractMarkdown(from: htmlText, baseURL: originalURL)
+        return (parsedTitle, markdown)
+    }
+
+    /// Extracts clean article Markdown from a URL using swift-readability and html-to-markdown-swift,
+    /// with resilient URLSession fetching, Wikipedia API acceleration, and a strict timeout.
+    func extractMarkdown(from url: URL, timeoutSeconds: Double = 4.0) async throws -> (title: String, markdown: String) {
+        // Fast path: if the URL is a Wikipedia article, use MediaWiki's action=parse API
+        if let wiki = parseWikipediaURL(url) {
+            do {
+                let result = try await fetchWikipediaMarkdownViaAPI(host: wiki.host, title: wiki.title, originalURL: url)
+                if !result.markdown.isEmpty {
+                    return result
+                }
+            } catch {
+                // If the Wikipedia API request fails, fall through to regular webpage scraping
+            }
+        }
+
+        return try await withThrowingTaskGroup(of: (title: String, markdown: String).self) { group in
+            group.addTask {
+                var request = URLRequest(url: url)
+                request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await self.session.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode),
+                      let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw URLError(.badServerResponse)
+                }
+                return try await self.extractMarkdown(from: html, baseURL: url)
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+
+            guard let firstResult = try await group.next() else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            group.cancelAll()
+            return firstResult
+        }
+    }
+
+    /// Extracts clean article Markdown from raw HTML using swift-readability and html-to-markdown-swift.
+    func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
+        let result = try await readability.parse(html: html, options: nil, baseURL: baseURL)
+        let markdown: String
+        if !result.content.isEmpty {
+            markdown = (try? HTMLToMarkdown.convert(result.content, plugins: [
+                BasePlugin(),
+                CommonmarkPlugin(),
+                GFMPlugin()
+            ])) ?? result.textContent
+        } else if !result.textContent.isEmpty {
+            markdown = result.textContent
+        } else {
+            markdown = ""
+        }
+        return (result.title, markdown.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Scrape content from a single URL into clean Markdown.
     func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
@@ -128,6 +254,39 @@ class WebScrapingService: ObservableObject {
             return rendered
         }
 
+        #if DEBUG
+        let pageStart = Date()
+        #endif
+
+        do {
+            let (title, markdown) = try await extractMarkdown(from: url)
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] Downloaded & converted %@ to markdown in %.3f s (%d chars)", urlString, elapsed, markdown.count))
+            #endif
+            guard !markdown.isEmpty else {
+                return await fallbackFetchAndConvert(url: url, maxCharacters: maxCharacters)
+            }
+            #if DEBUG
+            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: markdown, title: title, url: url)
+            #endif
+            if markdown.count > maxCharacters {
+                return String(markdown.prefix(maxCharacters))
+            }
+            return markdown
+        } catch {
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] extractMarkdown failed for %@ in %.3f s, trying fallback", urlString, elapsed))
+            #endif
+            return await fallbackFetchAndConvert(url: url, maxCharacters: maxCharacters)
+        }
+    }
+
+    private func fallbackFetchAndConvert(url: URL, maxCharacters: Int) async -> String? {
+        #if DEBUG
+        let fallbackStart = Date()
+        #endif
         do {
             var request = URLRequest(url: url)
             request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
@@ -140,38 +299,41 @@ class WebScrapingService: ObservableObject {
                 return nil
             }
 
-            // Extract text content from HTML
-            return Self.extractTextFromHTML(html, maxCharacters: maxCharacters)
-        } catch {
-            return nil
-        }
-    }
-
-    nonisolated private static func scrapeContentOffMainActor(
-        from urlString: String,
-        maxCharacters: Int = 5000
-    ) async -> String? {
-        guard let url = URL(string: urlString) else { return nil }
-
-        do {
-            var request = URLRequest(url: url)
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else {
-                return nil
+            if let (title, markdown) = try? await extractMarkdown(from: html, baseURL: url), !markdown.isEmpty {
+                #if DEBUG
+                let elapsed = Date().timeIntervalSince(fallbackStart)
+                print(String(format: "[Timing][Webpage] Downloaded & converted %@ (via fallback extract) to markdown in %.3f s (%d chars)", url.absoluteString, elapsed, markdown.count))
+                DebugRAGStorage.shared.saveDownloadedWebpage(markdown: markdown, title: title, url: url)
+                #endif
+                if markdown.count > maxCharacters {
+                    return String(markdown.prefix(maxCharacters))
+                }
+                return markdown
             }
 
-            return await extractTextFromHTML(html, maxCharacters: maxCharacters)
+            let directMarkdown = (try? HTMLToMarkdown.convert(html, plugins: [
+                BasePlugin(),
+                CommonmarkPlugin(),
+                GFMPlugin()
+            ])) ?? HTMLSanitizer.htmlToPlainText(html)
+
+            let trimmed = directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(fallbackStart)
+            print(String(format: "[Timing][Webpage] Downloaded & converted %@ (via fallback direct) to markdown in %.3f s (%d chars)", url.absoluteString, elapsed, trimmed.count))
+            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: trimmed, title: url.host ?? "webpage", url: url)
+            #endif
+            if trimmed.count > maxCharacters {
+                return String(trimmed.prefix(maxCharacters))
+            }
+            return trimmed
         } catch {
             return nil
         }
     }
 
-    /// Scrape content from multiple URLs concurrently
+    /// Scrape content from multiple URLs concurrently into clean Markdown
     func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000, useVision: Bool = false) async -> [String: String] {
         isScrapingContent = true
         defer { isScrapingContent = false }
@@ -200,12 +362,7 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content: String?
-                    if useVision {
-                        content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
-                    } else {
-                        content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
-                    }
+                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
                     return (nextURL, content)
                 }
             }
@@ -232,12 +389,7 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content: String?
-                        if useVision {
-                            content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
-                        } else {
-                            content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
-                        }
+                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: useVision)
                         return (nextURL, content)
                     }
                 }
@@ -262,6 +414,7 @@ class WebScrapingService: ObservableObject {
 
         return results
     }
+
 
     static func renderedPageText(
         from analyses: [ImageAnalysisService.PDFPageAnalysisResult],
@@ -292,39 +445,7 @@ class WebScrapingService: ObservableObject {
         return text
     }
 
-    /// Extract readable text content from HTML using cached regexes.
-    private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
-        var text = html
 
-        // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
-        //    generic tag stripper flattens them. Numeric stats pages rely
-        //    almost entirely on tables, and the model handles `| col |`
-        //    layouts far better than space-separated rubble.
-        text = Self.extractAndReplaceTables(text)
-        // 1. Strip script/style/nav/header/footer blocks (and their content) in one alternation pass.
-        text = Self.applyRegex(Self.nonContentBlockRegex, to: text, replacement: "")
-        // 2. Strip HTML comments.
-        text = Self.applyRegex(Self.htmlCommentRegex, to: text, replacement: "")
-        // 3. Strip any remaining tags, replacing them with a space so adjacent words don't merge.
-        text = Self.applyRegex(Self.htmlTagRegex, to: text, replacement: " ")
-        // 4. Decode common HTML entities (named + numeric + hex) in a single pass.
-        text = Self.decodeHTMLEntities(text)
-        // 5. Collapse whitespace runs. Use the chunker's whitespace normaliser
-        //    so newlines (paragraph + table-row boundaries) survive the
-        //    pipeline — the chunker uses those as preferred split points.
-        text = RAGChunker.normalizeWhitespace(text)
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // 6. Cap length. `String.prefix(_:)` operates on extended grapheme
-        // clusters in Swift's `String`, so this slice is grapheme-safe and
-        // never splits a Unicode cluster — do not downgrade this to UTF-16
-        // or UnicodeScalar slicing.
-        if text.count > maxCharacters {
-            text = String(text.prefix(maxCharacters))
-        }
-
-        return text
-    }
 
     /// Finds every `<table>` in `html`, converts it to a Markdown pipe table,
     /// and splices the result back into the document — surrounded by blank

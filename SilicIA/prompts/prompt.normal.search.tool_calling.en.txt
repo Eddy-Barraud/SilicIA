@@ -1,4 +1,4 @@
-Topic or question: {{query}}
+{{groundingContext}}Topic or question: {{query}}
 
 {{corpusHint}}
 If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext` or `webSearch`) first.
@@ -12,4 +12,3 @@ Limit: {{maxOutputTokens}} tokens.
 Expected output format: clear Markdown prose.
 When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
 Never wrap non-mathematical text in LaTeX and never use \begin{ environments (such as \begin{array}).
-

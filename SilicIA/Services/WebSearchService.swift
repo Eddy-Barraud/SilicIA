@@ -351,9 +351,9 @@ class WebSearchService: ObservableObject {
         return detailsByKey
     }
 
-    /// Calls /w/rest.php/v1/page/[key] and decodes full page source content.
+    /// Calls MediaWiki /w/api.php?action=parse and decodes article HTML and title.
     private func fetchWikipediaPageDetails(for key: String, language: ModelLanguage) async -> WikipediaPageResponse? {
-        guard let pageURL = wikipediaPageEndpointURL(key: key, language: language) else {
+        guard let pageURL = wikipediaActionParseURL(key: key, language: language) else {
             return nil
         }
 
@@ -365,7 +365,15 @@ class WebSearchService: ObservableObject {
                   httpResponse.statusCode == 200 else {
                 return nil
             }
-            return try Self.jsonDecoder.decode(WikipediaPageResponse.self, from: data)
+            let parsed = try Self.jsonDecoder.decode(MediaWikiActionParseResponse.self, from: data)
+            guard let parse = parsed.parse else { return nil }
+            return WikipediaPageResponse(
+                key: key,
+                title: parse.title,
+                source: parse.text?["*"],
+                contentUrls: nil,
+                htmlUrl: nil
+            )
         } catch {
             debugLog("Wikipedia page fetch failed for key=\(key): \(error.localizedDescription)")
             return nil
@@ -504,15 +512,19 @@ class WebSearchService: ObservableObject {
         return components.url
     }
 
-    private func wikipediaPageEndpointURL(key: String, language: ModelLanguage) -> URL? {
-        guard let encodedKey = key.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) else {
-            return nil
-        }
-
+    private func wikipediaActionParseURL(key: String, language: ModelLanguage) -> URL? {
+        let decodedKey = key.removingPercentEncoding ?? key
         var components = URLComponents()
         components.scheme = "https"
         components.host = wikipediaHost(for: language)
-        components.path = "/w/rest.php/v1/page/\(encodedKey)"
+        components.path = "/w/api.php"
+        components.queryItems = [
+            URLQueryItem(name: "action", value: "parse"),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "page", value: decodedKey),
+            URLQueryItem(name: "prop", value: "text"),
+            URLQueryItem(name: "redirects", value: "1")
+        ]
         return components.url
     }
 
@@ -528,6 +540,14 @@ class WebSearchService: ObservableObject {
         case .english: return "en.wikipedia.org"
         }
     }
+}
+
+private struct MediaWikiActionParseResponse: Decodable {
+    struct ParseContent: Decodable {
+        let title: String?
+        let text: [String: String]?
+    }
+    let parse: ParseContent?
 }
 
 private struct WikipediaSearchResponse: Decodable {

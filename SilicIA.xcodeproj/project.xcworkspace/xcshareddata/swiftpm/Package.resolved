@@ -1,6 +1,15 @@
 {
-  "originHash" : "b140f3f1d712255eeb37b97690b39c645244dd30e74e60408e907a0e2ee00020",
+  "originHash" : "5dcfdd69aa3ed1a09c4d409206f32666d165b6b78b60ff6f83f1f14483d25b30",
   "pins" : [
+    {
+      "identity" : "html-to-markdown-swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/jaredhowland/html-to-markdown-swift.git",
+      "state" : {
+        "revision" : "a200a4a97ac329429653d5aa4b52049cd9a6d92f",
+        "version" : "0.9.0"
+      }
+    },
     {
       "identity" : "latexswiftui",
       "kind" : "remoteSourceControl",
@@ -29,12 +38,30 @@
       }
     },
     {
+      "identity" : "swift-readability",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Ryu0118/swift-readability.git",
+      "state" : {
+        "revision" : "2c315862f73e9ef23018d18a1ab7fe4c488560ad",
+        "version" : "0.4.0"
+      }
+    },
+    {
       "identity" : "swiftdraw",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/swhitty/SwiftDraw",
       "state" : {
         "revision" : "776456051ea2b099343e18ed8a53fca9dd2e9807",
         "version" : "0.27.0"
+      }
+    },
+    {
+      "identity" : "swiftsoup",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/scinfu/SwiftSoup.git",
+      "state" : {
+        "revision" : "9598b4f4e5a0a18f8d96e664f209e9022cddd30a",
+        "version" : "2.14.1"
       }
     }
   ],

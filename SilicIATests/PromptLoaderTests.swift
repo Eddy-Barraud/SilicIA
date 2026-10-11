@@ -23,7 +23,8 @@ final class PromptLoaderTests: XCTestCase {
                     "query": "Test query",
                     "corpusHint": "Sample hint",
                     "keyPoints": "1 to 3",
-                    "maxOutputTokens": "200"
+                    "maxOutputTokens": "200",
+                    "groundingContext": "Grounding snippet\n\n"
                 ]
             )
 
@@ -31,9 +32,11 @@ final class PromptLoaderTests: XCTestCase {
             guard let prompt = prompt else { continue }
             XCTAssertTrue(prompt.contains("Test query"))
             XCTAssertTrue(prompt.contains("Sample hint"))
+            XCTAssertTrue(prompt.contains("Grounding snippet"))
             XCTAssertTrue(prompt.contains("200"))
             XCTAssertFalse(prompt.contains("{{query}}"))
             XCTAssertFalse(prompt.contains("{{corpusHint}}"))
+            XCTAssertFalse(prompt.contains("{{groundingContext}}"))
             XCTAssertFalse(prompt.contains("Format de sortie requis : LaTeX"))
             XCTAssertFalse(prompt.contains("Required output format: LaTeX"))
         }

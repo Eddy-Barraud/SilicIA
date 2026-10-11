@@ -68,6 +68,7 @@ nonisolated enum ToolKit {
         /// `webSearch` call fetched. SearchView wires it through
         /// AIService so the cards reflect the model's tool decisions.
         var onWebResults: (@Sendable ([SearchResult]) -> Void)? = nil
+        var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
     }
 
     /// Returns the model's tool array, the per-call token budget it was
@@ -129,6 +130,7 @@ nonisolated enum ToolKit {
                 tokenBudget: webSearchBudget
             )
             webTool.onResults = config.onWebResults
+            webTool.onScrapeDuration = config.onScrapeDuration
             webTool.governor = governor
             webTool.transcriptRecorder = transcriptRecorder
             tools.append(webTool)

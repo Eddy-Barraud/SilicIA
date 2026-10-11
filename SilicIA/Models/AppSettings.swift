@@ -49,15 +49,20 @@ struct AppSettings: Codable, Equatable {
             _isFirstGuessEnabled = newValue
         }
     }
-    private var _isWebSummariesEnabled: Bool = false
-    var isWebSummariesEnabled: Bool {
+    private var _isReaderViewAndSummaryEnabled: Bool = false
+    var isReaderViewAndSummaryEnabled: Bool {
         get {
             guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _isWebSummariesEnabled
+            return _isReaderViewAndSummaryEnabled
         }
         set {
-            _isWebSummariesEnabled = newValue
+            _isReaderViewAndSummaryEnabled = newValue
         }
+    }
+    /// Compatibility alias for isReaderViewAndSummaryEnabled
+    var isWebSummariesEnabled: Bool {
+        get { isReaderViewAndSummaryEnabled }
+        set { isReaderViewAndSummaryEnabled = newValue }
     }
     var useWebVision: Bool = false
     var useDuckDuckGo: Bool = true
@@ -92,6 +97,7 @@ struct AppSettings: Codable, Equatable {
         case temperature
         case maxContextTokens
         case isFirstGuessEnabled
+        case isReaderViewAndSummaryEnabled
         case isWebSummariesEnabled
         case useWebVision
         case useDuckDuckGo
@@ -142,8 +148,13 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.temperature
         isFirstGuessEnabled = try container.decodeIfPresent(Bool.self, forKey: .isFirstGuessEnabled)
             ?? Self.defaultSettings.isFirstGuessEnabled
-        isWebSummariesEnabled = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled)
-            ?? Self.defaultSettings.isWebSummariesEnabled
+        if let readerAndSummary = try container.decodeIfPresent(Bool.self, forKey: .isReaderViewAndSummaryEnabled) {
+            isReaderViewAndSummaryEnabled = readerAndSummary
+        } else if let legacyWebSummaries = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled) {
+            isReaderViewAndSummaryEnabled = legacyWebSummaries
+        } else {
+            isReaderViewAndSummaryEnabled = Self.defaultSettings.isReaderViewAndSummaryEnabled
+        }
         useWebVision = try container.decodeIfPresent(Bool.self, forKey: .useWebVision)
             ?? Self.defaultSettings.useWebVision
         useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
@@ -175,7 +186,8 @@ struct AppSettings: Codable, Equatable {
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
         try container.encode(isFirstGuessEnabled, forKey: .isFirstGuessEnabled)
-        try container.encode(isWebSummariesEnabled, forKey: .isWebSummariesEnabled)
+        try container.encode(isReaderViewAndSummaryEnabled, forKey: .isReaderViewAndSummaryEnabled)
+        try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
         try container.encode(useWebVision, forKey: .useWebVision)
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
@@ -233,7 +245,7 @@ struct AppSettings: Codable, Equatable {
         if !FoundationModelAvailability.check().isAvailable {
             copy.useToolCalling = false
             copy.isFirstGuessEnabled = false
-            copy.isWebSummariesEnabled = false
+            copy.isReaderViewAndSummaryEnabled = false
         }
         return copy
     }

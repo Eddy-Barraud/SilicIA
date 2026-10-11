@@ -75,6 +75,31 @@ struct RAGChunker {
         options: []
     )
 
+    /// Splits text into paragraph chunks using Swift NaturalLanguage NLTokenizer(unit: .paragraph).
+    static func chunkParagraphs(
+        text: String,
+        source: String,
+        url: String? = nil,
+        pdfPage: Int? = nil
+    ) -> [RAGChunk] {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else { return [] }
+
+        let tokenizer = NLTokenizer(unit: .paragraph)
+        tokenizer.string = cleanText
+
+        var chunks: [RAGChunk] = []
+        tokenizer.enumerateTokens(in: cleanText.startIndex..<cleanText.endIndex) { range, _ in
+            let paragraph = cleanText[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !paragraph.isEmpty {
+                chunks.append(RAGChunk(source: source, text: paragraph, url: url, pdfPage: pdfPage))
+            }
+            return true
+        }
+
+        return chunks
+    }
+
     /// Chunks text with overlap while preserving non-empty slices.
     func chunk(
         text: String,
@@ -751,6 +776,12 @@ struct RAGSelectionOptions {
     /// Small fallback bonus for chunks that contain a figure cue when the
     /// query asks about a figure but does not carry stronger signals.
     let figurePresenceBonus: Double
+    /// Cosine pre-filtering threshold (score > 0.7) for two-stage ranking
+    let cosinePreFilterThreshold: Double
+    /// Minimum candidate chunks retained after pre-filtering
+    let minimumFilterCandidates: Int
+    /// Character length prefix used for fast cosine pre-filtering
+    let cosinePreFilterSampleLength: Int
 
     nonisolated static let `default` = RAGSelectionOptions(
         avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
@@ -769,7 +800,10 @@ struct RAGSelectionOptions {
         figureReferenceMatchBonus: 2.5,
         figureCaptionBonus: 0.5,
         figurePageMatchBonus: 2.0,
-        figurePresenceBonus: 0.2
+        figurePresenceBonus: 0.2,
+        cosinePreFilterThreshold: 0.9,
+        minimumFilterCandidates: 8,
+        cosinePreFilterSampleLength: 350
     )
 }
 
@@ -831,7 +865,27 @@ struct RAGSelectionResult {
 
 /// Shared context selection/relevance service for chat and search.
 actor RAGContextService {
-    /// Selects the highest-ranked chunks that fit the context budget.
+    /// In-memory cache of sentence embeddings by language to avoid repeated disk reads.
+    private var embeddingCache: [NLLanguage: NLEmbedding] = [:]
+
+    init() {
+        // Preload commonly used language embeddings in background
+        Task { [weak self] in
+            await self?.preloadEmbeddings()
+        }
+    }
+
+    /// Preloads sentence embeddings for supported languages into memory.
+    func preloadEmbeddings() {
+        let defaultLanguages: [NLLanguage] = [.english, .french, .spanish]
+        for lang in defaultLanguages {
+            if embeddingCache[lang] == nil, let emb = NLEmbedding.sentenceEmbedding(for: lang) {
+                embeddingCache[lang] = emb
+            }
+        }
+    }
+    /// - Parameter query: User query to rank against.
+    /// - Parameter historyTokens: Tokens consumed by conversation history.
     /// - Parameter maxOutputTokens: Requested response-token budget used to compute remaining context space.
     /// - Parameter contextUtilizationFactor: Optional context budget multiplier.
     ///   When nil, `options.contextUtilizationFactor` is used.
@@ -840,6 +894,7 @@ actor RAGContextService {
     func selectContext(
         chunks: [RAGChunk],
         query: String,
+        historyTokens: Int = 0,
         maxOutputTokens: Int,
         contextUtilizationFactor: Double? = nil,
         queries: [String]? = nil,
@@ -854,7 +909,9 @@ actor RAGContextService {
         }
 
         let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
-        let maxContextChars = await calculateMaxContextCharacters(
+        let maxContextChars = calculate4096BudgetedContextCharacters(
+            query: query,
+            historyTokens: historyTokens,
             maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: utilization,
             options: options
@@ -872,22 +929,123 @@ actor RAGContextService {
         // numeric tokens introduced by query expansion, not just the user's
         // original wording.
         let numericQueryString = (queries?.joined(separator: " ")).map { $0.isEmpty ? query : $0 } ?? query
+        let embedding = resolveEmbedding(for: query)
+        let queryEmbeddingInfo: (unitVector: [Double], query: String, embedding: NLEmbedding)? = {
+            guard let embedding, let rawVec = embedding.vector(for: query) else { return nil }
+            let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
+            guard norm > 0 else { return nil }
+            return (rawVec.map { $0 / norm }, query, embedding)
+        }()
+
+        #if DEBUG
+        let rankingStart = Date()
+        #endif
 
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(chunks.count)
-        for chunk in chunks {
-            let score: Double
-            if let combinedQueryVector {
-                score = cosineRelevanceScore(
-                    chunk: chunk,
-                    queryVector: combinedQueryVector,
-                    numericQueryString: numericQueryString,
+
+        if combinedQueryVector == nil, let qInfo = queryEmbeddingInfo, chunks.count > options.minimumFilterCandidates {
+            // Stage 1: Fast Cosine Pre-filtering
+            // Extract truncated lead samples to compute fast unit vectors & cosine similarity.
+            struct ChunkCandidate {
+                let index: Int
+                let chunk: RAGChunk
+                let baseScore: Double
+            }
+
+            var candidates: [ChunkCandidate] = []
+            candidates.reserveCapacity(chunks.count)
+
+            for (idx, chunk) in chunks.enumerated() {
+                let sample = String(chunk.text.prefix(options.cosinePreFilterSampleLength))
+                var baseScore: Double
+                if let sampleVec = qInfo.embedding.vector(for: sample) {
+                    let sampleNorm = sqrt(sampleVec.map { $0 * $0 }.reduce(0, +))
+                    if sampleNorm > 0 {
+                        var dot = 0.0
+                        let count = min(qInfo.unitVector.count, sampleVec.count)
+                        for i in 0..<count {
+                            dot += qInfo.unitVector[i] * (sampleVec[i] / sampleNorm)
+                        }
+                        let dist = sqrt(max(0.0, 2.0 * (1.0 - dot)))
+                        baseScore = max(0.0, 2.0 - dist)
+                    } else {
+                        baseScore = 0.0
+                    }
+                } else {
+                    baseScore = 0.0
+                }
+                // Add query intent boosts so specific figure/equation/page matches survive pre-filtering
+                baseScore += Self.numericRelevanceBoost(text: chunk.text, query: qInfo.query, options: options)
+                baseScore += Self.equationRelevanceBoost(text: chunk.text, query: qInfo.query, options: options)
+                baseScore += Self.figureRelevanceBoost(chunk: chunk, query: qInfo.query, options: options)
+                candidates.append(ChunkCandidate(index: idx, chunk: chunk, baseScore: baseScore))
+            }
+
+            // Identify candidate indices passing threshold (cosine / baseScore > 0.7)
+            let passing = candidates.filter { $0.baseScore > options.cosinePreFilterThreshold }
+            let filteredCandidates: [ChunkCandidate]
+            if passing.count >= options.minimumFilterCandidates {
+                filteredCandidates = passing
+            } else {
+                // Ensure at least minimumFilterCandidates are evaluated
+                let sortedByScore = candidates.sorted { $0.baseScore > $1.baseScore }
+                filteredCandidates = Array(sortedByScore.prefix(options.minimumFilterCandidates))
+            }
+
+            let filteredIndices = Set(filteredCandidates.map(\.index))
+
+            #if DEBUG
+            print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(filteredIndices.count) passed cosine pre-filter (> \(options.cosinePreFilterThreshold))")
+            #endif
+
+            // Stage 2: Deep evaluation on top candidates.
+            for candidate in filteredCandidates {
+                let score = nlEmbeddingRelevanceScore(
+                    chunk: candidate.chunk,
+                    query: qInfo.query,
+                    unitQueryVector: qInfo.unitVector,
+                    embedding: qInfo.embedding,
                     options: options
                 )
-            } else {
-                score = relevanceScore(chunk: chunk, query: query, options: options)
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: score))
             }
-            ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
+
+            // Append non-candidates with their Stage 1 baseScore, clamped below candidate scores if needed
+            for candidate in candidates where !filteredIndices.contains(candidate.index) {
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: candidate.baseScore))
+            }
+        } else {
+            for chunk in chunks {
+                let score: Double
+                if let combinedQueryVector {
+                    score = cosineRelevanceScore(
+                        chunk: chunk,
+                        queryVector: combinedQueryVector,
+                        numericQueryString: numericQueryString,
+                        options: options
+                    )
+                } else if let qInfo = queryEmbeddingInfo {
+                    score = nlEmbeddingRelevanceScore(
+                        chunk: chunk,
+                        query: qInfo.query,
+                        unitQueryVector: qInfo.unitVector,
+                        embedding: qInfo.embedding,
+                        options: options
+                    )
+                } else if let embedding {
+                    score = nlEmbeddingRelevanceScore(
+                        chunk: chunk,
+                        query: query,
+                        unitQueryVector: nil,
+                        embedding: embedding,
+                        options: options
+                    )
+                } else {
+                    score = relevanceScore(chunk: chunk, query: query, options: options)
+                }
+                ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
+            }
         }
 
         ranked.sort { lhs, rhs in
@@ -896,6 +1054,15 @@ actor RAGContextService {
             }
             return lhs.relevanceScore > rhs.relevanceScore
         }
+
+        #if DEBUG
+        let rankingElapsed = Date().timeIntervalSince(rankingStart)
+        print(String(format: "[Timing][RAGContextService] Ranked %d chunks in %.3f s (%.2f ms)", chunks.count, rankingElapsed, rankingElapsed * 1000.0))
+        let debugRanked = ranked.enumerated().map { index, r in
+            (rank: index + 1, score: r.relevanceScore, source: r.chunk.source, text: r.chunk.text)
+        }
+        DebugRAGStorage.shared.saveRankedChunks(query: query, chunks: debugRanked)
+        #endif
 
         var selected: [String] = []
         var selectedChunks: [RankedRAGChunk] = []
@@ -960,6 +1127,86 @@ actor RAGContextService {
                 avgCharsPerToken: options.avgCharsPerToken
             )
         }
+    }
+
+    private func calculate4096BudgetedContextCharacters(
+        query: String,
+        historyTokens: Int,
+        maxOutputTokens: Int,
+        contextUtilizationFactor: Double,
+        options: RAGSelectionOptions
+    ) -> Int {
+        let queryTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: query.count)
+        let effectiveOutputTokens = TokenBudgeting.clampedOutputTokens(
+            requestedMaxTokens: maxOutputTokens,
+            instructionTokens: options.instructionTokens,
+            promptOverheadTokens: options.promptOverheadTokens,
+            minContextTokens: options.minContextTokens
+        )
+        let nonContextTokens = queryTokens + historyTokens + options.instructionTokens + options.promptOverheadTokens + effectiveOutputTokens
+        let availableTokens = max(0, TokenBudgeting.contextWindowLimit - nonContextTokens)
+        let budgetedTokens = Int(Double(availableTokens) * min(max(contextUtilizationFactor, 0.1), 1.0))
+        return max(options.minContextTokens * options.avgCharsPerToken, budgetedTokens * options.avgCharsPerToken)
+    }
+
+    private func resolveEmbedding(for query: String) -> NLEmbedding? {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(query)
+        let language = recognizer.dominantLanguage ?? .english
+
+        if let cached = embeddingCache[language] {
+            return cached
+        }
+        if let loaded = NLEmbedding.sentenceEmbedding(for: language) {
+            embeddingCache[language] = loaded
+            return loaded
+        }
+        if let englishCached = embeddingCache[.english] {
+            return englishCached
+        }
+        if let englishLoaded = NLEmbedding.sentenceEmbedding(for: .english) {
+            embeddingCache[.english] = englishLoaded
+            return englishLoaded
+        }
+        return nil
+    }
+
+    private func nlEmbeddingRelevanceScore(
+        chunk: RAGChunk,
+        query: String,
+        unitQueryVector: [Double]?,
+        embedding: NLEmbedding,
+        options: RAGSelectionOptions
+    ) -> Double {
+        let distance: Double
+        if let unitQueryVector, let chunkVector = embedding.vector(for: chunk.text) {
+            let chunkNorm = sqrt(chunkVector.map { $0 * $0 }.reduce(0, +))
+            if chunkNorm > 0 {
+                var diffSq = 0.0
+                let count = min(unitQueryVector.count, chunkVector.count)
+                for i in 0..<count {
+                    let d = unitQueryVector[i] - (chunkVector[i] / chunkNorm)
+                    diffSq += d * d
+                }
+                distance = sqrt(diffSq)
+            } else {
+                distance = embedding.distance(between: query, and: chunk.text, distanceType: .cosine)
+            }
+        } else {
+            distance = embedding.distance(between: query, and: chunk.text, distanceType: .cosine)
+        }
+
+        guard !distance.isNaN else {
+            return relevanceScore(chunk: chunk, query: query, options: options)
+        }
+        var score = max(0.0, 2.0 - distance)
+        if chunk.text.count > options.longChunkCharacterThreshold {
+            score += options.longChunkBonusScore
+        }
+        score += Self.numericRelevanceBoost(text: chunk.text, query: query, options: options)
+        score += Self.equationRelevanceBoost(text: chunk.text, query: query, options: options)
+        score += Self.figureRelevanceBoost(chunk: chunk, query: query, options: options)
+        return score
     }
 
     private func relevanceScore(chunk: RAGChunk, query: String, options: RAGSelectionOptions) -> Double {

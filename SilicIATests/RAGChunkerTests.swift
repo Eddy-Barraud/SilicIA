@@ -102,6 +102,115 @@ final class RAGChunkerTests: XCTestCase {
         })
     }
 
+    func testParagraphChunkingUsingNLTokenizer() {
+        let sampleMarkdown = """
+        # Title of Article
+
+        First paragraph about artificial intelligence and swift readability. It contains several sentences.
+
+        Second paragraph explaining NaturalLanguage NLTokenizer and embeddings.
+
+        Third paragraph with conclusion.
+        """
+
+        let chunks = RAGChunker.chunkParagraphs(text: sampleMarkdown, source: "Web: Example", url: "https://example.com")
+        XCTAssertEqual(chunks.count, 4)
+        XCTAssertEqual(chunks[0].text, "# Title of Article")
+        XCTAssertTrue(chunks[1].text.contains("First paragraph"))
+        XCTAssertTrue(chunks[2].text.contains("Second paragraph"))
+        XCTAssertTrue(chunks[3].text.contains("Third paragraph"))
+        XCTAssertEqual(chunks[0].url, "https://example.com")
+    }
+
+    func testRAGContextServiceRankingAnd4096Budgeting() async {
+        let service = RAGContextService()
+        let chunks = [
+            RAGChunk(source: "Page 1", text: "Photosynthesis is the biological process by which plants convert light energy into chemical energy.", url: "https://p1.com", pdfPage: nil),
+            RAGChunk(source: "Page 2", text: "Quantum computing utilizes superposition and entanglement to perform calculations.", url: "https://p2.com", pdfPage: nil),
+            RAGChunk(source: "Page 3", text: "Chlorophyll in plant leaves absorbs sunlight during photosynthesis.", url: "https://p3.com", pdfPage: nil)
+        ]
+
+        let query = "How does photosynthesis work in plants?"
+        let historyTokens = 200
+        let result = await service.selectContext(
+            chunks: chunks,
+            query: query,
+            historyTokens: historyTokens,
+            maxOutputTokens: 1000
+        )
+
+        XCTAssertFalse(result.rankedChunks.isEmpty)
+        // Photosynthesis chunks should rank higher than quantum computing
+        let topChunk = result.rankedChunks.first
+        XCTAssertTrue(topChunk?.chunk.text.contains("Photosynthesis") == true || topChunk?.chunk.text.contains("Chlorophyll") == true)
+
+        // Ensure selectedContext is non-empty and fits context window
+        XCTAssertFalse(result.selectedContext.isEmpty)
+        let estimatedTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: result.selectedContext.count)
+        // Check that combined prompt elements fit 4096
+        let totalTurnTokens = estimatedTokens + historyTokens + 100 + 80 + 1000
+        XCTAssertLessThanOrEqual(totalTurnTokens, TokenBudgeting.contextWindowLimit + 500)
+    }
+
+    func testTwoStageCosinePreFiltering() async {
+        let service = RAGContextService()
+        // Create 20 chunks: 3 highly relevant chunks, 17 irrelevant filler chunks
+        var chunks: [RAGChunk] = [
+            RAGChunk(source: "Winner 1", text: "The Nobel Prize in Chemistry 2017 was awarded to Jacques Dubochet, Joachim Frank and Richard Henderson for developing cryo-electron microscopy.", url: "https://nobel.org/1", pdfPage: nil),
+            RAGChunk(source: "Winner 2", text: "The Nobel Prize in Chemistry winners for 2017 developed cryo-electron microscopy for the high-resolution structure determination of biomolecules.", url: "https://nobel.org/2", pdfPage: nil),
+            RAGChunk(source: "Winner 3", text: "In 2017, Richard Henderson was awarded the Nobel Prize in Chemistry for using an electron microscope to generate 3D structures.", url: "https://nobel.org/3", pdfPage: nil)
+        ]
+
+        for i in 1...17 {
+            chunks.append(RAGChunk(
+                source: "Filler \(i)",
+                text: "Unrelated topic \(i): We talk about gardening, cooking pasta, soccer league results, weather forecasts, and bicycle maintenance.",
+                url: "https://filler\(i).com",
+                pdfPage: nil
+            ))
+        }
+
+        let query = "Who won the Nobel Prize in Chemistry in 2017?"
+        let options = RAGSelectionOptions(
+            avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
+            instructionTokens: TokenBudgeting.instructionTokens,
+            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
+            minContextTokens: TokenBudgeting.minContextTokens,
+            contextUtilizationFactor: 0.8,
+            minimumFallbackContextCharacters: 200,
+            longChunkCharacterThreshold: 300,
+            longChunkBonusScore: 0.2,
+            numericTokenMatchBonus: 0.6,
+            numericPresenceBonus: 0.3,
+            equationReferenceMatchBonus: 2.5,
+            equationFormulaBonus: 0.5,
+            equationPresenceBonus: 0.2,
+            figureReferenceMatchBonus: 2.5,
+            figureCaptionBonus: 0.5,
+            figurePageMatchBonus: 2.0,
+            figurePresenceBonus: 0.2,
+            cosinePreFilterThreshold: 0.7,
+            minimumFilterCandidates: 5,
+            cosinePreFilterSampleLength: 350
+        )
+
+        let result = await service.selectContext(
+            chunks: chunks,
+            query: query,
+            historyTokens: 0,
+            maxOutputTokens: 500,
+            options: options
+        )
+
+        XCTAssertEqual(result.rankedChunks.count, 20)
+        // Top chunks should contain the chemistry Nobel prize chunks
+        let top3 = result.rankedChunks.prefix(3)
+        for ranked in top3 {
+            XCTAssertTrue(ranked.chunk.source.hasPrefix("Winner"), "Expected Winner in top 3 but got \(ranked.chunk.source) with score \(ranked.relevanceScore)")
+            XCTAssertGreaterThan(ranked.relevanceScore, 0.7)
+        }
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size

@@ -198,9 +198,14 @@ final class ChatService: ObservableObject {
             preAnalyzedUseWebVision = useWebVision
         }
         debugContext("sendMessage chunkCount=\(chunks.count)")
+        let historyMessages = messages.dropLast()
+        let historyText = historyMessages.suffix(Self.historyMessageLimit).map { "\($0.role == .assistant ? "Assistant" : "User"): \($0.content)" }.joined(separator: "\n")
+        let historyTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: historyText.count)
+
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
+            historyTokens: historyTokens,
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
@@ -350,6 +355,10 @@ final class ChatService: ObservableObject {
             let assistantID = UUID()
             streamingAssistantID = assistantID
             messages.append(ChatMessage(id: assistantID, role: .assistant, content: "", citations: citations))
+
+            #if DEBUG
+            DebugRAGStorage.shared.logFinalPrompt(prompt, label: "Chat")
+            #endif
 
             var latestPartial = ""
             let responseStream = session.streamResponse(to: prompt, options: options)
@@ -842,11 +851,9 @@ final class ChatService: ObservableObject {
                   !retrievedContent.isEmpty else {
                 continue
             }
-            let chunked = await ragChunker.chunk(
+            let chunked = RAGChunker.chunkParagraphs(
                 text: retrievedContent,
                 source: result.title,
-                maxChunkTokens: Self.webChunkMaxTokens,
-                overlapTokens: Self.webChunkOverlapTokens,
                 url: result.url
             )
             chunks.append(contentsOf: chunked)
@@ -865,11 +872,9 @@ final class ChatService: ObservableObject {
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
-                let chunked = await ragChunker.chunk(
+                let chunked = RAGChunker.chunkParagraphs(
                     text: text,
                     source: "Web: \(url)",
-                    maxChunkTokens: Self.webChunkMaxTokens,
-                    overlapTokens: Self.webChunkOverlapTokens,
                     url: url
                 )
                 chunks.append(contentsOf: chunked)

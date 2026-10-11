@@ -107,5 +107,20 @@ final class WebSearchServiceTests: XCTestCase {
         let esText = esResults.map { "\($0.title) \($0.snippet)" }.joined(separator: " ").lowercased()
         XCTAssertTrue(esText.contains("madrid") || esText.contains("españa"), "Spanish Wikipedia should identify Madrid or España. Found: \(esText)")
     }
+
+    @MainActor
+    func testWikipediaAPIArticleExtraction() async throws {
+        let scraper = WebScrapingService()
+        guard let url = URL(string: "https://en.wikipedia.org/wiki/Swift_(programming_language)") else {
+            XCTFail("Invalid test URL")
+            return
+        }
+
+        let (title, markdown) = try await scraper.extractMarkdown(from: url, timeoutSeconds: 5.0)
+        XCTAssertFalse(title.isEmpty, "Title should not be empty")
+        XCTAssertFalse(markdown.isEmpty, "Markdown content should not be empty")
+        let lowered = markdown.lowercased()
+        XCTAssertTrue(lowered.contains("apple") || lowered.contains("programming language"), "Markdown should contain relevant topic information")
+    }
 }
 

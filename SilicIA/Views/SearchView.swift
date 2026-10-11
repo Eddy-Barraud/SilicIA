@@ -159,10 +159,11 @@ struct SearchView: View {
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
-    // Per-result web page summaries
+    // Per-result web page reader view and summaries
     @State private var isShowingWebPageSummaryOverlay = false
     @State private var selectedWebPageSummaryResult: SearchResult?
     @State private var webPageSummaryText: String = ""
+    @State private var webPageMarkdownText: String = ""
     @State private var webPageSummaryError: String?
     @State private var isGeneratingWebPageSummary = false
     @State private var activeWebPageSummaryRequestID = UUID()
@@ -567,7 +568,7 @@ struct SearchView: View {
                             result: result,
                             matchingScore: matchingScoresByURL[result.url] ?? 0,
                             accessibilityLanguage: settings.language,
-                            isWebSummariesEnabled: settings.isWebSummariesEnabled,
+                            isReaderViewAndSummaryEnabled: settings.isReaderViewAndSummaryEnabled,
                             onRequestSummary: { tapped in
                                 presentWebPageSummary(for: tapped)
                             }
@@ -895,11 +896,11 @@ struct SearchView: View {
                 }
             }
 
-            // Web Summaries Toggle
+            // Reader View and Summary Toggle
             VStack(alignment: .leading, spacing: 4) {
                 let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isWebSummariesEnabled) {
-                    Text(L.t("search.settings.webSummariesToggle", language: settings.language))
+                Toggle(isOn: $settingsStore.settings.isReaderViewAndSummaryEnabled) {
+                    Text(L.t("search.settings.readerViewAndSummaryToggle", language: settings.language))
                         .font(.subheadline)
                 }
                 .disabled(!isModelAvailable)
@@ -1081,17 +1082,32 @@ struct SearchView: View {
         .glassCard(cornerRadius: 16)
     }
 
-    // MARK: - Web Page Summary Overlay
+    // MARK: - Web Page Reader View and Summary Overlay
     private var webPageSummaryOverlay: some View {
         ZStack {
-            Color.black.opacity(0.25)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture {
                     dismissWebPageSummaryOverlay()
                 }
 
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Header bar
                 HStack(spacing: 10) {
+                    if let result = selectedWebPageSummaryResult {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text(result.url)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
                     Button {
                         guard let urlString = selectedWebPageSummaryResult?.url else { return }
                         openWebPage(urlString)
@@ -1105,8 +1121,6 @@ struct SearchView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Spacer()
-
                     Button {
                         dismissWebPageSummaryOverlay()
                     } label: {
@@ -1117,49 +1131,81 @@ struct SearchView: View {
                     .buttonStyle(.plain)
                 }
 
-                if let result = selectedWebPageSummaryResult {
-                    Text(result.title)
-                        .font(.headline)
-                        .lineLimit(2)
-                }
-
                 Divider()
 
-                if isGeneratingWebPageSummary {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
-                            .foregroundColor(.secondary)
-                        Spacer()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // AI Summary on top
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.accentColor)
+
+                                if isGeneratingWebPageSummary {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                }
+                                Spacer()
+                            }
+
+                            if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
+                                Text(L.t("search.webPage.generatingSummary", language: settings.language))
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if let webPageSummaryError, webPageSummaryText.isEmpty {
+                                Text(webPageSummaryError)
+                                    .font(.subheadline)
+                                    .foregroundColor(.red)
+                            } else if !webPageSummaryText.isEmpty {
+                                StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
+                                    .font(.body)
+                            }
+                        }
+                        .padding(12)
+                        .subtleAccentCard(cornerRadius: 12)
+
+                        // Reader view: Full Markdown content
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(L.t("search.webPage.readerContent", language: settings.language), systemImage: "doc.text")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.secondary)
+
+                            if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
+                                ProgressView()
+                                    .padding(.vertical, 20)
+                                    .frame(maxWidth: .infinity)
+                            } else if !webPageMarkdownText.isEmpty {
+                                MarkdownContentView(markdown: webPageMarkdownText)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
+                                Text(snippet)
+                                    .font(.body)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 4)
                     }
-                } else if let webPageSummaryError,
-                          !webPageSummaryError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(webPageSummaryError)
-                        .font(.body)
-                        .foregroundColor(.red)
-                } else {
-                    ScrollView {
-                        Text(webPageSummaryText)
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
+                    .padding(.vertical, 4)
                 }
             }
             .padding()
-            .frame(maxWidth: 650, maxHeight: 460)
+            .frame(maxWidth: 750, maxHeight: 620)
             .glassCard(cornerRadius: 16)
-            .shadow(radius: 12)
+            .shadow(radius: 16)
             .padding()
         }
     }
 
     private func presentWebPageSummary(for result: SearchResult) {
-        guard settings.isWebSummariesEnabled else { return }
+        guard settings.isReaderViewAndSummaryEnabled else { return }
 
         selectedWebPageSummaryResult = result
         webPageSummaryText = ""
+        webPageMarkdownText = ""
         webPageSummaryError = nil
         isGeneratingWebPageSummary = true
         isShowingWebPageSummaryOverlay = true
@@ -1168,19 +1214,33 @@ struct SearchView: View {
         activeWebPageSummaryRequestID = requestID
 
         Task {
-            let summary = await aiService.summarizeWebPage(
+            if let targetURL = URL(string: result.url) {
+                if let extracted = try? await WebScrapingService().extractMarkdown(from: targetURL) {
+                    guard activeWebPageSummaryRequestID == requestID else { return }
+                    webPageMarkdownText = extracted.markdown
+                }
+            }
+
+            let (summary, markdown) = await aiService.summarizeWebPage(
                 title: result.title,
                 url: result.url,
                 language: settings.language,
-                useWebVision: settings.useWebVision
+                useWebVision: settings.useWebVision,
+                onPartialUpdate: { partial in
+                    guard activeWebPageSummaryRequestID == requestID else { return }
+                    webPageSummaryText = partial
+                }
             )
             guard activeWebPageSummaryRequestID == requestID else { return }
             isGeneratingWebPageSummary = false
 
+            if !markdown.isEmpty {
+                webPageMarkdownText = markdown
+            }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
+            if trimmed.isEmpty && webPageSummaryText.isEmpty {
                 webPageSummaryError = L.t("search.webPage.unavailable", language: settings.language)
-            } else {
+            } else if !trimmed.isEmpty {
                 webPageSummaryText = trimmed
             }
         }
@@ -1191,6 +1251,7 @@ struct SearchView: View {
         isGeneratingWebPageSummary = false
         selectedWebPageSummaryResult = nil
         webPageSummaryText = ""
+        webPageMarkdownText = ""
         webPageSummaryError = nil
         activeWebPageSummaryRequestID = UUID()
     }
@@ -1411,30 +1472,6 @@ struct SearchView: View {
         
         Task {
             do {
-                // Tool-calling mode: skip the auto web search entirely.
-                // The model owns the decision to query the web via its
-                // `webSearch` tool. Otherwise we end up handing it both a
-                // pre-fetched corpus AND the tools, and it just calls
-                // `searchContext` over the corpus — `webSearch` never
-                // fires. Result cards stay empty in this mode; the
-                // summary card carries the model's tool-driven answer.
-                if settings.useToolCalling && !noAIOnly {
-                    guard activeSearchRequestID == requestID else { return }
-                    searchResults = []
-                    errorMessage = nil
-                    showingSummary = true
-                    await generateSummary(
-                        maxScrapingResults: resultsCount,
-                        maxScrapingChars: scrapingChars,
-                        summaryResults: [],
-                        generationProfile: generationProfile,
-                        queries: nil
-                    )
-                    if activeSearchRequestID == requestID {
-                        isGeneratingFirstGuess = false
-                    }
-                    return
-                }
 
                 let fetchedResults: [SearchResult]
                 var allQueries: [String] = [trimmedQuery]
@@ -1720,7 +1757,11 @@ struct SearchResultCard: View {
     var matchingScore: Double = 0
     /// UI language for accessibility-label localisation. Defaults to English.
     var accessibilityLanguage: ModelLanguage = .english
-    var isWebSummariesEnabled: Bool = false
+    var isReaderViewAndSummaryEnabled: Bool = false
+    var isWebSummariesEnabled: Bool {
+        get { isReaderViewAndSummaryEnabled }
+        set { isReaderViewAndSummaryEnabled = newValue }
+    }
     var onRequestSummary: ((SearchResult) -> Void)? = nil
 
     #if canImport(UIKit)
@@ -1743,7 +1784,7 @@ struct SearchResultCard: View {
     #endif
 
     private func handleTitleTap() {
-        if isWebSummariesEnabled, let onRequestSummary {
+        if isReaderViewAndSummaryEnabled, let onRequestSummary {
             onRequestSummary(result)
             return
         }

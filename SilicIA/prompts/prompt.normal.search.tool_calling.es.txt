@@ -1,4 +1,4 @@
-Tema o pregunta: {{query}}
+{{groundingContext}}Tema o pregunta: {{query}}
 
 {{corpusHint}}
 Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext` o `webSearch`).

@@ -43,6 +43,10 @@ class AIService: ObservableObject {
 
     @Published var debugTimings: [TimingMetric] = []
     @Published var debugNotes: [String] = []
+    var lastFirstGuessDuration: Double? = nil
+    var toolRAGScrapeDuration: Double = 0.0
+    var toolRAGChunkDuration: Double = 0.0
+    var toolRAGRankingDuration: Double = 0.0
     #endif
 
     private let webScraper = WebScrapingService()
@@ -94,6 +98,15 @@ class AIService: ObservableObject {
     ) async -> String {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return "" }
+
+        #if DEBUG
+        let firstGuessStart = Date()
+        defer {
+            let elapsed = Date().timeIntervalSince(firstGuessStart)
+            self.lastFirstGuessDuration = elapsed
+            print(String(format: "[Timing][FirstGuess] Generated intuition in %.3f s", elapsed))
+        }
+        #endif
 
         do {
             // Fresh, ephemeral session per call — first guess is a one-shot,
@@ -183,7 +196,7 @@ class AIService: ObservableObject {
         }
     }
 
-    /// Summarizes a single web page using Foundation Models. Returns an empty string when unavailable.
+    /// Summarizes a single web page using Foundation Models and returns both the summary and clean markdown.
     func summarizeWebPage(
         title: String,
         url: String,
@@ -191,11 +204,20 @@ class AIService: ObservableObject {
         maxCharacters: Int = 4500,
         temperature: Double = 0.3,
         maxTokens: Int = 320,
-        useWebVision: Bool = false
-    ) async -> String {
-        let scraped = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters, useVision: useWebVision) ?? ""
-        let trimmedContent = scraped.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedContent.isEmpty else { return "" }
+        useWebVision: Bool = false,
+        onPartialUpdate: ((String) -> Void)? = nil
+    ) async -> (summary: String, markdown: String) {
+        var pageMarkdown = ""
+        if let targetURL = URL(string: url) {
+            if let extracted = try? await webScraper.extractMarkdown(from: targetURL) {
+                pageMarkdown = extracted.markdown
+            }
+        }
+        if pageMarkdown.isEmpty {
+            pageMarkdown = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters, useVision: useWebVision) ?? ""
+        }
+        let trimmedContent = pageMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContent.isEmpty else { return ("", "") }
 
         let instructions = PromptLoader.loadPrompt(
             mode: "normal",
@@ -211,12 +233,12 @@ class AIService: ObservableObject {
             replacements: [
                 "title": title,
                 "url": url,
-                "content": trimmedContent
+                "content": String(trimmedContent.prefix(maxCharacters))
             ]
         ) ?? fallbackWebPagePrompt(
             title: title,
             url: url,
-            content: trimmedContent,
+            content: String(trimmedContent.prefix(maxCharacters)),
             language: language
         )
 
@@ -226,12 +248,31 @@ class AIService: ObservableObject {
                 temperature: temperature,
                 maximumResponseTokens: maxTokens
             )
+            #if DEBUG
+            DebugRAGStorage.shared.logFinalPrompt(prompt, label: "WebPageSummary")
+            #endif
+
+            if let onPartialUpdate {
+                var latestPartial = ""
+                let responseStream = session.streamResponse(to: prompt, options: options)
+                for try await snapshot in responseStream {
+                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !partial.isEmpty, partial != latestPartial else { continue }
+                    latestPartial = partial
+                    onPartialUpdate(partial)
+                }
+                if !latestPartial.isEmpty {
+                    return (latestPartial, pageMarkdown)
+                }
+            }
+
             let response = try await session.respond(to: prompt, options: options)
             let text = String(describing: response.content)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
+            return (ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text), pageMarkdown)
         } catch {
-            return ""
+            return ("", pageMarkdown)
         }
     }
 
@@ -261,6 +302,9 @@ class AIService: ObservableObject {
         #if DEBUG
         debugTimings = []
         debugNotes = []
+        toolRAGScrapeDuration = 0.0
+        toolRAGChunkDuration = 0.0
+        toolRAGRankingDuration = 0.0
         let summarizeStart = Date()
         #endif
 
@@ -287,9 +331,10 @@ class AIService: ObservableObject {
             maxCharacters: effectiveScrapingChars,
             useVision: useWebVision
         )
+        let ragScrapeDuration = Date().timeIntervalSince(scrapeStart)
         debugTimings.append(TimingMetric(
             name: "WebScrapingService.scrapeMultiplePages",
-            seconds: Date().timeIntervalSince(scrapeStart)
+            seconds: ragScrapeDuration
         ))
         if let stats = webScraper.lastDebugStats {
             if stats.candidateURLCount <= stats.requestedLimit {
@@ -313,39 +358,41 @@ class AIService: ObservableObject {
 
         var chunks: [RAGChunk] = []
         #if DEBUG
-        let contextPrepStart = Date()
+        let chunkingStart = Date()
         #endif
         for result in results {
             if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
-                let chunked = await ragChunker.chunk(
+                let chunked = RAGChunker.chunkParagraphs(
                     text: retrievedContent,
                     source: result.title,
-                    maxChunkTokens: Self.webChunkMaxTokens,
-                    overlapTokens: Self.webChunkOverlapTokens,
                     url: result.url
                 )
                 chunks.append(contentsOf: chunked)
             } else if let pageContent = scrapedContent[result.url] {
-                let chunked = await ragChunker.chunk(
+                let chunked = RAGChunker.chunkParagraphs(
                     text: pageContent,
                     source: result.title,
-                    maxChunkTokens: Self.webChunkMaxTokens,
-                    overlapTokens: Self.webChunkOverlapTokens,
                     url: result.url
                 )
                 chunks.append(contentsOf: chunked)
             } else {
-                let chunked = await ragChunker.chunk(
+                let chunked = RAGChunker.chunkParagraphs(
                     text: result.snippet,
                     source: result.title,
-                    maxChunkTokens: Self.webChunkMaxTokens,
-                    overlapTokens: Self.webChunkOverlapTokens,
                     url: result.url
                 )
                 chunks.append(contentsOf: chunked)
             }
         }
+        #if DEBUG
+        let chunkingDuration = Date().timeIntervalSince(chunkingStart)
+        debugTimings.append(TimingMetric(
+            name: "Paragraph Chunking (NLTokenizer)",
+            seconds: chunkingDuration
+        ))
+        print(String(format: "[Timing][Chunking] Chunked into %d paragraphs in %.3f s (%.2f ms)", chunks.count, chunkingDuration, chunkingDuration * 1000.0))
+        #endif
 
         let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxTokens,
@@ -358,6 +405,10 @@ class AIService: ObservableObject {
             : Self.fastSummaryContextUtilizationFactor
         self.activeEffectiveMaxTokens = effectiveMaxTokens
         self.activeContextUtilizationFactor = contextUtilizationFactor
+
+        #if DEBUG
+        let rankingPrepStart = Date()
+        #endif
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
@@ -365,6 +416,13 @@ class AIService: ObservableObject {
             contextUtilizationFactor: contextUtilizationFactor,
             queries: queries
         )
+        #if DEBUG
+        let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
+        debugTimings.append(TimingMetric(
+            name: "NLEmbedding Ranking & Selection",
+            seconds: rankingDuration
+        ))
+        #endif
 
         // Expose per-source match scores derived from the selected chunks so
         // the UI can render a relevance badge on each result card. Sources
@@ -376,10 +434,6 @@ class AIService: ObservableObject {
         }
 
         #if DEBUG
-        debugTimings.append(TimingMetric(
-            name: "RAG context prep (chunk + select)",
-            seconds: Date().timeIntervalSince(contextPrepStart)
-        ))
         // Full per-chunk dump of what the model is about to see for the
         // search-summary prompt. Only chunks that survived budgeting are
         // included — the rest of the scraped pages are discarded before
@@ -424,8 +478,18 @@ class AIService: ObservableObject {
         // same RAG pipeline the prompt-stuffing path uses so the cards
         // render with match-score badges instead of bare 0% rings.
         if useToolCalling, !toolFetchedResults.isEmpty, let onMatchingScores {
+            #if DEBUG
+            let toolChunkStart = Date()
+            #endif
             let toolChunks = await chunkResultsForRAG(toolFetchedResults)
+            #if DEBUG
+            let toolChunkElapsed = Date().timeIntervalSince(toolChunkStart)
+            toolRAGChunkDuration += toolChunkElapsed
+            #endif
             if !toolChunks.isEmpty {
+                #if DEBUG
+                let toolRankStart = Date()
+                #endif
                 let toolSelected = await ragContextService.selectContext(
                     chunks: toolChunks,
                     query: query,
@@ -433,24 +497,67 @@ class AIService: ObservableObject {
                     contextUtilizationFactor: contextUtilizationFactor,
                     queries: queries
                 )
+                #if DEBUG
+                let toolRankElapsed = Date().timeIntervalSince(toolRankStart)
+                toolRAGRankingDuration += toolRankElapsed
+                #endif
                 let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
                 onMatchingScores(scores)
             }
         }
 
         #if DEBUG
+        let summaryGenDuration = Date().timeIntervalSince(generationStart)
         debugTimings.append(TimingMetric(
             name: "generateSummaryWithFoundationModels",
-            seconds: Date().timeIntervalSince(generationStart)
+            seconds: summaryGenDuration
         ))
         #endif
         let citations = generateAnswer ? RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language) : ""
 
         #if DEBUG
+        let totalElapsed = Date().timeIntervalSince(summarizeStart)
         debugTimings.append(TimingMetric(
             name: "AIService.summarize (total)",
-            seconds: Date().timeIntervalSince(summarizeStart)
+            seconds: totalElapsed
         ))
+
+        // Total decomposition of time spent in RAG vs LLM answering
+        let effectiveScrapeDuration = max(ragScrapeDuration, toolRAGScrapeDuration)
+        let effectiveChunkDuration = max(chunkingDuration, toolRAGChunkDuration)
+        let effectiveRankingDuration = max(rankingDuration, toolRAGRankingDuration)
+        let totalRAGDuration = effectiveScrapeDuration + effectiveChunkDuration + effectiveRankingDuration
+
+        // In tool-calling mode, web searching & scraping occur synchronously
+        // inside summaryGenDuration. Subtract that embedded RAG time to isolate
+        // genuine LLM generation time.
+        let pureLLMDuration = useToolCalling ? max(0.0, summaryGenDuration - totalRAGDuration) : summaryGenDuration
+        let totalLLMDuration = pureLLMDuration
+        let sumPhases = totalRAGDuration + totalLLMDuration
+
+        let ragPercent = sumPhases > 0 ? (totalRAGDuration / sumPhases) * 100.0 : 0.0
+        let llmPercent = sumPhases > 0 ? (totalLLMDuration / sumPhases) * 100.0 : 0.0
+
+        var breakdownLines: [String] = [
+            "┏━━━━━━━━━━━━━━━━ [DEBUG TIMING BREAKDOWN] ━━━━━━━━━━━━━━━━",
+            "┃ Total Elapsed:  \(String(format: "%.3f s", totalElapsed))",
+            "┃ ├─ RAG Pipeline: \(String(format: "%.3f s (%.1f%%)", totalRAGDuration, ragPercent))",
+            "┃ │  ├─ Web Download/Markdown: \(String(format: "%.3f s", effectiveScrapeDuration))",
+            "┃ │  ├─ Paragraph Chunking:    \(String(format: "%.3f s (%.2f ms)", effectiveChunkDuration, effectiveChunkDuration * 1000.0))",
+            "┃ │  └─ NLEmbedding Ranking:   \(String(format: "%.3f s (%.2f ms)", effectiveRankingDuration, effectiveRankingDuration * 1000.0))",
+            "┃ └─ LLM Answering: \(String(format: "%.3f s (%.1f%%)", totalLLMDuration, llmPercent))"
+        ]
+        if let firstGuessDuration = lastFirstGuessDuration, firstGuessDuration > 0.0 {
+            breakdownLines.append("┃    ├─ First Guess (parallel): \(String(format: "%.3f s", firstGuessDuration))")
+            breakdownLines.append("┃    └─ Summary Generation:     \(String(format: "%.3f s", summaryGenDuration))")
+        } else {
+            breakdownLines.append("┃    └─ Summary Generation:     \(String(format: "%.3f s", summaryGenDuration))")
+        }
+        breakdownLines.append("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+        let breakdownLog = breakdownLines.joined(separator: "\n")
+        print(breakdownLog)
+        debugNotes.append(breakdownLog)
         #endif
 
         self.summary = summary
@@ -509,11 +616,9 @@ class AIService: ObservableObject {
                 text = result.snippet
             }
             guard !text.isEmpty else { continue }
-            let chunked = await ragChunker.chunk(
+            let chunked = RAGChunker.chunkParagraphs(
                 text: text,
                 source: result.title,
-                maxChunkTokens: Self.webChunkMaxTokens,
-                overlapTokens: Self.webChunkOverlapTokens,
                 url: result.url
             )
             chunks.append(contentsOf: chunked)
@@ -568,14 +673,20 @@ class AIService: ObservableObject {
         webSearchAvailable: Bool,
         language: ModelLanguage,
         isDeepProfile: Bool,
-        maxOutputTokens: Int
+        maxOutputTokens: Int,
+        groundingContext: String = ""
     ) -> String {
         let keyPoints = isDeepProfile ? (language == .french ? "4 à 6" : "4 to 6") : (language == .french ? "1 à 3" : "1 to 3")
+        let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasGrounding = !trimmedGrounding.isEmpty
         let corpusHint = loadSearchCorpusHint(
             chunkCount: corpusChunkCount,
             webSearchAvailable: webSearchAvailable,
-            language: language
+            language: language,
+            hasGrounding: hasGrounding
         )
+
+        let contextBlock = localizedSearchContextBlock(from: trimmedGrounding, language: language)
 
         if let loaded = PromptLoader.loadPrompt(
             mode: "normal",
@@ -586,7 +697,8 @@ class AIService: ObservableObject {
                 "query": query,
                 "corpusHint": corpusHint,
                 "keyPoints": keyPoints,
-                "maxOutputTokens": "\(maxOutputTokens)"
+                "maxOutputTokens": "\(maxOutputTokens)",
+                "groundingContext": contextBlock
             ]
         ) {
             return loaded
@@ -597,16 +709,37 @@ class AIService: ObservableObject {
             corpusHint: corpusHint,
             keyPoints: keyPoints,
             maxOutputTokens: maxOutputTokens,
-            language: language
+            language: language,
+            groundingContext: contextBlock
         )
+    }
+
+    private static func localizedSearchContextBlock(from selectedContext: String, language: ModelLanguage) -> String {
+        let trimmedContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedContext.isEmpty else { return "" }
+        switch language {
+        case .french:
+            return "Contexte web :\n\(trimmedContext)\n\n"
+        case .spanish:
+            return "Contexto web:\n\(trimmedContext)\n\n"
+        case .english:
+            return "Web context:\n\(trimmedContext)\n\n"
+        }
     }
 
     private static func loadSearchCorpusHint(
         chunkCount: Int,
         webSearchAvailable: Bool,
-        language: ModelLanguage
+        language: ModelLanguage,
+        hasGrounding: Bool = false
     ) -> String {
-        if chunkCount > 0 {
+        if hasGrounding {
+            switch language {
+            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext` ou `webSearch`."
+            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext` o `webSearch`."
+            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext` or `webSearch`."
+            }
+        } else if chunkCount > 0 {
             if let loaded = PromptLoader.loadPrompt(
                 mode: "normal",
                 feature: "search",
@@ -657,12 +790,13 @@ class AIService: ObservableObject {
         corpusHint: String,
         keyPoints: String,
         maxOutputTokens: Int,
-        language: ModelLanguage
+        language: ModelLanguage,
+        groundingContext: String = ""
     ) -> String {
         switch language {
         case .french:
             return """
-            Sujet ou question : \(query)
+            \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
             Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext` ou `webSearch`).
@@ -679,7 +813,7 @@ class AIService: ObservableObject {
             """
         case .spanish:
             return """
-            Tema o pregunta: \(query)
+            \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
             Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext` o `webSearch`).
@@ -696,7 +830,7 @@ class AIService: ObservableObject {
             """
         case .english:
             return """
-            Topic or question: \(query)
+            \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
             If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext` or `webSearch`) first.
@@ -1019,6 +1153,7 @@ class AIService: ObservableObject {
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
             )
             let session: LanguageModelSession
+            var toolBudget: Int = 0
             if useToolCalling {
                 let webSearchAvailable = useDuckDuckGo || useWikipedia
                 // Tool budget is sized from the clamped response cap. We
@@ -1031,7 +1166,7 @@ class AIService: ObservableObject {
                     promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
                     minContextTokens: TokenBudgeting.minContextTokens
                 )
-                let (tools, toolBudget, _) = ToolKit.assemble(
+                let assembled = ToolKit.assemble(
                     config: ToolKit.Configuration(
                         language: language,
                         corpusChunks: corpusChunks,
@@ -1055,10 +1190,19 @@ class AIService: ObservableObject {
                             Task { @MainActor [weak self = self] in
                                 await self?.appendUniqueResults(results)
                             }
+                        },
+                        onScrapeDuration: { duration in
+                            #if DEBUG
+                            Task { @MainActor [weak self = self] in
+                                self?.toolRAGScrapeDuration += duration
+                            }
+                            #endif
                         }
                     ),
                     responseTokens: clampedOutputTokens
                 )
+                toolBudget = assembled.tokenBudget
+                let tools = assembled.tools
                 #if DEBUG
                 debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
                 #endif
@@ -1114,23 +1258,39 @@ class AIService: ObservableObject {
                 }
             }
 
-            // Build the prompt. In tool-calling mode we use a tool-aware
-            // prompt that does NOT include the pre-baked scraped context;
-            // if we hand the model both a context block AND the tools, it
-            // satisfies the request from the block alone and never calls
-            // `webSearch` / `currentDateTime`. The scraped chunks are
-            // still reachable through `searchContext` as a tool. In the
-            // prompt-stuffing baseline we keep the existing template so
-            // the output remains identical when tool calling is off.
+            // Build the prompt. In tool-calling mode we provide grounding context
+            // if pre-fetched web context is available, capped so that the prompt,
+            // tools, and model answer fit within the context window.
             let prompt: String
             if useToolCalling {
+                let toolGroundingContext: String
+                if selectedContext.isEmpty {
+                    toolGroundingContext = ""
+                } else {
+                    let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
+                        maxOutputTokens: effectiveMaxTokens,
+                        reservedToolReplyTokens: toolBudget + 120
+                    )
+                    let toolGroundingTokenCap = TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
+                    let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
+                    var grounded = TokenBudgeting.truncateToApproxWordCount(
+                        selectedContext,
+                        maxWords: toolGroundingWords
+                    )
+                    if grounded.count > toolGroundingCharCap {
+                        grounded = String(grounded.prefix(toolGroundingCharCap))
+                    }
+                    toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+
                 prompt = Self.toolCallingSearchPrompt(
                     query: query,
                     corpusChunkCount: corpusChunks.count,
                     webSearchAvailable: useDuckDuckGo || useWikipedia,
                     language: language,
                     isDeepProfile: isDeepProfile,
-                    maxOutputTokens: effectiveMaxTokens
+                    maxOutputTokens: effectiveMaxTokens,
+                    groundingContext: toolGroundingContext
                 )
             } else {
                 prompt = PromptLoader.loadPrompt(
@@ -1157,6 +1317,7 @@ class AIService: ObservableObject {
             debugNotes.append(
                 "generation profile=\(profile.rawValue), budget: reqTokens=\(maxTokens), effTokens=\(effectiveMaxTokens), contextCharsIn=\(context.count), contextCharsUsed=\(selectedContext.count), promptChars=\(prompt.count)"
             )
+            DebugRAGStorage.shared.logFinalPrompt(prompt, label: "SearchSummary")
             #endif
 
             // Configure generation options using the effective (clamped) token limit

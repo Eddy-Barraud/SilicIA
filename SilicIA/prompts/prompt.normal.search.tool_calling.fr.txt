@@ -1,4 +1,4 @@
-Sujet ou question : {{query}}
+{{groundingContext}}Sujet ou question : {{query}}
 
 {{corpusHint}}
 Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext` ou `webSearch`).
@@ -12,4 +12,3 @@ Limite : {{maxOutputTokens}} tokens.
 Format de sortie attendu : texte clair en Markdown.
 Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
 N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \begin{ (comme \begin{array}).
-

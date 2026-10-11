@@ -63,6 +63,7 @@ struct WebSearchTool: Tool {
     /// once per tool invocation with the slice of `[SearchResult]` that
     /// the model received as the tool reply.
     var onResults: (@Sendable ([SearchResult]) -> Void)? = nil
+    var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
 
     /// Token budget for the entire tool reply (titles + URLs + scraped
     /// content). Caller-supplied so it scales with the conversation's
@@ -199,12 +200,15 @@ struct WebSearchTool: Tool {
             }
             return result.url
         }
+        let scrapeStart = Date()
         let scraped = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: limit,
             maxCharacters: perResultCharBudget,
             useVision: useWebVision
         )
+        let toolScrapeElapsed = Date().timeIntervalSince(scrapeStart)
+        onScrapeDuration?(toolScrapeElapsed)
 
         // Each result block carries enough metadata for the model to cite
         // it accurately in its final answer.
@@ -228,13 +232,21 @@ struct WebSearchTool: Tool {
         #if DEBUG
         print("[Tool:webSearch] returning \(top.count) result(s) to model, \(results.count) to cards")
         #endif
-        // Send EVERY fetched result to the UI sink, not just the slice the
-        // model received. The model's reply (`rendered`) is still bounded
-        // by its requested `maxResults`, so the model's context isn't
-        // affected — but the user gets to see all the sources the tool
-        // actually surfaced, the same way the prompt-stuffing path's
-        // search-result cards do.
-        onResults?(results)
+        // Enrich results with scraped content so the UI and RAG score calculator
+        // receive full text rather than empty/fallback snippets.
+        let enrichedResults = results.map { result -> SearchResult in
+            if let scrapedText = scraped[result.url], !scrapedText.isEmpty {
+                return SearchResult(
+                    id: result.id,
+                    title: result.title,
+                    url: result.url,
+                    snippet: result.snippet,
+                    retrievedContent: scrapedText
+                )
+            }
+            return result
+        }
+        onResults?(enrichedResults)
         let output = rendered.joined(separator: "\n\n")
         if let transcriptRecorder {
             await transcriptRecorder.record(tool: name, arguments: trimmed, result: output)
