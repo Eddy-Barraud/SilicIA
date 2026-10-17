@@ -36,9 +36,9 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 6
     var maxWikipediaResults: Int = 2
-    var maxResponseTokens: Int = 500
-    var temperature: Double = 0.4
-    var maxContextTokens: Int = 3400
+    var maxResponseTokens: Int = 1000
+    var temperature: Double = 0.7
+    var maxContextTokens: Int = 2916
     private var _isFirstGuessEnabled: Bool = true
     var isFirstGuessEnabled: Bool {
         get {
@@ -68,7 +68,7 @@ struct AppSettings: Codable, Equatable {
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
     var language: ModelLanguage = .systemPreferred()
-    private var _useToolCalling: Bool = false
+    private var _useToolCalling: Bool = true
     /// Experimental: when true, ChatService runs the model with on-demand
     /// `searchContext` + `calculate` tools instead of stuffing pre-selected
     /// RAG chunks into the prompt. Off by default — gives the user a

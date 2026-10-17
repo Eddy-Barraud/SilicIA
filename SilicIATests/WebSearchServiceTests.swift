@@ -169,7 +169,7 @@ final class WebSearchServiceTests: XCTestCase {
                         <img src="https://silicia.app/images/architecture.png" alt="SilicIA Architecture" />
                         <figcaption>Figure 1: SilicIA On-Device Architecture</figcaption>
                     </figure>
-                    <p>SilicIA renders Reeeed HTML directly inside Reader View so images and figures are preserved without intermediate Markdown conversion.</p>
+                    <p>SilicIA renders Reeeed HTML directly inside Reader View so images and figures are preserved without intermediate Markdown conversion, and inline formulas like $E = mc^2$ or \\(\\nabla \\cdot \\mathbf{E} = \\frac{\\rho}{\\varepsilon_0}\\) are rendered by MathJax.</p>
                     <p>This single-pass extraction also returns clean plain text for the AI summary.</p>
                 </article>
             </main>
@@ -182,6 +182,9 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertEqual(readerContent.baseURL, baseURL)
         XCTAssertTrue(readerContent.styledHTML.contains("<img"), "Styled Reader HTML should preserve <img> tags")
         XCTAssertTrue(readerContent.styledHTML.contains("architecture.png"), "Styled Reader HTML should preserve image source URL")
+        XCTAssertTrue(readerContent.styledHTML.contains("MathJax-script"), "Styled Reader HTML should inject MathJax script")
+        XCTAssertTrue(readerContent.styledHTML.contains("tex-mml-chtml.js"), "Styled Reader HTML should load MathJax v3 CHTML bundle")
+        XCTAssertTrue(readerContent.styledHTML.contains("$E = mc^2$"), "Styled Reader HTML should preserve inline LaTeX formulas for MathJax")
         XCTAssertTrue(readerContent.plainText.contains("SilicIA renders Reeeed HTML"), "Plain text should be extracted for AI summarization")
     }
 

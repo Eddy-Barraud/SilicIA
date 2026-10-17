@@ -511,7 +511,56 @@ class WebScrapingService: ObservableObject {
     #__footer {
         display: none !important;
     }
+    mjx-container[jax="CHTML"][display="true"] {
+        overflow-x: auto;
+        overflow-y: hidden;
+        max-width: 100%;
+    }
     """
+
+    private static let readerMathJaxSnippet = """
+    <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+        displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        ignoreHtmlClass: 'tex2jax_ignore'
+      },
+      startup: {
+        pageReady: function() {
+          return MathJax.startup.defaultPageReady().then(function() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+              var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+              window.webkit.messageHandlers.heightChange.postMessage(h);
+            }
+          });
+        }
+      }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    """
+
+    /// Injects the MathJax configuration and script into a Reader HTML document so inline and display LaTeX formulas render properly.
+    nonisolated static func injectMathJax(into html: String) -> String {
+        guard !html.contains("MathJax-script") else { return html }
+        if let headCloseRange = html.range(of: "</head>", options: .caseInsensitive) {
+            var modified = html
+            modified.insert(contentsOf: "\n" + readerMathJaxSnippet + "\n", at: headCloseRange.lowerBound)
+            return modified
+        } else if let bodyCloseRange = html.range(of: "</body>", options: .caseInsensitive) {
+            var modified = html
+            modified.insert(contentsOf: "\n" + readerMathJaxSnippet + "\n", at: bodyCloseRange.lowerBound)
+            return modified
+        } else {
+            return readerMathJaxSnippet + "\n" + html
+        }
+    }
 
     /// Extracts styled Reader HTML (preserving images and layout via Reeeed's ReadableDoc)
     /// along with plain text for AI summarization in a single pass.
@@ -555,17 +604,18 @@ class WebScrapingService: ObservableObject {
         if let extracted, let rawContent = extracted.content, !rawContent.isEmpty {
             let metadata = (try? await SiteMetadata.extractMetadata(fromHTML: html, baseURL: baseURL)) ?? SiteMetadata(url: baseURL)
             let theme = ReaderTheme(additionalCSS: Self.readerAdditionalCSS)
-            let styledHTML: String
+            let rawStyledHTML: String
             if let doc = ReadableDoc(
                 extracted: extracted,
                 insertHeroImage: nil,
                 metadata: metadata,
                 date: extracted.datePublished
             ) {
-                styledHTML = doc.html(includeExitReaderButton: false, theme: theme)
+                rawStyledHTML = doc.html(includeExitReaderButton: false, theme: theme)
             } else {
-                styledHTML = rawContent
+                rawStyledHTML = rawContent
             }
+            let styledHTML = Self.injectMathJax(into: rawStyledHTML)
             let title = extracted.title ?? metadata.title ?? ""
             let plainText = extracted.extractPlainText.trimmingCharacters(in: .whitespacesAndNewlines)
             let fallbackText = plainText.isEmpty ? HTMLSanitizer.htmlToPlainText(rawContent) : plainText

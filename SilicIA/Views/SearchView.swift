@@ -1992,7 +1992,8 @@ private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
             guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
             lastLoadedHTML = html
             lastLoadedBaseURL = baseURL
-            webView.loadHTMLString(html, baseURL: baseURL)
+            let htmlWithMathJax = WebScrapingService.injectMathJax(into: html)
+            webView.loadHTMLString(htmlWithMathJax, baseURL: baseURL)
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -2017,6 +2018,9 @@ private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
                 report();
                 if (window.ResizeObserver) {
                     new ResizeObserver(report).observe(document.body);
+                }
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise().then(report);
                 }
                 window.addEventListener('load', report);
                 setTimeout(report, 300);
@@ -2092,7 +2096,8 @@ private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
             guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
             lastLoadedHTML = html
             lastLoadedBaseURL = baseURL
-            webView.loadHTMLString(html, baseURL: baseURL)
+            let htmlWithMathJax = WebScrapingService.injectMathJax(into: html)
+            webView.loadHTMLString(htmlWithMathJax, baseURL: baseURL)
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -2117,6 +2122,9 @@ private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
                 report();
                 if (window.ResizeObserver) {
                     new ResizeObserver(report).observe(document.body);
+                }
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise().then(report);
                 }
                 window.addEventListener('load', report);
                 setTimeout(report, 300);
