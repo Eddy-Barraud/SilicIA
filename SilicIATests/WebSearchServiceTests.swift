@@ -122,5 +122,34 @@ final class WebSearchServiceTests: XCTestCase {
         let lowered = markdown.lowercased()
         XCTAssertTrue(lowered.contains("apple") || lowered.contains("programming language"), "Markdown should contain relevant topic information")
     }
+
+    @MainActor
+    func testReeeedHTMLArticleExtraction() async throws {
+        let scraper = WebScrapingService()
+        let sampleHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>SilicIA Neural Engine Architecture</title>
+        </head>
+        <body>
+            <header><nav><a href="/home">Home</a></nav></header>
+            <main>
+                <article>
+                    <h1>SilicIA Neural Engine Architecture</h1>
+                    <p>SilicIA leverages Apple Silicon Neural Accelerators for private, on-device intelligence.</p>
+                    <p>With unified memory and low latency inference, local RAG enables rich multi-source reasoning.</p>
+                </article>
+            </main>
+            <footer><p>&copy; 2026 SilicIA</p></footer>
+        </body>
+        </html>
+        """
+
+        let (title, markdown) = try await scraper.extractMarkdown(from: sampleHTML, baseURL: URL(string: "https://silicia.app/article")!)
+        XCTAssertTrue(title.contains("SilicIA") || markdown.contains("SilicIA"), "Title or markdown should extract the article heading")
+        XCTAssertTrue(markdown.contains("Apple Silicon"), "Markdown should extract main article text")
+        XCTAssertFalse(markdown.contains("&copy;"), "Boilerplate should be stripped")
+    }
 }
 

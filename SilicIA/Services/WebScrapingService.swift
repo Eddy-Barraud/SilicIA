@@ -15,8 +15,23 @@ import UIKit
 #if canImport(WebKit)
 import WebKit
 #endif
-import Readability
+import Reeeed
 import HTMLToMarkdown
+
+private struct SilicIAReeeedLogger: Logger {
+    func info(_ string: String) {
+        #if DEBUG
+        if !string.hasPrefix("Successfully extracted:") {
+            print("[Reeeed] \(string)")
+        }
+        #endif
+    }
+    func error(_ string: String) {
+        #if DEBUG
+        print("[Reeeed] 🚨 \(string)")
+        #endif
+    }
+}
 
 @MainActor
 /// Fetches and extracts readable text content from web pages.
@@ -120,9 +135,20 @@ class WebScrapingService: ObservableObject {
         config.waitsForConnectivity = false
         config.requestCachePolicy = .returnCacheDataElseLoad
         self.session = URLSession(configuration: config)
+
+        Reeeed.logger = SilicIAReeeedLogger()
+        Reeeed.warmup(extractor: .readability)
+        Reeeed.warmup(extractor: .mercury)
     }
 
-    private let readability = Readability()
+    /// Converts HTML string into clean Markdown without blocking the MainActor.
+    nonisolated static func convertHTMLToMarkdown(_ html: String) -> String {
+        (try? HTMLToMarkdown.convert(html, plugins: [
+            BasePlugin(),
+            CommonmarkPlugin(),
+            GFMPlugin()
+        ])) ?? HTMLSanitizer.htmlToPlainText(html)
+    }
 
     /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
     private func parseWikipediaURL(_ url: URL) -> (host: String, title: String)? {
@@ -187,7 +213,7 @@ class WebScrapingService: ObservableObject {
         return (parsedTitle, markdown)
     }
 
-    /// Extracts clean article Markdown from a URL using swift-readability and html-to-markdown-swift,
+    /// Extracts clean article Markdown from a URL using Reeeed and html-to-markdown-swift,
     /// with resilient URLSession fetching, Wikipedia API acceleration, and a strict timeout.
     func extractMarkdown(from url: URL, timeoutSeconds: Double = 4.0) async throws -> (title: String, markdown: String) {
         // Fast path: if the URL is a Wikipedia article, use MediaWiki's action=parse API
@@ -228,22 +254,36 @@ class WebScrapingService: ObservableObject {
         }
     }
 
-    /// Extracts clean article Markdown from raw HTML using swift-readability and html-to-markdown-swift.
+    /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback) and html-to-markdown-swift.
     func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
-        let result = try await readability.parse(html: html, options: nil, baseURL: baseURL)
-        let markdown: String
-        if !result.content.isEmpty {
-            markdown = (try? HTMLToMarkdown.convert(result.content, plugins: [
-                BasePlugin(),
-                CommonmarkPlugin(),
-                GFMPlugin()
-            ])) ?? result.textContent
-        } else if !result.textContent.isEmpty {
-            markdown = result.textContent
-        } else {
-            markdown = ""
+        let dummyURL = baseURL ?? URL(string: "https://localhost")!
+
+        var extracted: ExtractedContent?
+        do {
+            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .readability)
+        } catch {
+            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .mercury)
         }
-        return (result.title, markdown.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        if let extracted = extracted {
+            let title = extracted.title ?? ""
+            let rawContent = extracted.content ?? ""
+            let plainText = extracted.extractPlainText
+
+            if !rawContent.isEmpty {
+                let markdown = await Task.detached(priority: .userInitiated) {
+                    Self.convertHTMLToMarkdown(rawContent)
+                }.value
+                return (title, markdown.trimmingCharacters(in: .whitespacesAndNewlines))
+            } else if !plainText.isEmpty {
+                return (title, plainText.trimmingCharacters(in: .whitespacesAndNewlines))
+            }
+        }
+
+        let directMarkdown = await Task.detached(priority: .userInitiated) {
+            Self.convertHTMLToMarkdown(html)
+        }.value
+        return ("", directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Scrape content from a single URL into clean Markdown.
@@ -311,11 +351,9 @@ class WebScrapingService: ObservableObject {
                 return markdown
             }
 
-            let directMarkdown = (try? HTMLToMarkdown.convert(html, plugins: [
-                BasePlugin(),
-                CommonmarkPlugin(),
-                GFMPlugin()
-            ])) ?? HTMLSanitizer.htmlToPlainText(html)
+            let directMarkdown = await Task.detached(priority: .userInitiated) {
+                Self.convertHTMLToMarkdown(html)
+            }.value
 
             let trimmed = directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { return nil }
