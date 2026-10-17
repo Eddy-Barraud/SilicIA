@@ -16,6 +16,9 @@ import AppKit
 import UIKit
 import SafariServices
 #endif
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
@@ -163,6 +166,8 @@ struct SearchView: View {
     @State private var isShowingWebPageSummaryOverlay = false
     @State private var selectedWebPageSummaryResult: SearchResult?
     @State private var webPageSummaryText: String = ""
+    @State private var webPageReaderHTML: String = ""
+    @State private var webPageReaderBaseURL: URL? = nil
     @State private var webPageMarkdownText: String = ""
     @State private var webPageSummaryError: String?
     @State private var isGeneratingWebPageSummary = false
@@ -1133,64 +1138,77 @@ struct SearchView: View {
 
                 Divider()
 
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        // AI Summary on top
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack {
-                                Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.accentColor)
+                // AI Summary on top
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.accentColor)
 
-                                if isGeneratingWebPageSummary {
-                                    ProgressView()
-                                        .scaleEffect(0.7)
-                                }
-                                Spacer()
-                            }
-
-                            if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
-                                Text(L.t("search.webPage.generatingSummary", language: settings.language))
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .italic()
-                            } else if let webPageSummaryError, webPageSummaryText.isEmpty {
-                                Text(webPageSummaryError)
-                                    .font(.subheadline)
-                                    .foregroundColor(.red)
-                            } else if !webPageSummaryText.isEmpty {
-                                StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
-                                    .font(.body)
-                            }
+                        if isGeneratingWebPageSummary {
+                            ProgressView()
+                                .scaleEffect(0.7)
                         }
-                        .padding(12)
-                        .subtleAccentCard(cornerRadius: 12)
-
-                        // Reader view: Full Markdown content
-                        VStack(alignment: .leading, spacing: 8) {
-                            Label(L.t("search.webPage.readerContent", language: settings.language), systemImage: "doc.text")
-                                .font(.subheadline)
-                                .fontWeight(.semibold)
-                                .foregroundColor(.secondary)
-
-                            if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
-                                ProgressView()
-                                    .padding(.vertical, 20)
-                                    .frame(maxWidth: .infinity)
-                            } else if !webPageMarkdownText.isEmpty {
-                                MarkdownContentView(markdown: webPageMarkdownText)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
-                                Text(snippet)
-                                    .font(.body)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.horizontal, 4)
+                        Spacer()
                     }
-                    .padding(.vertical, 4)
+
+                    if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
+                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .italic()
+                    } else if let webPageSummaryError, webPageSummaryText.isEmpty {
+                        Text(webPageSummaryError)
+                            .font(.subheadline)
+                            .foregroundColor(.red)
+                    } else if !webPageSummaryText.isEmpty {
+                        StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
+                            .font(.body)
+                    }
                 }
+                .padding(12)
+                .subtleAccentCard(cornerRadius: 12)
+
+                // Reader view: Rendered Reeeed HTML content (preserving images)
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(L.t("search.webPage.readerContent", language: settings.language), systemImage: "doc.richtext")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.secondary)
+
+                    if !webPageReaderHTML.isEmpty {
+                        ReaderHTMLWebView(
+                            html: webPageReaderHTML,
+                            baseURL: webPageReaderBaseURL,
+                            onLinkClicked: { clickedURL in
+                                openWebPage(clickedURL.absoluteString)
+                            }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    } else if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
+                        ProgressView()
+                            .padding(.vertical, 20)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if !webPageMarkdownText.isEmpty {
+                        ScrollView {
+                            MarkdownContentView(markdown: webPageMarkdownText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
+                        ScrollView {
+                            Text(snippet)
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                }
+                .padding(.horizontal, 4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding()
             .frame(maxWidth: 750, maxHeight: 620)
@@ -1205,6 +1223,8 @@ struct SearchView: View {
 
         selectedWebPageSummaryResult = result
         webPageSummaryText = ""
+        webPageReaderHTML = ""
+        webPageReaderBaseURL = URL(string: result.url)
         webPageMarkdownText = ""
         webPageSummaryError = nil
         isGeneratingWebPageSummary = true
@@ -1214,10 +1234,13 @@ struct SearchView: View {
         activeWebPageSummaryRequestID = requestID
 
         Task {
+            var preExtractedPlainText: String? = nil
             if let targetURL = URL(string: result.url) {
-                if let extracted = try? await WebScrapingService().extractMarkdown(from: targetURL) {
+                if let readerContent = try? await WebScrapingService().extractReaderHTML(from: targetURL) {
                     guard activeWebPageSummaryRequestID == requestID else { return }
-                    webPageMarkdownText = extracted.markdown
+                    webPageReaderHTML = readerContent.styledHTML
+                    webPageReaderBaseURL = readerContent.baseURL
+                    preExtractedPlainText = readerContent.plainText
                 }
             }
 
@@ -1226,6 +1249,7 @@ struct SearchView: View {
                 url: result.url,
                 language: settings.language,
                 useWebVision: settings.useWebVision,
+                preExtractedContent: preExtractedPlainText,
                 onPartialUpdate: { partial in
                     guard activeWebPageSummaryRequestID == requestID else { return }
                     webPageSummaryText = partial
@@ -1234,7 +1258,7 @@ struct SearchView: View {
             guard activeWebPageSummaryRequestID == requestID else { return }
             isGeneratingWebPageSummary = false
 
-            if !markdown.isEmpty {
+            if webPageReaderHTML.isEmpty && !markdown.isEmpty {
                 webPageMarkdownText = markdown
             }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1251,6 +1275,8 @@ struct SearchView: View {
         isGeneratingWebPageSummary = false
         selectedWebPageSummaryResult = nil
         webPageSummaryText = ""
+        webPageReaderHTML = ""
+        webPageReaderBaseURL = nil
         webPageMarkdownText = ""
         webPageSummaryError = nil
         activeWebPageSummaryRequestID = UUID()
@@ -1876,6 +1902,136 @@ struct FeatureRow: View {
         }
     }
 }
+
+// MARK: - Reader HTML WebView
+/// Renders Reeeed's styled Reader HTML inside a WKWebView, preserving images and resolving relative URLs.
+struct ReaderHTMLWebView: View {
+    let html: String
+    let baseURL: URL?
+    var onLinkClicked: ((URL) -> Void)? = nil
+
+    var body: some View {
+        ReaderHTMLWebViewRepresentable(
+            html: html,
+            baseURL: baseURL,
+            onLinkClicked: onLinkClicked
+        )
+    }
+}
+
+#if os(macOS)
+private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
+    let html: String
+    let baseURL: URL?
+    let onLinkClicked: ((URL) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onLinkClicked: onLinkClicked)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onLinkClicked = onLinkClicked
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var onLinkClicked: ((URL) -> Void)?
+        private var lastLoadedHTML: String = ""
+        private var lastLoadedBaseURL: URL? = nil
+
+        init(onLinkClicked: ((URL) -> Void)?) {
+            self.onLinkClicked = onLinkClicked
+        }
+
+        func loadIfNeeded(html: String, baseURL: URL?, into webView: WKWebView) {
+            guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
+            lastLoadedHTML = html
+            lastLoadedBaseURL = baseURL
+            webView.loadHTMLString(html, baseURL: baseURL)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url {
+                onLinkClicked?(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+#elseif canImport(UIKit)
+private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
+    let html: String
+    let baseURL: URL?
+    let onLinkClicked: ((URL) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onLinkClicked: onLinkClicked)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onLinkClicked = onLinkClicked
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        var onLinkClicked: ((URL) -> Void)?
+        private var lastLoadedHTML: String = ""
+        private var lastLoadedBaseURL: URL? = nil
+
+        init(onLinkClicked: ((URL) -> Void)?) {
+            self.onLinkClicked = onLinkClicked
+        }
+
+        func loadIfNeeded(html: String, baseURL: URL?, into webView: WKWebView) {
+            guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
+            lastLoadedHTML = html
+            lastLoadedBaseURL = baseURL
+            webView.loadHTMLString(html, baseURL: baseURL)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url {
+                onLinkClicked?(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+#endif
 
 #Preview {
     SearchView(chatService: ChatService())

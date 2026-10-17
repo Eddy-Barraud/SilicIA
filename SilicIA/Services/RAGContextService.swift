@@ -7,6 +7,7 @@
 
 import Foundation
 import NaturalLanguage
+import Accelerate
 
 /// Represents a retrieval chunk and its source metadata.
 struct RAGChunk: Identifiable {
@@ -941,110 +942,89 @@ actor RAGContextService {
         let rankingStart = Date()
         #endif
 
+        let allQueries = (queries?.isEmpty == false) ? queries! : [query]
+        let stage1QueryVector = combinedQueryVector ?? combinedTermVector(from: allQueries)
+        let stage1QueryDCT = dctUnitVector(for: numericQueryString)
+        let maxStage2Chars = maxContextChars * 2
+
+        struct ChunkCandidate {
+            let index: Int
+            let chunk: RAGChunk
+            let baseScore: Double
+        }
+
+        // Stage 1: Fast Discrete Cosine Transform (DCT) & Lexical Cosine Ranking
+        var candidates: [ChunkCandidate] = []
+        candidates.reserveCapacity(chunks.count)
+
+        for (idx, chunk) in chunks.enumerated() {
+            let baseScore = dctCosineRelevanceScore(
+                chunk: chunk,
+                queryVector: stage1QueryVector,
+                queryDCTVector: stage1QueryDCT,
+                numericQueryString: numericQueryString,
+                options: options
+            )
+            candidates.append(ChunkCandidate(index: idx, chunk: chunk, baseScore: baseScore))
+        }
+
+        // Sort chunks by Stage 1 DCT/cosine score descending
+        candidates.sort { lhs, rhs in
+            if lhs.baseScore == rhs.baseScore {
+                return lhs.chunk.text.count > rhs.chunk.text.count
+            }
+            return lhs.baseScore > rhs.baseScore
+        }
+
+        // Keep only the top portion of sorted chunks such that cumulative chunk size
+        // does not exceed 2x the token budget (2 * maxContextChars).
+        var topCosineCandidates: [ChunkCandidate] = []
+        topCosineCandidates.reserveCapacity(min(candidates.count, 32))
+        var accumulatedStage2Chars = 0
+        for candidate in candidates {
+            let chunkChars = candidate.chunk.text.count
+            if !topCosineCandidates.isEmpty && accumulatedStage2Chars + chunkChars > maxStage2Chars {
+                break
+            }
+            topCosineCandidates.append(candidate)
+            accumulatedStage2Chars += chunkChars
+        }
+
+        #if DEBUG
+        print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(topCosineCandidates.count) kept after DCT/cosine ranking (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 2x token budget)")
+        #endif
+
         var ranked: [RankedRAGChunk] = []
-        ranked.reserveCapacity(chunks.count)
+        ranked.reserveCapacity(topCosineCandidates.count)
 
-        if combinedQueryVector == nil, let qInfo = queryEmbeddingInfo, chunks.count > options.minimumFilterCandidates {
-            // Stage 1: Fast Cosine Pre-filtering
-            // Extract truncated lead samples to compute fast unit vectors & cosine similarity.
-            struct ChunkCandidate {
-                let index: Int
-                let chunk: RAGChunk
-                let baseScore: Double
-            }
-
-            var candidates: [ChunkCandidate] = []
-            candidates.reserveCapacity(chunks.count)
-
-            for (idx, chunk) in chunks.enumerated() {
-                let sample = String(chunk.text.prefix(options.cosinePreFilterSampleLength))
-                var baseScore: Double
-                if let sampleVec = qInfo.embedding.vector(for: sample) {
-                    let sampleNorm = sqrt(sampleVec.map { $0 * $0 }.reduce(0, +))
-                    if sampleNorm > 0 {
-                        var dot = 0.0
-                        let count = min(qInfo.unitVector.count, sampleVec.count)
-                        for i in 0..<count {
-                            dot += qInfo.unitVector[i] * (sampleVec[i] / sampleNorm)
-                        }
-                        let dist = sqrt(max(0.0, 2.0 * (1.0 - dot)))
-                        baseScore = max(0.0, 2.0 - dist)
-                    } else {
-                        baseScore = 0.0
-                    }
-                } else {
-                    baseScore = 0.0
-                }
-                // Add query intent boosts so specific figure/equation/page matches survive pre-filtering
-                baseScore += Self.numericRelevanceBoost(text: chunk.text, query: qInfo.query, options: options)
-                baseScore += Self.equationRelevanceBoost(text: chunk.text, query: qInfo.query, options: options)
-                baseScore += Self.figureRelevanceBoost(chunk: chunk, query: qInfo.query, options: options)
-                candidates.append(ChunkCandidate(index: idx, chunk: chunk, baseScore: baseScore))
-            }
-
-            // Identify candidate indices passing threshold (cosine / baseScore > 0.7)
-            let passing = candidates.filter { $0.baseScore > options.cosinePreFilterThreshold }
-            let filteredCandidates: [ChunkCandidate]
-            if passing.count >= options.minimumFilterCandidates {
-                filteredCandidates = passing
-            } else {
-                // Ensure at least minimumFilterCandidates are evaluated
-                let sortedByScore = candidates.sorted { $0.baseScore > $1.baseScore }
-                filteredCandidates = Array(sortedByScore.prefix(options.minimumFilterCandidates))
-            }
-
-            let filteredIndices = Set(filteredCandidates.map(\.index))
-
-            #if DEBUG
-            print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(filteredIndices.count) passed cosine pre-filter (> \(options.cosinePreFilterThreshold))")
-            #endif
-
-            // Stage 2: Deep evaluation on top candidates.
-            for candidate in filteredCandidates {
-                let score = nlEmbeddingRelevanceScore(
+        // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
+        if combinedQueryVector == nil, let qInfo = queryEmbeddingInfo {
+            for candidate in topCosineCandidates {
+                let semanticScore = nlEmbeddingRelevanceScore(
                     chunk: candidate.chunk,
                     query: qInfo.query,
                     unitQueryVector: qInfo.unitVector,
                     embedding: qInfo.embedding,
                     options: options
                 )
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: score))
+                let combinedScore = semanticScore + candidate.baseScore * 0.25
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
-
-            // Append non-candidates with their Stage 1 baseScore, clamped below candidate scores if needed
-            for candidate in candidates where !filteredIndices.contains(candidate.index) {
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: candidate.baseScore))
+        } else if combinedQueryVector == nil, let embedding {
+            for candidate in topCosineCandidates {
+                let semanticScore = nlEmbeddingRelevanceScore(
+                    chunk: candidate.chunk,
+                    query: query,
+                    unitQueryVector: nil,
+                    embedding: embedding,
+                    options: options
+                )
+                let combinedScore = semanticScore + candidate.baseScore * 0.25
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
         } else {
-            for chunk in chunks {
-                let score: Double
-                if let combinedQueryVector {
-                    score = cosineRelevanceScore(
-                        chunk: chunk,
-                        queryVector: combinedQueryVector,
-                        numericQueryString: numericQueryString,
-                        options: options
-                    )
-                } else if let qInfo = queryEmbeddingInfo {
-                    score = nlEmbeddingRelevanceScore(
-                        chunk: chunk,
-                        query: qInfo.query,
-                        unitQueryVector: qInfo.unitVector,
-                        embedding: qInfo.embedding,
-                        options: options
-                    )
-                } else if let embedding {
-                    score = nlEmbeddingRelevanceScore(
-                        chunk: chunk,
-                        query: query,
-                        unitQueryVector: nil,
-                        embedding: embedding,
-                        options: options
-                    )
-                } else {
-                    score = relevanceScore(chunk: chunk, query: query, options: options)
-                }
-                ranked.append(RankedRAGChunk(chunk: chunk, relevanceScore: score))
+            for candidate in topCosineCandidates {
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: candidate.baseScore))
             }
         }
 
@@ -1278,6 +1258,88 @@ actor RAGContextService {
         score += Self.numericRelevanceBoost(text: text, query: numericQueryString, options: options)
         score += Self.equationRelevanceBoost(text: text, query: numericQueryString, options: options)
         score += Self.figureRelevanceBoost(chunk: chunk, query: numericQueryString, options: options)
+        return score
+    }
+
+    // MARK: - Discrete Cosine Transform (DCT) Stage 1 Pre-Ranking
+
+    private nonisolated static let dctLength = 64
+    private nonisolated static let dctSetup = vDSP.DCT(count: dctLength, transformType: .II)
+
+    /// Deterministic FNV-1a 64-bit hash for projecting tokens and character stems into a fixed signal.
+    @inline(__always)
+    private nonisolated static func fnv1aHash(_ bytes: String.UTF8View) -> UInt64 {
+        var hash: UInt64 = 14695981039346656037
+        for byte in bytes {
+            hash ^= UInt64(byte)
+            hash &*= 1099511628211
+        }
+        return hash
+    }
+
+    /// Projects text tokens and stems into a fixed-length signal, transforms via 1D Type-II
+    /// Discrete Cosine Transform (`vDSP.DCT`), and returns an L2-normalized frequency vector.
+    private func dctUnitVector(for text: String) -> [Float]? {
+        guard let dct = Self.dctSetup else { return nil }
+        let terms = tokenize(text).filter { $0.count > 2 }
+        guard !terms.isEmpty else { return nil }
+
+        var signal = [Float](repeating: 0, count: Self.dctLength)
+        let mask = UInt64(Self.dctLength - 1)
+
+        for term in terms {
+            let h = Self.fnv1aHash(term.utf8)
+            let bin = Int(h & mask)
+            let sign: Float = ((h >> 32) & 1) == 0 ? 1.0 : -1.0
+            signal[bin] += sign
+
+            // Project 4-character prefix stem so morphological variants share spectral energy
+            if term.count > 4 {
+                let stem = String(term.prefix(4))
+                let sh = Self.fnv1aHash(stem.utf8)
+                let sBin = Int(sh & mask)
+                let sSign: Float = ((sh >> 32) & 1) == 0 ? 0.5 : -0.5
+                signal[sBin] += sSign
+            }
+        }
+
+        var spectrum = [Float](repeating: 0, count: Self.dctLength)
+        dct.transform(signal, result: &spectrum)
+
+        var sumSquares: Float = 0
+        vDSP_svesq(spectrum, 1, &sumSquares, vDSP_Length(Self.dctLength))
+        let norm = sqrt(sumSquares)
+        guard norm > 0 else { return nil }
+
+        var scale = 1.0 / norm
+        var unitSpectrum = [Float](repeating: 0, count: Self.dctLength)
+        vDSP_vsmul(spectrum, 1, &scale, &unitSpectrum, 1, vDSP_Length(Self.dctLength))
+        return unitSpectrum
+    }
+
+    /// Fast Stage 1 relevance score combining Discrete Cosine Transform (DCT) spectral cosine similarity
+    /// and lexical term-frequency cosine similarity with numeric, equation, and figure boosts.
+    private func dctCosineRelevanceScore(
+        chunk: RAGChunk,
+        queryVector: [String: Double],
+        queryDCTVector: [Float]?,
+        numericQueryString: String,
+        options: RAGSelectionOptions
+    ) -> Double {
+        var score = cosineRelevanceScore(
+            chunk: chunk,
+            queryVector: queryVector,
+            numericQueryString: numericQueryString,
+            options: options
+        )
+
+        if let queryDCTVector, let chunkDCTVector = dctUnitVector(for: chunk.text) {
+            var dctDot: Float = 0
+            vDSP_dotpr(queryDCTVector, 1, chunkDCTVector, 1, &dctDot, vDSP_Length(Self.dctLength))
+            let dctCosine = max(0.0, Double(dctDot))
+            score += dctCosine * 0.5
+        }
+
         return score
     }
 

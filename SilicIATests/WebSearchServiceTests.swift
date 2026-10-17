@@ -151,5 +151,38 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertTrue(markdown.contains("Apple Silicon"), "Markdown should extract main article text")
         XCTAssertFalse(markdown.contains("&copy;"), "Boilerplate should be stripped")
     }
+
+    @MainActor
+    func testReeeedReaderHTMLExtractionPreservesImages() async throws {
+        let scraper = WebScrapingService()
+        let baseURL = URL(string: "https://silicia.app/article")!
+        let sampleHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>SilicIA Reader View Test</title></head>
+        <body>
+            <header><nav>Menu</nav></header>
+            <main>
+                <article>
+                    <h1>SilicIA Reader View Test</h1>
+                    <figure>
+                        <img src="https://silicia.app/images/architecture.png" alt="SilicIA Architecture" />
+                        <figcaption>Figure 1: SilicIA On-Device Architecture</figcaption>
+                    </figure>
+                    <p>SilicIA renders Reeeed HTML directly inside Reader View so images and figures are preserved without intermediate Markdown conversion.</p>
+                    <p>This single-pass extraction also returns clean plain text for the AI summary.</p>
+                </article>
+            </main>
+            <footer><p>Copyright 2026</p></footer>
+        </body>
+        </html>
+        """
+
+        let readerContent = try await scraper.extractReaderHTML(from: sampleHTML, baseURL: baseURL)
+        XCTAssertEqual(readerContent.baseURL, baseURL)
+        XCTAssertTrue(readerContent.styledHTML.contains("<img"), "Styled Reader HTML should preserve <img> tags")
+        XCTAssertTrue(readerContent.styledHTML.contains("architecture.png"), "Styled Reader HTML should preserve image source URL")
+        XCTAssertTrue(readerContent.plainText.contains("SilicIA renders Reeeed HTML"), "Plain text should be extracted for AI summarization")
+    }
 }
 

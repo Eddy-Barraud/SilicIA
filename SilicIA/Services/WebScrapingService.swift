@@ -286,6 +286,94 @@ class WebScrapingService: ObservableObject {
         return ("", directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    struct ReaderWebPageContent: Sendable {
+        let title: String
+        let styledHTML: String
+        let plainText: String
+        let baseURL: URL
+    }
+
+    private static let readerAdditionalCSS = """
+    body {
+        background-color: transparent !important;
+    }
+    #__content {
+        padding: 0.25em 0.1em !important;
+        max-width: 100% !important;
+        opacity: 1 !important;
+    }
+    #__footer {
+        display: none !important;
+    }
+    """
+
+    /// Extracts styled Reader HTML (preserving images and layout via Reeeed's ReadableDoc)
+    /// along with plain text for AI summarization in a single pass.
+    func extractReaderHTML(from url: URL, timeoutSeconds: Double = 6.0) async throws -> ReaderWebPageContent {
+        return try await withThrowingTaskGroup(of: ReaderWebPageContent.self) { group in
+            group.addTask {
+                var request = URLRequest(url: url)
+                request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await self.session.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode),
+                      let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw URLError(.badServerResponse)
+                }
+                let baseURL = response.url ?? url
+                return try await self.extractReaderHTML(from: html, baseURL: baseURL)
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+
+            guard let firstResult = try await group.next() else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            group.cancelAll()
+            return firstResult
+        }
+    }
+
+    /// Extracts styled Reader HTML and plain text from raw HTML using Reeeed's ReadableDoc.
+    func extractReaderHTML(from html: String, baseURL: URL) async throws -> ReaderWebPageContent {
+        var extracted: ExtractedContent?
+        do {
+            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .readability)
+        } catch {
+            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .mercury)
+        }
+
+        if let extracted, let rawContent = extracted.content, !rawContent.isEmpty {
+            let metadata = (try? await SiteMetadata.extractMetadata(fromHTML: html, baseURL: baseURL)) ?? SiteMetadata(url: baseURL)
+            let theme = ReaderTheme(additionalCSS: Self.readerAdditionalCSS)
+            let styledHTML: String
+            if let doc = ReadableDoc(
+                extracted: extracted,
+                insertHeroImage: nil,
+                metadata: metadata,
+                date: extracted.datePublished
+            ) {
+                styledHTML = doc.html(includeExitReaderButton: false, theme: theme)
+            } else {
+                styledHTML = rawContent
+            }
+            let title = extracted.title ?? metadata.title ?? ""
+            let plainText = extracted.extractPlainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackText = plainText.isEmpty ? HTMLSanitizer.htmlToPlainText(rawContent) : plainText
+            return ReaderWebPageContent(
+                title: title,
+                styledHTML: styledHTML,
+                plainText: fallbackText,
+                baseURL: baseURL
+            )
+        }
+
+        throw URLError(.cannotDecodeContentData)
+    }
+
     /// Scrape content from a single URL into clean Markdown.
     func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
         guard let url = URL(string: urlString) else { return nil }

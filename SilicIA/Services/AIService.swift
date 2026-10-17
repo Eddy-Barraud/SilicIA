@@ -196,7 +196,7 @@ class AIService: ObservableObject {
         }
     }
 
-    /// Summarizes a single web page using Foundation Models and returns both the summary and clean markdown.
+    /// Summarizes a single web page using Foundation Models and returns both the summary and clean markdown/text.
     func summarizeWebPage(
         title: String,
         url: String,
@@ -205,10 +205,11 @@ class AIService: ObservableObject {
         temperature: Double = 0.3,
         maxTokens: Int = 320,
         useWebVision: Bool = false,
+        preExtractedContent: String? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async -> (summary: String, markdown: String) {
-        var pageMarkdown = ""
-        if let targetURL = URL(string: url) {
+        var pageMarkdown = preExtractedContent?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if pageMarkdown.isEmpty, let targetURL = URL(string: url) {
             if let extracted = try? await webScraper.extractMarkdown(from: targetURL) {
                 pageMarkdown = extracted.markdown
             }

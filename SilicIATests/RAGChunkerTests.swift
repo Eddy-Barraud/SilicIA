@@ -211,6 +211,62 @@ final class RAGChunkerTests: XCTestCase {
         }
     }
 
+    func testTwoStageDCTCosineCapsOutputAtTwiceTokenBudget() async {
+        let service = RAGContextService()
+        var chunks: [RAGChunk] = [
+            RAGChunk(
+                source: "Target 1",
+                text: "Une antenne de l'office de tourisme de Lyon a été saccagée et incendiée en marge de la mobilisation du 17 octobre.",
+                url: "https://franceinfo.fr/1",
+                pdfPage: nil
+            ),
+            RAGChunk(
+                source: "Target 2",
+                text: "Les pompiers sont intervenus rapidement à Lyon après l'incendie de l'office de tourisme lors de la manifestation du 17 octobre.",
+                url: "https://franceinfo.fr/2",
+                pdfPage: nil
+            )
+        ]
+
+        // Add 300 large filler chunks (~250 chars each = ~75,000 chars total, well above 2x token budget)
+        for i in 1...300 {
+            chunks.append(RAGChunk(
+                source: "Filler \(i)",
+                text: "Unrelated paragraph number \(i) discussing culinary recipes, chocolate cake baking temperatures, international football tournaments, gardening tips for spring roses, and municipal parking regulations in coastal towns.",
+                url: "https://filler.example.com/\(i)",
+                pdfPage: nil
+            ))
+        }
+
+        let query = "Que s'est-il passé à l'office de tourisme de Lyon le 17 octobre ?"
+        let start = Date()
+        let result = await service.selectContext(
+            chunks: chunks,
+            query: query,
+            historyTokens: 0,
+            maxOutputTokens: 1000,
+            contextUtilizationFactor: 0.65
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        // Compute the exact 2x token budget in characters
+        let queryTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: query.count)
+        let nonContextTokens = queryTokens + TokenBudgeting.instructionTokens + TokenBudgeting.promptOverheadTokens + 1000
+        let availableTokens = max(0, TokenBudgeting.contextWindowLimit - nonContextTokens)
+        let budgetedTokens = Int(Double(availableTokens) * 0.65)
+        let maxContextChars = max(TokenBudgeting.minContextTokens * TokenBudgeting.avgCharsPerToken, budgetedTokens * TokenBudgeting.avgCharsPerToken)
+        let maxStage2Chars = maxContextChars * 2
+
+        let rankedTotalChars = result.rankedChunks.reduce(0) { $0 + $1.chunk.text.count }
+        XCTAssertLessThanOrEqual(rankedTotalChars, maxStage2Chars, "Ranked chunk size (\(rankedTotalChars)) must not exceed 2x token budget (\(maxStage2Chars))")
+        XCTAssertLessThan(result.rankedChunks.count, chunks.count, "Only a top portion of sorted chunks should be kept for NLEmbedding")
+        XCTAssertLessThan(elapsed, 2.0, "Two-stage DCT + NLEmbedding ranking on 302 chunks should complete quickly")
+
+        let topSources = Set(result.rankedChunks.prefix(2).map(\.chunk.source))
+        XCTAssertTrue(topSources.contains("Target 1"))
+        XCTAssertTrue(topSources.contains("Target 2"))
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
