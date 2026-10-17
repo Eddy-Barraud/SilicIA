@@ -1146,7 +1146,7 @@ struct SearchView: View {
                 // Unified vertical scroll field containing both the native AI Summary and the HTML WebKit view
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        // Native AI Summary on top of HTML webkit (100% fluid streaming with StreamingLaTeXText)
+                        // Native AI Summary on top of HTML webkit with fixed height (~10 lines) and internal scroll field
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
@@ -1161,19 +1161,25 @@ struct SearchView: View {
                                 Spacer()
                             }
 
-                            if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
-                                Text(L.t("search.webPage.generatingSummary", language: settings.language))
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                                    .italic()
-                            } else if let webPageSummaryError, webPageSummaryText.isEmpty {
-                                Text(webPageSummaryError)
-                                    .font(.subheadline)
-                                    .foregroundColor(.red)
-                            } else if !webPageSummaryText.isEmpty {
-                                StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
-                                    .font(.body)
+                            ScrollView {
+                                Group {
+                                    if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
+                                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                    } else if let webPageSummaryError, webPageSummaryText.isEmpty {
+                                        Text(webPageSummaryError)
+                                            .font(.subheadline)
+                                            .foregroundColor(.red)
+                                    } else if !webPageSummaryText.isEmpty {
+                                        StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
+                                            .font(.body)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
                             }
+                            .frame(height: 185)
                         }
                         .padding(14)
                         .subtleAccentCard(cornerRadius: 12)
