@@ -8,13 +8,14 @@ struct BenchmarkRunner {
     static func main() async {
         print("==========================================================================================")
         print("  SilicIA Full Webpage HTML to Markdown Benchmark Suite                                  ")
-        print("  Evaluating 6 Strategies:                                                               ")
+        print("  Evaluating 7 Strategies:                                                               ")
         print("    1. SilicIA Baseline Regex                                                            ")
         print("    2. SwiftSoup Body Extraction + html-to-markdown-swift                                ")
         print("    3. Reeeed (Readability/Mercury JS Extractor) + html-to-markdown-swift                  ")
         print("    4. swift-readability (Mozilla Readability WKWebView) + html-to-markdown-swift          ")
         print("    5. Raw html-to-markdown-swift (Full Document)                                        ")
         print("    6. SilicIA Web Vision (Headless WKWebView PDF Rasterization + Apple Vision OCR)      ")
+        print("    7. WKWebView innerText + html-to-markdown-swift                                       ")
         print("==========================================================================================")
         
         let basePath = URL(fileURLWithPath: #filePath)
@@ -45,6 +46,9 @@ struct BenchmarkRunner {
         
         // Warm up swift-readability
         _ = try? await SwiftReadabilityExtractor.extractAndConvert(html: "<html><body><article><p>Warmup</p></article></body></html>")
+        
+        // Warm up WKWebView innerText extractor
+        _ = try? await WKWebViewInnerTextExtractor.extractAndConvert(html: "<html><body><p>Warmup</p></body></html>")
         
         // Warm up Apple Vision neural models (OCR + Classifier)
         print("Warming up Apple Vision neural engine...")
@@ -87,16 +91,24 @@ struct BenchmarkRunner {
             let webVisionTotalMs: Double
             let webVisionPages: Int
             let webVisionChars: Int
+            
+            // 7. WKWebView innerText + html-to-markdown-swift
+            let wkTextExtractMs: Double
+            let wkTextConvertMs: Double
+            let wkTextTotalMs: Double
+            let wkTextChars: Int
         }
         
         var results: [BenchmarkMetrics] = []
         
         for (index, sample) in samples.enumerated() {
             let safeDocName = sample.name
+                .precomposedStringWithCanonicalMapping
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
                 .filter { !$0.isEmpty }
                 .joined(separator: "_")
                 .lowercased()
+                .precomposedStringWithCanonicalMapping
             
             guard let sampleURL = URL(string: sample.sourceURL) else { continue }
             
@@ -224,6 +236,22 @@ struct BenchmarkRunner {
                 print("  6. [SilicIA Web Vision]        Failed: \(error)")
             }
             
+            // --- Method 7: WKWebView innerText + html-to-markdown-swift ---
+            var wkTextRes: WKWebViewInnerTextExtractor.ExtractionResult? = nil
+            do {
+                wkTextRes = try await WKWebViewInnerTextExtractor.extractAndConvert(
+                    html: sample.rawHTML,
+                    baseURL: sampleURL
+                )
+                if let wk = wkTextRes {
+                    print("  7. [WKWebView innerText+h2md]  Time: \(String(format: "%7.2f", wk.totalMs)) ms (Extract: \(String(format: "%.1f", wk.extractMs))ms, Convert: \(String(format: "%.1f", wk.markdownConvertMs))ms) | Length: \(wk.markdown.count) chars")
+                    let wkTextOutputFile = outputDir.appendingPathComponent("\(safeDocName)_wkwebview_innertext.md")
+                    try? wk.markdown.write(to: wkTextOutputFile, atomically: true, encoding: .utf8)
+                }
+            } catch {
+                print("  7. [WKWebView innerText+h2md]  Failed: \(error)")
+            }
+            
             results.append(BenchmarkMetrics(
                 name: sample.name,
                 rawBytes: sample.byteSize,
@@ -247,16 +275,20 @@ struct BenchmarkRunner {
                 webVisionOcrMs: webVisionRes?.visionOcrMs ?? 0,
                 webVisionTotalMs: webVisionRes?.totalMs ?? 0,
                 webVisionPages: webVisionRes?.pageCount ?? 0,
-                webVisionChars: webVisionRes?.markdown.count ?? 0
+                webVisionChars: webVisionRes?.markdown.count ?? 0,
+                wkTextExtractMs: wkTextRes?.extractMs ?? 0,
+                wkTextConvertMs: wkTextRes?.markdownConvertMs ?? 0,
+                wkTextTotalMs: wkTextRes?.totalMs ?? 0,
+                wkTextChars: wkTextRes?.markdown.count ?? 0
             ))
         }
         
-        print("\n===================================================================================================================================================")
-        print("                                                 FULL WEBPAGE BENCHMARK SUMMARY (SPEED)                                               ")
-        print("===================================================================================================================================================")
-        print(String(format: "%-25@ | %-8@ | %-10@ | %-14@ | %-13@ | %-16@ | %-13@ | %-15@",
-                     "Document", "HTML", "Regex(ms)", "SwiftSoup(ms)", "Reeeed(ms)", "Readability(ms)", "Raw h2md(ms)", "WebVision(ms)"))
-        print(String(repeating: "-", count: 147))
+        print("\n==================================================================================================================================================================")
+        print("                                                        FULL WEBPAGE BENCHMARK SUMMARY (SPEED)                                                            ")
+        print("==================================================================================================================================================================")
+        print(String(format: "%-30@ | %-8@ | %-10@ | %-13@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
+                     "Document", "HTML", "Regex(ms)", "SwiftSoup(ms)", "Reeeed(ms)", "Readability(ms)", "Raw h2md(ms)", "WKinnerText(ms)", "WebVision(ms)"))
+        print(String(repeating: "-", count: 170))
         
         for r in results {
             let sizeStr = "\(String(format: "%.1f", Double(r.rawBytes) / 1024.0)) KB"
@@ -265,23 +297,24 @@ struct BenchmarkRunner {
             let reeeedStr = "\(String(format: "%.1f", r.reeeedTotalMs))"
             let srStr = "\(String(format: "%.1f", r.srTotalMs))"
             let rawH2mStr = "\(String(format: "%.1f", r.rawH2mMs))"
+            let wkTextStr = "\(String(format: "%.1f", r.wkTextTotalMs))"
             let wvStr = "\(String(format: "%.1f", r.webVisionTotalMs)) (\(r.webVisionPages)p)"
             
-            print(String(format: "%-25@ | %-8@ | %-10@ | %-14@ | %-13@ | %-16@ | %-13@ | %-15@",
-                         String(r.name.prefix(25)), sizeStr, regexStr, soupStr, reeeedStr, srStr, rawH2mStr, wvStr))
+            print(String(format: "%-30@ | %-8@ | %-10@ | %-13@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
+                         String(r.name.prefix(30)), sizeStr, regexStr, soupStr, reeeedStr, srStr, rawH2mStr, wkTextStr, wvStr))
         }
         
-        print("\n===================================================================================================================================================")
-        print("                                                OUTPUT LENGTH SUMMARY (CHARACTERS)                                                    ")
-        print("===================================================================================================================================================")
-        print(String(format: "%-25@ | %-11@ | %-15@ | %-13@ | %-16@ | %-13@ | %-15@",
-                     "Document", "Regex Chars", "SwiftSoup Chars", "Reeeed Chars", "Readability Ch", "Raw h2md", "WebVision Chars"))
-        print(String(repeating: "-", count: 140))
+        print("\n==================================================================================================================================================================")
+        print("                                                       OUTPUT LENGTH SUMMARY (CHARACTERS)                                                                 ")
+        print("==================================================================================================================================================================")
+        print(String(format: "%-30@ | %-11@ | %-14@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
+                     "Document", "Regex Chars", "SwiftSoup Ch", "Reeeed Chars", "Readability Ch", "Raw h2md", "WKinnerText Ch", "WebVision Chars"))
+        print(String(repeating: "-", count: 161))
         for r in results {
-            print(String(format: "%-25@ | %-11d | %-15d | %-13d | %-16d | %-13d | %-15d",
-                         String(r.name.prefix(25)), r.regexChars, r.soupMarkdownChars, r.reeeedMarkdownChars, r.srMarkdownChars, r.rawH2mChars, r.webVisionChars))
+            print(String(format: "%-30@ | %-11d | %-14d | %-12d | %-15d | %-12d | %-15d | %-15d",
+                         String(r.name.prefix(30)), r.regexChars, r.soupMarkdownChars, r.reeeedMarkdownChars, r.srMarkdownChars, r.rawH2mChars, r.wkTextChars, r.webVisionChars))
         }
-        print("===================================================================================================================================================\n")
+        print("==================================================================================================================================================================\n")
         
         print("All resulting Markdown (.md) files saved to disk:")
         print("  📂 \(outputDir.path)\n")
