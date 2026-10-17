@@ -267,6 +267,41 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertTrue(topSources.contains("Target 2"))
     }
 
+    func testAIServiceTimingExcludesStreaming() async {
+        let aiService = AIService()
+        let result1 = SearchResult(
+            title: "Swift Concurrency",
+            url: "https://developer.apple.com/swift",
+            snippet: "Swift provides built-in support for writing asynchronous and parallel code in a structured way."
+        )
+
+        _ = await aiService.summarize(
+            query: "Swift async await concurrency",
+            results: [result1],
+            maxScrapingResults: 0,
+            maxScrapingChars: 0,
+            temperature: 0.3,
+            maxTokens: 300,
+            language: .english,
+            profile: .fast,
+            generateAnswer: false
+        )
+
+        guard let answerElapsed = aiService.lastAnswerElapsedSeconds else {
+            XCTFail("aiService.lastAnswerElapsedSeconds should be set after summarize")
+            return
+        }
+
+        XCTAssertGreaterThan(answerElapsed, 0.0, "Answer timing should be greater than 0")
+        XCTAssertLessThan(answerElapsed, 5.0, "RAG pipeline + timing should be fast")
+
+        #if DEBUG
+        let metricNames = aiService.debugTimings.map(\.name)
+        XCTAssertTrue(metricNames.contains("RAG Pipeline (Scrape + Chunk + Rank)"))
+        XCTAssertTrue(metricNames.contains("AIService.summarize (RAG + LLM Answering)"))
+        #endif
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size

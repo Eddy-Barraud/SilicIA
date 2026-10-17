@@ -168,6 +168,7 @@ struct SearchView: View {
     @State private var webPageSummaryText: String = ""
     @State private var webPageReaderHTML: String = ""
     @State private var webPageReaderBaseURL: URL? = nil
+    @State private var webPageContentHeight: CGFloat = 800
     @State private var webPageMarkdownText: String = ""
     @State private var webPageSummaryError: String?
     @State private var isGeneratingWebPageSummary = false
@@ -1098,7 +1099,7 @@ struct SearchView: View {
 
             VStack(alignment: .leading, spacing: 14) {
                 // Header bar
-                HStack(spacing: 10) {
+                HStack(spacing: 12) {
                     if let result = selectedWebPageSummaryResult {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(result.title)
@@ -1130,91 +1131,91 @@ struct SearchView: View {
                         dismissWebPageSummaryOverlay()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
+                            .font(.system(size: 26, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Circle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .help(L.t("common.close", language: settings.language))
                 }
 
                 Divider()
 
-                // AI Summary on top
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.accentColor)
+                // Unified vertical scroll field containing both the native AI Summary and the HTML WebKit view
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Native AI Summary on top of HTML webkit (100% fluid streaming with StreamingLaTeXText)
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.accentColor)
 
-                        if isGeneratingWebPageSummary {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                        }
-                        Spacer()
-                    }
-
-                    if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
-                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                            .italic()
-                    } else if let webPageSummaryError, webPageSummaryText.isEmpty {
-                        Text(webPageSummaryError)
-                            .font(.subheadline)
-                            .foregroundColor(.red)
-                    } else if !webPageSummaryText.isEmpty {
-                        StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
-                            .font(.body)
-                    }
-                }
-                .padding(12)
-                .subtleAccentCard(cornerRadius: 12)
-
-                // Reader view: Rendered Reeeed HTML content (preserving images)
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(L.t("search.webPage.readerContent", language: settings.language), systemImage: "doc.richtext")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.secondary)
-
-                    if !webPageReaderHTML.isEmpty {
-                        ReaderHTMLWebView(
-                            html: webPageReaderHTML,
-                            baseURL: webPageReaderBaseURL,
-                            onLinkClicked: { clickedURL in
-                                openWebPage(clickedURL.absoluteString)
+                                if isGeneratingWebPageSummary {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                }
+                                Spacer()
                             }
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    } else if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
-                        ProgressView()
-                            .padding(.vertical, 20)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if !webPageMarkdownText.isEmpty {
-                        ScrollView {
+
+                            if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
+                                Text(L.t("search.webPage.generatingSummary", language: settings.language))
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                    .italic()
+                            } else if let webPageSummaryError, webPageSummaryText.isEmpty {
+                                Text(webPageSummaryError)
+                                    .font(.subheadline)
+                                    .foregroundColor(.red)
+                            } else if !webPageSummaryText.isEmpty {
+                                StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
+                                    .font(.body)
+                            }
+                        }
+                        .padding(14)
+                        .subtleAccentCard(cornerRadius: 12)
+
+                        // Reader view: Rendered Reeeed HTML content (scrolls together with summary above it)
+                        if !webPageReaderHTML.isEmpty {
+                            ReaderHTMLWebView(
+                                html: webPageReaderHTML,
+                                baseURL: webPageReaderBaseURL,
+                                contentHeight: $webPageContentHeight,
+                                onLinkClicked: { clickedURL in
+                                    openWebPage(clickedURL.absoluteString)
+                                }
+                            )
+                            .frame(height: max(400, webPageContentHeight))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        } else if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
+                            ProgressView()
+                                .padding(.vertical, 30)
+                                .frame(maxWidth: .infinity)
+                        } else if !webPageMarkdownText.isEmpty {
                             MarkdownContentView(markdown: webPageMarkdownText)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
-                        ScrollView {
+                        } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
                             Text(snippet)
                                 .font(.body)
                                 .foregroundColor(.secondary)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
                 }
-                .padding(.horizontal, 4)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding()
-            .frame(maxWidth: 750, maxHeight: 620)
+            .padding(18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .glassCard(cornerRadius: 16)
-            .shadow(radius: 16)
-            .padding()
+            .shadow(color: Color.black.opacity(0.3), radius: 24, x: 0, y: 8)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
     }
 
@@ -1225,6 +1226,7 @@ struct SearchView: View {
         webPageSummaryText = ""
         webPageReaderHTML = ""
         webPageReaderBaseURL = URL(string: result.url)
+        webPageContentHeight = 800
         webPageMarkdownText = ""
         webPageSummaryError = nil
         isGeneratingWebPageSummary = true
@@ -1277,6 +1279,7 @@ struct SearchView: View {
         webPageSummaryText = ""
         webPageReaderHTML = ""
         webPageReaderBaseURL = nil
+        webPageContentHeight = 800
         webPageMarkdownText = ""
         webPageSummaryError = nil
         activeWebPageSummaryRequestID = UUID()
@@ -1601,6 +1604,11 @@ struct SearchView: View {
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
             generateAnswer: isModelAvailable,
+            onSummaryPartialUpdate: { _ in
+                if summaryElapsedSeconds == nil, let start = summaryStartTime {
+                    summaryElapsedSeconds = Date().timeIntervalSince(start)
+                }
+            },
             onMatchingScores: { scores in
                 Task { @MainActor in
                     // AIService chunks the full overfetched `fetchedResults`
@@ -1631,7 +1639,9 @@ struct SearchView: View {
         }
         #endif
 
-        if let start = summaryStartTime {
+        if let answerElapsed = aiService.lastAnswerElapsedSeconds {
+            summaryElapsedSeconds = answerElapsed
+        } else if let start = summaryStartTime, summaryElapsedSeconds == nil {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
         }
     }
@@ -1904,34 +1914,49 @@ struct FeatureRow: View {
 }
 
 // MARK: - Reader HTML WebView
-/// Renders Reeeed's styled Reader HTML inside a WKWebView, preserving images and resolving relative URLs.
+/// Renders Reeeed's styled Reader HTML inside a WKWebView, dynamically sizing to document height
+/// and forwarding scroll events to the enclosing unified SwiftUI ScrollView.
 struct ReaderHTMLWebView: View {
     let html: String
     let baseURL: URL?
+    @Binding var contentHeight: CGFloat
     var onLinkClicked: ((URL) -> Void)? = nil
 
     var body: some View {
         ReaderHTMLWebViewRepresentable(
             html: html,
             baseURL: baseURL,
+            contentHeight: $contentHeight,
             onLinkClicked: onLinkClicked
         )
     }
 }
 
 #if os(macOS)
+private final class NonScrollingWKWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        // Forward trackpad and mouse scroll wheel events directly to the enclosing SwiftUI ScrollView
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
 private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
     let html: String
     let baseURL: URL?
+    @Binding var contentHeight: CGFloat
     let onLinkClicked: ((URL) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onLinkClicked: onLinkClicked)
+        Coordinator(contentHeight: $contentHeight, onLinkClicked: onLinkClicked)
     }
 
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
-        let webView = WKWebView(frame: .zero, configuration: config)
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "heightChange")
+        config.userContentController = userContentController
+
+        let webView = NonScrollingWKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.setValue(false, forKey: "drawsBackground")
         context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
@@ -1943,12 +1968,18 @@ private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
         context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "heightChange")
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        @Binding var contentHeight: CGFloat
         var onLinkClicked: ((URL) -> Void)?
         private var lastLoadedHTML: String = ""
         private var lastLoadedBaseURL: URL? = nil
 
-        init(onLinkClicked: ((URL) -> Void)?) {
+        init(contentHeight: Binding<CGFloat>, onLinkClicked: ((URL) -> Void)?) {
+            self._contentHeight = contentHeight
             self.onLinkClicked = onLinkClicked
         }
 
@@ -1957,6 +1988,37 @@ private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
             lastLoadedHTML = html
             lastLoadedBaseURL = baseURL
             webView.loadHTMLString(html, baseURL: baseURL)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "heightChange", let height = message.body as? CGFloat, height > 100 {
+                DispatchQueue.main.async {
+                    if abs(self.contentHeight - height) > 5 {
+                        self.contentHeight = height
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let script = """
+            (function() {
+                function report() {
+                    var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+                        window.webkit.messageHandlers.heightChange.postMessage(h);
+                    }
+                }
+                report();
+                if (window.ResizeObserver) {
+                    new ResizeObserver(report).observe(document.body);
+                }
+                window.addEventListener('load', report);
+                setTimeout(report, 300);
+                setTimeout(report, 1000);
+            })();
+            """
+            webView.evaluateJavaScript(script, completionHandler: nil)
         }
 
         func webView(
@@ -1978,19 +2040,25 @@ private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
 private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
     let html: String
     let baseURL: URL?
+    @Binding var contentHeight: CGFloat
     let onLinkClicked: ((URL) -> Void)?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onLinkClicked: onLinkClicked)
+        Coordinator(contentHeight: $contentHeight, onLinkClicked: onLinkClicked)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "heightChange")
+        config.userContentController = userContentController
+
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false
         context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
         return webView
     }
@@ -2000,12 +2068,18 @@ private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
         context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "heightChange")
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        @Binding var contentHeight: CGFloat
         var onLinkClicked: ((URL) -> Void)?
         private var lastLoadedHTML: String = ""
         private var lastLoadedBaseURL: URL? = nil
 
-        init(onLinkClicked: ((URL) -> Void)?) {
+        init(contentHeight: Binding<CGFloat>, onLinkClicked: ((URL) -> Void)?) {
+            self._contentHeight = contentHeight
             self.onLinkClicked = onLinkClicked
         }
 
@@ -2014,6 +2088,37 @@ private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
             lastLoadedHTML = html
             lastLoadedBaseURL = baseURL
             webView.loadHTMLString(html, baseURL: baseURL)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "heightChange", let height = message.body as? CGFloat, height > 100 {
+                DispatchQueue.main.async {
+                    if abs(self.contentHeight - height) > 5 {
+                        self.contentHeight = height
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let script = """
+            (function() {
+                function report() {
+                    var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+                        window.webkit.messageHandlers.heightChange.postMessage(h);
+                    }
+                }
+                report();
+                if (window.ResizeObserver) {
+                    new ResizeObserver(report).observe(document.body);
+                }
+                window.addEventListener('load', report);
+                setTimeout(report, 300);
+                setTimeout(report, 1000);
+            })();
+            """
+            webView.evaluateJavaScript(script, completionHandler: nil)
         }
 
         func webView(

@@ -26,6 +26,7 @@ class AIService: ObservableObject {
     /// calling skips the auto web search.
     @Published var toolFetchedResults: [SearchResult] = []
     @Published var citations: String = ""
+    @Published var lastAnswerElapsedSeconds: Double? = nil
 
     // Properties to support real-time RAG scoring during tool calling
     private var activeQuery: String = ""
@@ -33,6 +34,10 @@ class AIService: ObservableObject {
     private var activeEffectiveMaxTokens: Int = 1000
     private var activeContextUtilizationFactor: Double = 0.65
     private var activeOnMatchingScores: (([String: Double]) -> Void)? = nil
+
+    private var toolRAGScrapeDuration: Double = 0.0
+    private var toolRAGChunkDuration: Double = 0.0
+    private var toolRAGRankingDuration: Double = 0.0
 
     #if DEBUG
     struct TimingMetric: Identifiable {
@@ -44,9 +49,6 @@ class AIService: ObservableObject {
     @Published var debugTimings: [TimingMetric] = []
     @Published var debugNotes: [String] = []
     var lastFirstGuessDuration: Double? = nil
-    var toolRAGScrapeDuration: Double = 0.0
-    var toolRAGChunkDuration: Double = 0.0
-    var toolRAGRankingDuration: Double = 0.0
     #endif
 
     private let webScraper = WebScrapingService()
@@ -300,12 +302,14 @@ class AIService: ObservableObject {
         // Tool-calling mode appends to this as the model invokes webSearch.
         toolFetchedResults = []
 
-        #if DEBUG
-        debugTimings = []
-        debugNotes = []
+        lastAnswerElapsedSeconds = nil
         toolRAGScrapeDuration = 0.0
         toolRAGChunkDuration = 0.0
         toolRAGRankingDuration = 0.0
+
+        #if DEBUG
+        debugTimings = []
+        debugNotes = []
         let summarizeStart = Date()
         #endif
 
@@ -323,16 +327,16 @@ class AIService: ObservableObject {
             }
             return result.url
         }
-        let scrapedContent: [String: String]
-        #if DEBUG
         let scrapeStart = Date()
-        scrapedContent = await webScraper.scrapeMultiplePages(
+        let scrapedContent = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: effectiveScrapingResults,
             maxCharacters: effectiveScrapingChars,
             useVision: useWebVision
         )
         let ragScrapeDuration = Date().timeIntervalSince(scrapeStart)
+
+        #if DEBUG
         debugTimings.append(TimingMetric(
             name: "WebScrapingService.scrapeMultiplePages",
             seconds: ragScrapeDuration
@@ -348,19 +352,10 @@ class AIService: ObservableObject {
             )
             debugNotes.append(String(format: "scrape elapsed (service): %.3f s", stats.elapsedSeconds))
         }
-        #else
-        scrapedContent = await webScraper.scrapeMultiplePages(
-            urls: urlsToScrape,
-            limit: effectiveScrapingResults,
-            maxCharacters: effectiveScrapingChars,
-            useVision: useWebVision
-        )
         #endif
 
         var chunks: [RAGChunk] = []
-        #if DEBUG
         let chunkingStart = Date()
-        #endif
         for result in results {
             if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
@@ -386,8 +381,8 @@ class AIService: ObservableObject {
                 chunks.append(contentsOf: chunked)
             }
         }
-        #if DEBUG
         let chunkingDuration = Date().timeIntervalSince(chunkingStart)
+        #if DEBUG
         debugTimings.append(TimingMetric(
             name: "Paragraph Chunking (NLTokenizer)",
             seconds: chunkingDuration
@@ -407,9 +402,7 @@ class AIService: ObservableObject {
         self.activeEffectiveMaxTokens = effectiveMaxTokens
         self.activeContextUtilizationFactor = contextUtilizationFactor
 
-        #if DEBUG
         let rankingPrepStart = Date()
-        #endif
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
@@ -417,8 +410,8 @@ class AIService: ObservableObject {
             contextUtilizationFactor: contextUtilizationFactor,
             queries: queries
         )
-        #if DEBUG
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
+        #if DEBUG
         debugTimings.append(TimingMetric(
             name: "NLEmbedding Ranking & Selection",
             seconds: rankingDuration
@@ -443,9 +436,8 @@ class AIService: ObservableObject {
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
-        #if DEBUG
         let generationStart = Date()
-        #endif
+        var firstTokenDate: Date? = nil
         let summary: String
         if generateAnswer {
             summary = await generateSummaryWithFoundationModels(
@@ -465,6 +457,9 @@ class AIService: ObservableObject {
                 useWikipedia: useWikipedia,
                 onPartialUpdate: { [weak self] partial in
                     guard let self else { return }
+                    if firstTokenDate == nil {
+                        firstTokenDate = Date()
+                    }
                     self.summary = partial
                     onSummaryPartialUpdate?(partial)
                 }
@@ -479,18 +474,12 @@ class AIService: ObservableObject {
         // same RAG pipeline the prompt-stuffing path uses so the cards
         // render with match-score badges instead of bare 0% rings.
         if useToolCalling, !toolFetchedResults.isEmpty, let onMatchingScores {
-            #if DEBUG
             let toolChunkStart = Date()
-            #endif
             let toolChunks = await chunkResultsForRAG(toolFetchedResults)
-            #if DEBUG
             let toolChunkElapsed = Date().timeIntervalSince(toolChunkStart)
             toolRAGChunkDuration += toolChunkElapsed
-            #endif
             if !toolChunks.isEmpty {
-                #if DEBUG
                 let toolRankStart = Date()
-                #endif
                 let toolSelected = await ragContextService.selectContext(
                     chunks: toolChunks,
                     query: query,
@@ -498,61 +487,78 @@ class AIService: ObservableObject {
                     contextUtilizationFactor: contextUtilizationFactor,
                     queries: queries
                 )
-                #if DEBUG
                 let toolRankElapsed = Date().timeIntervalSince(toolRankStart)
                 toolRAGRankingDuration += toolRankElapsed
-                #endif
                 let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
                 onMatchingScores(scores)
             }
         }
 
-        #if DEBUG
-        let summaryGenDuration = Date().timeIntervalSince(generationStart)
-        debugTimings.append(TimingMetric(
-            name: "generateSummaryWithFoundationModels",
-            seconds: summaryGenDuration
-        ))
-        #endif
-        let citations = generateAnswer ? RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language) : ""
+        let totalGenerationDuration = Date().timeIntervalSince(generationStart)
+        let resolvedFirstTokenDate = firstTokenDate ?? Date()
+        let rawLLMAnsweringDuration = generateAnswer
+            ? min(totalGenerationDuration, resolvedFirstTokenDate.timeIntervalSince(generationStart))
+            : 0.0
+        let streamingDuration = max(0.0, totalGenerationDuration - rawLLMAnsweringDuration)
 
-        #if DEBUG
-        let totalElapsed = Date().timeIntervalSince(summarizeStart)
-        debugTimings.append(TimingMetric(
-            name: "AIService.summarize (total)",
-            seconds: totalElapsed
-        ))
-
-        // Total decomposition of time spent in RAG vs LLM answering
         let effectiveScrapeDuration = max(ragScrapeDuration, toolRAGScrapeDuration)
         let effectiveChunkDuration = max(chunkingDuration, toolRAGChunkDuration)
         let effectiveRankingDuration = max(rankingDuration, toolRAGRankingDuration)
         let totalRAGDuration = effectiveScrapeDuration + effectiveChunkDuration + effectiveRankingDuration
 
         // In tool-calling mode, web searching & scraping occur synchronously
-        // inside summaryGenDuration. Subtract that embedded RAG time to isolate
-        // genuine LLM generation time.
-        let pureLLMDuration = useToolCalling ? max(0.0, summaryGenDuration - totalRAGDuration) : summaryGenDuration
-        let totalLLMDuration = pureLLMDuration
-        let sumPhases = totalRAGDuration + totalLLMDuration
+        // inside rawLLMAnsweringDuration. Subtract that embedded RAG time to isolate
+        // genuine LLM answering time.
+        let toolRAGDuration = toolRAGScrapeDuration + toolRAGChunkDuration + toolRAGRankingDuration
+        let pureLLMAnsweringDuration = useToolCalling
+            ? max(0.0, rawLLMAnsweringDuration - toolRAGDuration)
+            : rawLLMAnsweringDuration
+        let totalLLMAnsweringDuration = generateAnswer ? pureLLMAnsweringDuration : 0.0
 
+        // Timing of RAG Pipeline + LLM Answering (streaming part explicitly excluded)
+        let totalAnswerTime = totalRAGDuration + totalLLMAnsweringDuration
+        self.lastAnswerElapsedSeconds = totalAnswerTime
+
+        let citations = generateAnswer ? RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language) : ""
+
+        #if DEBUG
+        let sumPhases = totalRAGDuration + totalLLMAnsweringDuration
         let ragPercent = sumPhases > 0 ? (totalRAGDuration / sumPhases) * 100.0 : 0.0
-        let llmPercent = sumPhases > 0 ? (totalLLMDuration / sumPhases) * 100.0 : 0.0
+        let llmPercent = sumPhases > 0 ? (totalLLMAnsweringDuration / sumPhases) * 100.0 : 0.0
+
+        debugTimings.append(TimingMetric(
+            name: "RAG Pipeline (Scrape + Chunk + Rank)",
+            seconds: totalRAGDuration
+        ))
+        debugTimings.append(TimingMetric(
+            name: "LLM Answering (Time to First Token)",
+            seconds: totalLLMAnsweringDuration
+        ))
+        debugTimings.append(TimingMetric(
+            name: "Summary Streaming (excluded from timer)",
+            seconds: streamingDuration
+        ))
+        debugTimings.append(TimingMetric(
+            name: "AIService.summarize (RAG + LLM Answering)",
+            seconds: totalAnswerTime
+        ))
 
         var breakdownLines: [String] = [
             "┏━━━━━━━━━━━━━━━━ [DEBUG TIMING BREAKDOWN] ━━━━━━━━━━━━━━━━",
-            "┃ Total Elapsed:  \(String(format: "%.3f s", totalElapsed))",
+            "┃ Total Time to Answer: \(String(format: "%.3f s", totalAnswerTime)) (streaming excluded)",
             "┃ ├─ RAG Pipeline: \(String(format: "%.3f s (%.1f%%)", totalRAGDuration, ragPercent))",
             "┃ │  ├─ Web Download/Markdown: \(String(format: "%.3f s", effectiveScrapeDuration))",
             "┃ │  ├─ Paragraph Chunking:    \(String(format: "%.3f s (%.2f ms)", effectiveChunkDuration, effectiveChunkDuration * 1000.0))",
             "┃ │  └─ NLEmbedding Ranking:   \(String(format: "%.3f s (%.2f ms)", effectiveRankingDuration, effectiveRankingDuration * 1000.0))",
-            "┃ └─ LLM Answering: \(String(format: "%.3f s (%.1f%%)", totalLLMDuration, llmPercent))"
+            "┃ └─ LLM Answering: \(String(format: "%.3f s (%.1f%%)", totalLLMAnsweringDuration, llmPercent))"
         ]
         if let firstGuessDuration = lastFirstGuessDuration, firstGuessDuration > 0.0 {
             breakdownLines.append("┃    ├─ First Guess (parallel): \(String(format: "%.3f s", firstGuessDuration))")
-            breakdownLines.append("┃    └─ Summary Generation:     \(String(format: "%.3f s", summaryGenDuration))")
+            breakdownLines.append("┃    ├─ Time to First Token:    \(String(format: "%.3f s", totalLLMAnsweringDuration))")
+            breakdownLines.append("┃    └─ Streaming (excluded):   \(String(format: "%.3f s", streamingDuration))")
         } else {
-            breakdownLines.append("┃    └─ Summary Generation:     \(String(format: "%.3f s", summaryGenDuration))")
+            breakdownLines.append("┃    ├─ Time to First Token:    \(String(format: "%.3f s", totalLLMAnsweringDuration))")
+            breakdownLines.append("┃    └─ Streaming (excluded):   \(String(format: "%.3f s", streamingDuration))")
         }
         breakdownLines.append("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 

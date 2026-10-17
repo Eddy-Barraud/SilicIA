@@ -945,7 +945,7 @@ actor RAGContextService {
         let allQueries = (queries?.isEmpty == false) ? queries! : [query]
         let stage1QueryVector = combinedQueryVector ?? combinedTermVector(from: allQueries)
         let stage1QueryDCT = dctUnitVector(for: numericQueryString)
-        let maxStage2Chars = maxContextChars * 3
+        let maxStage2Chars = maxContextChars * 2
 
         struct ChunkCandidate {
             let index: Int
@@ -977,7 +977,7 @@ actor RAGContextService {
         }
 
         // Keep only the top portion of sorted chunks such that cumulative chunk size
-        // does not exceed 3x the token budget (3 * maxContextChars).
+        // does not exceed 2x the token budget (2 * maxContextChars).
         var topCosineCandidates: [ChunkCandidate] = []
         topCosineCandidates.reserveCapacity(min(candidates.count, 32))
         var accumulatedStage2Chars = 0
@@ -991,7 +991,7 @@ actor RAGContextService {
         }
 
         #if DEBUG
-        print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(topCosineCandidates.count) kept after DCT/cosine ranking (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 3x token budget)")
+        print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(topCosineCandidates.count) kept after DCT/cosine ranking (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 2x token budget)")
         #endif
 
         var ranked: [RankedRAGChunk] = []
