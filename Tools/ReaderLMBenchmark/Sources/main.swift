@@ -8,7 +8,7 @@ struct BenchmarkRunner {
     static func main() async {
         print("==========================================================================================")
         print("  SilicIA Full Webpage HTML to Markdown Benchmark Suite                                  ")
-        print("  Evaluating 7 Strategies:                                                               ")
+        print("  Evaluating 8 Strategies:                                                               ")
         print("    1. SilicIA Baseline Regex                                                            ")
         print("    2. SwiftSoup Body Extraction + html-to-markdown-swift                                ")
         print("    3. Reeeed (Readability/Mercury JS Extractor) + html-to-markdown-swift                  ")
@@ -16,6 +16,7 @@ struct BenchmarkRunner {
         print("    5. Raw html-to-markdown-swift (Full Document)                                        ")
         print("    6. SilicIA Web Vision (Headless WKWebView PDF Rasterization + Apple Vision OCR)      ")
         print("    7. WKWebView innerText + html-to-markdown-swift                                       ")
+        print("    8. neolee/swift-readability (Pure Swift Readability) + html-to-markdown-swift          ")
         print("==========================================================================================")
         
         let basePath = URL(fileURLWithPath: #filePath)
@@ -49,6 +50,9 @@ struct BenchmarkRunner {
         
         // Warm up WKWebView innerText extractor
         _ = try? await WKWebViewInnerTextExtractor.extractAndConvert(html: "<html><body><p>Warmup</p></body></html>")
+        
+        // Warm up neolee/swift-readability (Pure Swift)
+        _ = try? NeoLeeReadabilityExtractor.extractAndConvert(html: "<html><body><article><p>Warmup</p></article></body></html>")
         
         // Warm up Apple Vision neural models (OCR + Classifier)
         print("Warming up Apple Vision neural engine...")
@@ -97,6 +101,12 @@ struct BenchmarkRunner {
             let wkTextConvertMs: Double
             let wkTextTotalMs: Double
             let wkTextChars: Int
+            
+            // 8. neolee/swift-readability (Pure Swift) + html-to-markdown-swift
+            let neoleeExtractMs: Double
+            let neoleeConvertMs: Double
+            let neoleeTotalMs: Double
+            let neoleeMarkdownChars: Int
         }
         
         var results: [BenchmarkMetrics] = []
@@ -252,6 +262,22 @@ struct BenchmarkRunner {
                 print("  7. [WKWebView innerText+h2md]  Failed: \(error)")
             }
             
+            // --- Method 8: neolee/swift-readability (Pure Swift) + html-to-markdown-swift ---
+            var neoleeRes: NeoLeeReadabilityExtractor.ExtractionResult? = nil
+            do {
+                neoleeRes = try NeoLeeReadabilityExtractor.extractAndConvert(
+                    html: sample.rawHTML,
+                    baseURL: sampleURL
+                )
+                if let nl = neoleeRes {
+                    print("  8. [neolee/readability+h2md]   Time: \(String(format: "%7.2f", nl.totalMs)) ms (Extract: \(String(format: "%.1f", nl.extractMs))ms, Convert: \(String(format: "%.1f", nl.markdownConvertMs))ms) | Length: \(nl.markdown.count) chars")
+                    let neoleeOutputFile = outputDir.appendingPathComponent("\(safeDocName)_neolee_readability.md")
+                    try? nl.markdown.write(to: neoleeOutputFile, atomically: true, encoding: .utf8)
+                }
+            } catch {
+                print("  8. [neolee/readability+h2md]   Failed: \(error)")
+            }
+            
             results.append(BenchmarkMetrics(
                 name: sample.name,
                 rawBytes: sample.byteSize,
@@ -279,16 +305,20 @@ struct BenchmarkRunner {
                 wkTextExtractMs: wkTextRes?.extractMs ?? 0,
                 wkTextConvertMs: wkTextRes?.markdownConvertMs ?? 0,
                 wkTextTotalMs: wkTextRes?.totalMs ?? 0,
-                wkTextChars: wkTextRes?.markdown.count ?? 0
+                wkTextChars: wkTextRes?.markdown.count ?? 0,
+                neoleeExtractMs: neoleeRes?.extractMs ?? 0,
+                neoleeConvertMs: neoleeRes?.markdownConvertMs ?? 0,
+                neoleeTotalMs: neoleeRes?.totalMs ?? 0,
+                neoleeMarkdownChars: neoleeRes?.markdown.count ?? 0
             ))
         }
         
-        print("\n==================================================================================================================================================================")
-        print("                                                        FULL WEBPAGE BENCHMARK SUMMARY (SPEED)                                                            ")
-        print("==================================================================================================================================================================")
-        print(String(format: "%-30@ | %-8@ | %-10@ | %-13@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
-                     "Document", "HTML", "Regex(ms)", "SwiftSoup(ms)", "Reeeed(ms)", "Readability(ms)", "Raw h2md(ms)", "WKinnerText(ms)", "WebVision(ms)"))
-        print(String(repeating: "-", count: 170))
+        print("\n=================================================================================================================================================================================")
+        print("                                                               FULL WEBPAGE BENCHMARK SUMMARY (SPEED)                                                            ")
+        print("=================================================================================================================================================================================")
+        print(String(format: "%-28@ | %-8@ | %-10@ | %-12@ | %-11@ | %-13@ | %-12@ | %-13@ | %-13@ | %-15@",
+                     "Document", "HTML", "Regex(ms)", "SwiftSoup", "Reeeed(ms)", "Ryu0118(ms)", "NeoLee(ms)", "Raw h2md(ms)", "WKinnerText", "WebVision(ms)"))
+        print(String(repeating: "-", count: 185))
         
         for r in results {
             let sizeStr = "\(String(format: "%.1f", Double(r.rawBytes) / 1024.0)) KB"
@@ -296,25 +326,26 @@ struct BenchmarkRunner {
             let soupStr = "\(String(format: "%.1f", r.soupTotalMs))"
             let reeeedStr = "\(String(format: "%.1f", r.reeeedTotalMs))"
             let srStr = "\(String(format: "%.1f", r.srTotalMs))"
+            let neoleeStr = "\(String(format: "%.1f", r.neoleeTotalMs))"
             let rawH2mStr = "\(String(format: "%.1f", r.rawH2mMs))"
             let wkTextStr = "\(String(format: "%.1f", r.wkTextTotalMs))"
             let wvStr = "\(String(format: "%.1f", r.webVisionTotalMs)) (\(r.webVisionPages)p)"
             
-            print(String(format: "%-30@ | %-8@ | %-10@ | %-13@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
-                         String(r.name.prefix(30)), sizeStr, regexStr, soupStr, reeeedStr, srStr, rawH2mStr, wkTextStr, wvStr))
+            print(String(format: "%-28@ | %-8@ | %-10@ | %-12@ | %-11@ | %-13@ | %-12@ | %-13@ | %-13@ | %-15@",
+                         String(r.name.prefix(28)), sizeStr, regexStr, soupStr, reeeedStr, srStr, neoleeStr, rawH2mStr, wkTextStr, wvStr))
         }
         
-        print("\n==================================================================================================================================================================")
-        print("                                                       OUTPUT LENGTH SUMMARY (CHARACTERS)                                                                 ")
-        print("==================================================================================================================================================================")
-        print(String(format: "%-30@ | %-11@ | %-14@ | %-12@ | %-15@ | %-12@ | %-15@ | %-15@",
-                     "Document", "Regex Chars", "SwiftSoup Ch", "Reeeed Chars", "Readability Ch", "Raw h2md", "WKinnerText Ch", "WebVision Chars"))
-        print(String(repeating: "-", count: 161))
+        print("\n=================================================================================================================================================================================")
+        print("                                                              OUTPUT LENGTH SUMMARY (CHARACTERS)                                                                 ")
+        print("=================================================================================================================================================================================")
+        print(String(format: "%-28@ | %-10@ | %-12@ | %-11@ | %-13@ | %-12@ | %-13@ | %-13@ | %-15@",
+                     "Document", "Regex Ch", "SwiftSoup Ch", "Reeeed Ch", "Ryu0118 Ch", "NeoLee Ch", "Raw h2md", "WKinnerText", "WebVision Chars"))
+        print(String(repeating: "-", count: 185))
         for r in results {
-            print(String(format: "%-30@ | %-11d | %-14d | %-12d | %-15d | %-12d | %-15d | %-15d",
-                         String(r.name.prefix(30)), r.regexChars, r.soupMarkdownChars, r.reeeedMarkdownChars, r.srMarkdownChars, r.rawH2mChars, r.wkTextChars, r.webVisionChars))
+            print(String(format: "%-28@ | %-10d | %-12d | %-11d | %-13d | %-12d | %-13d | %-13d | %-15d",
+                         String(r.name.prefix(28)), r.regexChars, r.soupMarkdownChars, r.reeeedMarkdownChars, r.srMarkdownChars, r.neoleeMarkdownChars, r.rawH2mChars, r.wkTextChars, r.webVisionChars))
         }
-        print("==================================================================================================================================================================\n")
+        print("=================================================================================================================================================================================\n")
         
         print("All resulting Markdown (.md) files saved to disk:")
         print("  📂 \(outputDir.path)\n")

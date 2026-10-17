@@ -9,6 +9,7 @@ let package = Package(
         .package(url: "https://github.com/scinfu/SwiftSoup.git", from: "2.7.5"),
         .package(url: "https://github.com/nate-parrott/reeeed.git", branch: "main"),
         .package(url: "https://github.com/Ryu0118/swift-readability.git", exact: "0.4.0"),
+        .package(path: "Packages/NeoLeeReadability"),
     ],
     targets: [
         .executableTarget(
@@ -18,6 +19,7 @@ let package = Package(
                 .product(name: "SwiftSoup", package: "SwiftSoup"),
                 .product(name: "Reeeed", package: "reeeed"),
                 .product(name: "Readability", package: "swift-readability"),
+                .product(name: "NeoLeeReadability", package: "NeoLeeReadability"),
             ],
             path: "Sources"
         )
