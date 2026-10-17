@@ -1624,6 +1624,11 @@ struct SearchView: View {
                         displayedURLs: Set(searchResults.map(\.url))
                     )
                 }
+            },
+            onValidSourcesUpdated: { validSources in
+                Task { @MainActor in
+                    searchResults = Array(validSources.prefix(settings.maxSearchResults))
+                }
             }
         )
 

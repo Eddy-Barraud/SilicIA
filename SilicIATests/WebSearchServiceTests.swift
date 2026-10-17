@@ -184,5 +184,115 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertTrue(readerContent.styledHTML.contains("architecture.png"), "Styled Reader HTML should preserve image source URL")
         XCTAssertTrue(readerContent.plainText.contains("SilicIA renders Reeeed HTML"), "Plain text should be extracted for AI summarization")
     }
+
+    @MainActor
+    func testDeeplyNestedHTMLDoesNotOverflowStackAndIsRejected() async throws {
+        let scraper = WebScrapingService()
+        let baseURL = URL(string: "https://silicia.app/nested")!
+
+        // 1. Pathological HTML with 250 nested <blockquote>/<pre><code> tags that would overflow a 512 KB cooperative stack
+        let deepNesting = 250
+        let openTags = String(repeating: "<blockquote><p>Nested quote layer</p>", count: deepNesting)
+        let closeTags = String(repeating: "</blockquote>", count: deepNesting)
+        let pathologicalHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>Deeply Nested Page</title></head>
+        <body>
+            <article>
+                <h1>Deeply Nested Page</h1>
+                <p>Introductory paragraph with enough content for readability extraction to keep the article block intact.</p>
+                \(openTags)<pre><code>let crash = false</code></pre><p>Deeply buried text inside 250 nested blockquotes.</p>\(closeTags)
+            </article>
+        </body>
+        </html>
+        """
+
+        do {
+            _ = try await scraper.extractMarkdown(from: pathologicalHTML, baseURL: baseURL)
+            XCTFail("Expected deeply nested HTML (250 levels) to throw HTMLConversionError.excessiveDOMDepth")
+        } catch let error as WebScrapingService.HTMLConversionError {
+            if case .excessiveDOMDepth(let depth) = error {
+                XCTAssertGreaterThan(depth, WebScrapingService.maxDOMNestingDepth)
+            } else {
+                XCTFail("Expected excessiveDOMDepth, got \(error)")
+            }
+        }
+
+        // Synchronous helper should also safely return empty string without crashing
+        let syncResult = WebScrapingService.convertHTMLToMarkdown(pathologicalHTML)
+        XCTAssertTrue(syncResult.isEmpty, "Synchronous helper should reject deeply nested HTML and return empty string")
+
+        // 2. Moderately nested HTML (20 levels) within the 64-level limit should succeed on the 4 MB bounded-stack thread
+        let safeOpen = String(repeating: "<div>", count: 20)
+        let safeClose = String(repeating: "</div>", count: 20)
+        let safeHTML = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>Safe Nested Page</title></head>
+        <body>
+            <article>
+                <h1>Safe Nested Page</h1>
+                \(safeOpen)
+                <p>SilicIA safely converts moderately nested HTML on a bounded 4 MB stack thread.</p>
+                <pre><code>let safe = true</code></pre>
+                \(safeClose)
+            </article>
+        </body>
+        </html>
+        """
+
+        let (_, markdown) = try await scraper.extractMarkdown(from: safeHTML, baseURL: baseURL)
+        XCTAssertTrue(markdown.contains("SilicIA safely converts"), "Moderately nested HTML should convert to Markdown")
+        XCTAssertTrue(markdown.contains("let safe = true"), "Pre/code block should be preserved by CommonmarkPlugin")
+    }
+
+    @MainActor
+    func testUnconvertibleSourcesAreDeletedFromRAGAndSearchResults() async throws {
+        let aiService = AIService()
+
+        let validSource = SearchResult(
+            title: "Valid Apple Silicon Source",
+            url: "https://valid.example.com/apple-silicon",
+            snippet: "Valid snippet about Apple Silicon unified memory.",
+            retrievedContent: """
+            # Apple Silicon Architecture
+
+            Apple Silicon integrates CPU, GPU, and Neural Engine on a single system-on-chip with unified memory.
+            """
+        )
+
+        // Source with no pre-extracted content and an unreachable/invalid port that cannot be reduced to Markdown
+        let unconvertibleSource = SearchResult(
+            title: "Unconvertible Broken Source",
+            url: "http://127.0.0.1:1/unconvertible-deep-html",
+            snippet: "Fallback snippet that must be ignored and deleted when HTML-to-Markdown fails."
+        )
+
+        var updatedValidSources: [SearchResult]? = nil
+        var reportedScores: [String: Double] = [:]
+
+        _ = await aiService.summarize(
+            query: "Apple Silicon unified memory architecture",
+            results: [validSource, unconvertibleSource],
+            maxScrapingResults: 2,
+            maxScrapingChars: 4000,
+            language: .english,
+            profile: .fast,
+            generateAnswer: false,
+            onMatchingScores: { scores in
+                reportedScores = scores
+            },
+            onValidSourcesUpdated: { valid in
+                updatedValidSources = valid
+            }
+        )
+
+        XCTAssertNotNil(updatedValidSources, "onValidSourcesUpdated callback should be invoked")
+        XCTAssertEqual(updatedValidSources?.count, 1, "Unconvertible source should be deleted from active sources")
+        XCTAssertEqual(updatedValidSources?.first?.url, validSource.url, "Only the valid Markdown source should remain")
+        XCTAssertNil(reportedScores[unconvertibleSource.url], "Deleted source must not receive a RAG matching score")
+    }
 }
+
 

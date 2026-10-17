@@ -186,15 +186,16 @@ struct WebSearchTool: Tool {
             return "Web search failed: \(error.localizedDescription). Answer from your own knowledge instead of retrying."
         }
 
-        let top = Array(results.prefix(limit))
-        guard !top.isEmpty else {
+        guard !results.isEmpty else {
             return "No web results found for query: '\(trimmed)'. Refine the query (e.g. add a year or proper noun) or answer from your own knowledge."
         }
 
         // Scrape pages that didn't ship full content already (Wikipedia
         // results typically have `retrievedContent`; DuckDuckGo results
-        // are usually snippet-only and need a scrape).
-        let urlsToScrape = top.compactMap { result -> String? in
+        // are usually snippet-only and need a scrape). Pass the full
+        // candidate list so `scrapeMultiplePages` can overfetch and replace
+        // any URLs that fail HTML-to-Markdown conversion.
+        let urlsToScrape = results.compactMap { result -> String? in
             guard (result.retrievedContent ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
                 return nil
             }
@@ -210,32 +211,14 @@ struct WebSearchTool: Tool {
         let toolScrapeElapsed = Date().timeIntervalSince(scrapeStart)
         onScrapeDuration?(toolScrapeElapsed)
 
-        // Each result block carries enough metadata for the model to cite
-        // it accurately in its final answer.
-        let rendered = top.enumerated().map { idx, result -> String in
-            var lines = ["--- Result \(idx + 1): \(result.title)"]
-            lines.append("URL: \(result.url)")
-            let body: String
-            if let retrieved = result.retrievedContent,
-               !retrieved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                body = String(retrieved.prefix(perResultCharBudget))
-            } else if let scrapedBody = scraped[result.url],
-                      !scrapedBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                body = scrapedBody
-            } else {
-                body = result.snippet
+        // Ignore sources that cannot be reduced to Markdown and delete them from results.
+        let enrichedResults = results.compactMap { result -> SearchResult? in
+            if let retrieved = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !retrieved.isEmpty {
+                return result
             }
-            lines.append("Content: \(body)")
-            return lines.joined(separator: "\n")
-        }
-
-        #if DEBUG
-        print("[Tool:webSearch] returning \(top.count) result(s) to model, \(results.count) to cards")
-        #endif
-        // Enrich results with scraped content so the UI and RAG score calculator
-        // receive full text rather than empty/fallback snippets.
-        let enrichedResults = results.map { result -> SearchResult in
-            if let scrapedText = scraped[result.url], !scrapedText.isEmpty {
+            if let scrapedText = scraped[result.url]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !scrapedText.isEmpty {
                 return SearchResult(
                     id: result.id,
                     title: result.title,
@@ -244,8 +227,27 @@ struct WebSearchTool: Tool {
                     retrievedContent: scrapedText
                 )
             }
-            return result
+            return nil
         }
+
+        let top = Array(enrichedResults.prefix(limit))
+        guard !top.isEmpty else {
+            return "No web results found for query: '\(trimmed)'. Refine the query (e.g. add a year or proper noun) or answer from your own knowledge."
+        }
+
+        // Each result block carries enough metadata for the model to cite
+        // it accurately in its final answer.
+        let rendered = top.enumerated().map { idx, result -> String in
+            var lines = ["--- Result \(idx + 1): \(result.title)"]
+            lines.append("URL: \(result.url)")
+            let body = String((result.retrievedContent ?? "").prefix(perResultCharBudget))
+            lines.append("Content: \(body)")
+            return lines.joined(separator: "\n")
+        }
+
+        #if DEBUG
+        print("[Tool:webSearch] returning \(top.count) result(s) to model, \(enrichedResults.count) to cards")
+        #endif
         onResults?(enrichedResults)
         let output = rendered.joined(separator: "\n\n")
         if let transcriptRecorder {

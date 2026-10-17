@@ -40,7 +40,37 @@ class WebScrapingService: ObservableObject {
         NetworkConstants.defaultUserAgent
     }
 
+    enum HTMLConversionError: Error, LocalizedError {
+        case inputTooLarge(Int)
+        case excessiveDOMDepth(Int)
+        case excessiveElementCount(Int)
+        case emptyContent
+        case conversionFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .inputTooLarge(let bytes):
+                return "HTML input exceeds memory limit (\(bytes) bytes)"
+            case .excessiveDOMDepth(let depth):
+                return "HTML DOM nesting depth exceeds safe recursion limit (\(depth))"
+            case .excessiveElementCount(let count):
+                return "HTML element count exceeds memory budget (\(count))"
+            case .emptyContent:
+                return "Converted Markdown content is empty"
+            case .conversionFailed:
+                return "Failed to reduce HTML content to Markdown"
+            }
+        }
+    }
+
+    nonisolated static let maxRawHTMLBytes = 2 * 1024 * 1024
+    nonisolated static let maxMarkdownInputBytes = 512 * 1024
+    nonisolated static let maxDOMNestingDepth = 64
+    nonisolated static let maxDOMElementCount = 10_000
+    nonisolated static let markdownThreadStackSize = 4 * 1024 * 1024
+
     @Published var isScrapingContent = false
+    @Published private(set) var lastFailedURLs: Set<String> = []
 
     #if DEBUG
     struct ScrapeDebugStats {
@@ -73,9 +103,19 @@ class WebScrapingService: ObservableObject {
 
     /// Strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` blocks (and content) in one pass.
     nonisolated private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
+        pattern: "<(script|style|nav|header|footer|svg|noscript|template|iframe)[^>]*>[\\s\\S]*?</\\1>",
         options: [.caseInsensitive]
     )
+    /// Strips semantic-free inline wrapper tags (`<span>`, `<font>`) to flatten DOM depth before Markdown conversion.
+    nonisolated private static let inlineWrapperTagRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "</?(span|font)(\\s[^>]*)?>",
+        options: [.caseInsensitive]
+    )
+    /// Void HTML tags that do not push onto the DOM nesting stack.
+    nonisolated private static let voidHTMLTags: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr"
+    ]
     /// Matches a whole `<table>...</table>` block. Used to extract tables
     /// *before* the generic tag stripper destroys their structure, so we can
     /// emit a Markdown pipe table the model can actually read.
@@ -141,13 +181,172 @@ class WebScrapingService: ObservableObject {
         Reeeed.warmup(extractor: .mercury)
     }
 
-    /// Converts HTML string into clean Markdown without blocking the MainActor.
+    /// Validates HTML byte size, strips non-content blocks and inline wrapper tags,
+    /// and verifies in a single non-recursive O(N) pass that DOM nesting depth and element count
+    /// stay within safe bounds before SwiftSoup / HTMLToMarkdown recursive traversal.
+    nonisolated static func validateAndPrepareHTMLForMarkdown(
+        _ html: String,
+        maxInputBytes: Int = maxMarkdownInputBytes,
+        maxElements: Int = maxDOMElementCount
+    ) throws -> String {
+        let rawBytes = html.utf8.count
+        guard rawBytes <= maxRawHTMLBytes else {
+            throw HTMLConversionError.inputTooLarge(rawBytes)
+        }
+
+        var cleaned = html
+        if let commentRegex = htmlCommentRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = commentRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
+        if let blockRegex = nonContentBlockRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = blockRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
+        if let wrapperRegex = inlineWrapperTagRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = wrapperRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
+
+        let cleanedBytes = cleaned.utf8.count
+        guard cleanedBytes <= maxInputBytes else {
+            throw HTMLConversionError.inputTooLarge(cleanedBytes)
+        }
+
+        let bytes = Array(cleaned.utf8)
+        let count = bytes.count
+        var i = 0
+        var openStack: [String] = []
+        openStack.reserveCapacity(maxDOMNestingDepth + 1)
+        var elementCount = 0
+
+        while i < count {
+            if bytes[i] == 0x3C { // '<'
+                let nextIdx = i + 1
+                guard nextIdx < count else { break }
+                let firstChar = bytes[nextIdx]
+
+                // Skip '<!' or '<?' declarations
+                if firstChar == 0x21 || firstChar == 0x3F {
+                    i = nextIdx + 1
+                    while i < count && bytes[i] != 0x3E { i += 1 }
+                    i += 1
+                    continue
+                }
+
+                let isClosing = (firstChar == 0x2F) // '/'
+                var nameStart = isClosing ? nextIdx + 1 : nextIdx
+                while nameStart < count && (bytes[nameStart] == 0x20 || bytes[nameStart] == 0x09 || bytes[nameStart] == 0x0A || bytes[nameStart] == 0x0D) {
+                    nameStart += 1
+                }
+
+                var nameEnd = nameStart
+                while nameEnd < count {
+                    let b = bytes[nameEnd]
+                    let isAlphaNum = (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39)
+                    if !isAlphaNum { break }
+                    nameEnd += 1
+                }
+
+                guard nameEnd > nameStart else {
+                    i += 1
+                    continue
+                }
+
+                var tagChars = [UInt8]()
+                tagChars.reserveCapacity(nameEnd - nameStart)
+                for idx in nameStart..<nameEnd {
+                    let b = bytes[idx]
+                    tagChars.append((b >= 0x41 && b <= 0x5A) ? (b + 32) : b)
+                }
+                let tagName = String(decoding: tagChars, as: UTF8.self)
+
+                // Advance to '>'
+                var tagClose = nameEnd
+                var isSelfClosing = false
+                while tagClose < count && bytes[tagClose] != 0x3E {
+                    if bytes[tagClose] == 0x2F {
+                        isSelfClosing = true
+                    } else if bytes[tagClose] != 0x20 && bytes[tagClose] != 0x09 && bytes[tagClose] != 0x0A && bytes[tagClose] != 0x0D {
+                        isSelfClosing = false
+                    }
+                    tagClose += 1
+                }
+                i = min(count, tagClose + 1)
+
+                if isClosing {
+                    if let matchIdx = openStack.lastIndex(of: tagName) {
+                        openStack.removeSubrange(matchIdx..<openStack.count)
+                    }
+                } else {
+                    elementCount += 1
+                    if elementCount > maxElements {
+                        throw HTMLConversionError.excessiveElementCount(elementCount)
+                    }
+                    if !isSelfClosing && !voidHTMLTags.contains(tagName) {
+                        // Apply HTML5 implicit sibling close rules so valid unclosed <p>/<li>/<td>/<tr> don't inflate depth
+                        if (tagName == "p" && openStack.last == "p")
+                            || (tagName == "li" && openStack.last == "li")
+                            || ((tagName == "td" || tagName == "th") && (openStack.last == "td" || openStack.last == "th"))
+                            || (tagName == "tr" && openStack.last == "tr")
+                            || ((tagName == "dd" || tagName == "dt") && (openStack.last == "dd" || openStack.last == "dt")) {
+                            openStack.removeLast()
+                        }
+                        openStack.append(tagName)
+                        if openStack.count > maxDOMNestingDepth {
+                            throw HTMLConversionError.excessiveDOMDepth(openStack.count)
+                        }
+                    }
+                }
+            } else {
+                i += 1
+            }
+        }
+
+        return cleaned
+    }
+
+    /// Executes HTML-to-Markdown conversion on a dedicated Thread with an explicit 4 MB stack
+    /// after validating memory and DOM nesting limits.
+    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String) async throws -> String {
+        let prepared = try validateAndPrepareHTMLForMarkdown(html)
+        return try await withCheckedThrowingContinuation { continuation in
+            let thread = Thread {
+                autoreleasepool {
+                    do {
+                        let markdown = try HTMLToMarkdown.convert(prepared, plugins: [
+                            BasePlugin(),
+                            CommonmarkPlugin(),
+                            GFMPlugin()
+                        ]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if markdown.isEmpty {
+                            continuation.resume(throwing: HTMLConversionError.emptyContent)
+                        } else {
+                            continuation.resume(returning: markdown)
+                        }
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            thread.stackSize = Self.markdownThreadStackSize
+            thread.qualityOfService = .userInitiated
+            thread.name = "fr.trevalim.silicia.html2md"
+            thread.start()
+        }
+    }
+
+    /// Synchronous helper with memory/depth validation (returns empty string if HTML cannot be safely reduced to Markdown).
     nonisolated static func convertHTMLToMarkdown(_ html: String) -> String {
-        (try? HTMLToMarkdown.convert(html, plugins: [
-            BasePlugin(),
-            CommonmarkPlugin(),
-            GFMPlugin()
-        ])) ?? HTMLSanitizer.htmlToPlainText(html)
+        guard let prepared = try? validateAndPrepareHTMLForMarkdown(html),
+              let markdown = try? HTMLToMarkdown.convert(prepared, plugins: [
+                  BasePlugin(),
+                  CommonmarkPlugin(),
+                  GFMPlugin()
+              ]) else {
+            return ""
+        }
+        return markdown.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
@@ -234,9 +433,14 @@ class WebScrapingService: ObservableObject {
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode),
-                      let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                      (200...299).contains(httpResponse.statusCode) else {
                     throw URLError(.badServerResponse)
+                }
+                guard data.count <= Self.maxRawHTMLBytes else {
+                    throw HTMLConversionError.inputTooLarge(data.count)
+                }
+                guard let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw URLError(.cannotDecodeContentData)
                 }
                 return try await self.extractMarkdown(from: html, baseURL: url)
             }
@@ -254,8 +458,16 @@ class WebScrapingService: ObservableObject {
         }
     }
 
-    /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback) and html-to-markdown-swift.
+    /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback)
+    /// and bounded-stack html-to-markdown-swift conversion with DOM depth/memory limits.
     func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
+        // Pre-validate raw HTML size and DOM nesting depth before running Readability/Mercury or SwiftSoup.
+        _ = try Self.validateAndPrepareHTMLForMarkdown(
+            html,
+            maxInputBytes: Self.maxRawHTMLBytes,
+            maxElements: Self.maxDOMElementCount * 3
+        )
+
         let dummyURL = baseURL ?? URL(string: "https://localhost")!
 
         var extracted: ExtractedContent?
@@ -268,22 +480,16 @@ class WebScrapingService: ObservableObject {
         if let extracted = extracted {
             let title = extracted.title ?? ""
             let rawContent = extracted.content ?? ""
-            let plainText = extracted.extractPlainText
 
             if !rawContent.isEmpty {
-                let markdown = await Task.detached(priority: .userInitiated) {
-                    Self.convertHTMLToMarkdown(rawContent)
-                }.value
-                return (title, markdown.trimmingCharacters(in: .whitespacesAndNewlines))
-            } else if !plainText.isEmpty {
-                return (title, plainText.trimmingCharacters(in: .whitespacesAndNewlines))
+                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent)
+                return (title, markdown)
             }
         }
 
-        let directMarkdown = await Task.detached(priority: .userInitiated) {
-            Self.convertHTMLToMarkdown(html)
-        }.value
-        return ("", directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Only attempt direct conversion if the HTML itself passes strict size, element count, and DOM depth checks.
+        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(html)
+        return ("", directMarkdown)
     }
 
     struct ReaderWebPageContent: Sendable {
@@ -375,6 +581,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Scrape content from a single URL into clean Markdown.
+    /// Returns `nil` if the page cannot be fetched or safely reduced to Markdown within memory/depth limits.
     func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
@@ -388,80 +595,37 @@ class WebScrapingService: ObservableObject {
 
         do {
             let (title, markdown) = try await extractMarkdown(from: url)
-            #if DEBUG
-            let elapsed = Date().timeIntervalSince(pageStart)
-            print(String(format: "[Timing][Webpage] Downloaded & converted %@ to markdown in %.3f s (%d chars)", urlString, elapsed, markdown.count))
-            #endif
-            guard !markdown.isEmpty else {
-                return await fallbackFetchAndConvert(url: url, maxCharacters: maxCharacters)
-            }
-            #if DEBUG
-            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: markdown, title: title, url: url)
-            #endif
-            if markdown.count > maxCharacters {
-                return String(markdown.prefix(maxCharacters))
-            }
-            return markdown
-        } catch {
-            #if DEBUG
-            let elapsed = Date().timeIntervalSince(pageStart)
-            print(String(format: "[Timing][Webpage] extractMarkdown failed for %@ in %.3f s, trying fallback", urlString, elapsed))
-            #endif
-            return await fallbackFetchAndConvert(url: url, maxCharacters: maxCharacters)
-        }
-    }
-
-    private func fallbackFetchAndConvert(url: URL, maxCharacters: Int) async -> String? {
-        #if DEBUG
-        let fallbackStart = Date()
-        #endif
-        do {
-            var request = URLRequest(url: url)
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else {
+            let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                #if DEBUG
+                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown after conversion")
+                #endif
                 return nil
             }
-
-            if let (title, markdown) = try? await extractMarkdown(from: html, baseURL: url), !markdown.isEmpty {
-                #if DEBUG
-                let elapsed = Date().timeIntervalSince(fallbackStart)
-                print(String(format: "[Timing][Webpage] Downloaded & converted %@ (via fallback extract) to markdown in %.3f s (%d chars)", url.absoluteString, elapsed, markdown.count))
-                DebugRAGStorage.shared.saveDownloadedWebpage(markdown: markdown, title: title, url: url)
-                #endif
-                if markdown.count > maxCharacters {
-                    return String(markdown.prefix(maxCharacters))
-                }
-                return markdown
-            }
-
-            let directMarkdown = await Task.detached(priority: .userInitiated) {
-                Self.convertHTMLToMarkdown(html)
-            }.value
-
-            let trimmed = directMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
             #if DEBUG
-            let elapsed = Date().timeIntervalSince(fallbackStart)
-            print(String(format: "[Timing][Webpage] Downloaded & converted %@ (via fallback direct) to markdown in %.3f s (%d chars)", url.absoluteString, elapsed, trimmed.count))
-            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: trimmed, title: url.host ?? "webpage", url: url)
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] Downloaded & converted %@ to markdown in %.3f s (%d chars)", urlString, elapsed, trimmed.count))
+            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: trimmed, title: title, url: url)
             #endif
             if trimmed.count > maxCharacters {
                 return String(trimmed.prefix(maxCharacters))
             }
             return trimmed
         } catch {
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] Ignoring source %@ (failed in %.3f s: %@)", urlString, elapsed, error.localizedDescription))
+            #endif
             return nil
         }
     }
 
-    /// Scrape content from multiple URLs concurrently into clean Markdown
+    /// Scrape content from multiple URLs concurrently into clean Markdown.
+    /// Sources that fail or exceed memory/DOM depth limits are omitted from the returned dictionary
+    /// and recorded in `lastFailedURLs`.
     func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000, useVision: Bool = false) async -> [String: String] {
         isScrapingContent = true
+        lastFailedURLs = []
         defer { isScrapingContent = false }
 
         let targetSuccessCount = max(0, limit)
@@ -470,6 +634,7 @@ class WebScrapingService: ObservableObject {
         let fetchCount = targetSuccessCount + Self.overfetchCount
         let limitedURLs = Array(urls.prefix(fetchCount))
         var results: [String: String] = [:]
+        var failedURLs: Set<String> = []
         var urlIterator = limitedURLs.makeIterator()
         let concurrency = useVision ? Self.renderedScrapeConcurrency : Self.scrapeConcurrency
         let initialWorkers = min(concurrency, limitedURLs.count)
@@ -498,7 +663,7 @@ class WebScrapingService: ObservableObject {
                 completedTasks += 1
                 #endif
 
-                if let content = content {
+                if let content = content, !content.isEmpty {
                     results[url] = content
                     // Keep the fastest successful pages only.
                     if results.count >= targetSuccessCount {
@@ -508,6 +673,8 @@ class WebScrapingService: ObservableObject {
                         group.cancelAll()
                         break
                     }
+                } else {
+                    failedURLs.insert(url)
                 }
 
                 if let nextURL = urlIterator.next() {
@@ -521,6 +688,8 @@ class WebScrapingService: ObservableObject {
                 }
             }
         }
+
+        lastFailedURLs = failedURLs
 
         #if DEBUG
         let canceledTasks = max(launchedTasks - completedTasks, 0)

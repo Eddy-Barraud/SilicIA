@@ -291,7 +291,7 @@ class AIService: ObservableObject {
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, useWebVision: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, useWebVision: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
@@ -354,18 +354,22 @@ class AIService: ObservableObject {
         }
         #endif
 
+        var validResults: [SearchResult] = []
         var chunks: [RAGChunk] = []
         let chunkingStart = Date()
         for result in results {
             if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
+                validResults.append(result)
                 let chunked = RAGChunker.chunkParagraphs(
                     text: retrievedContent,
                     source: result.title,
                     url: result.url
                 )
                 chunks.append(contentsOf: chunked)
-            } else if let pageContent = scrapedContent[result.url] {
+            } else if let pageContent = scrapedContent[result.url]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !pageContent.isEmpty {
+                validResults.append(result)
                 let chunked = RAGChunker.chunkParagraphs(
                     text: pageContent,
                     source: result.title,
@@ -373,14 +377,13 @@ class AIService: ObservableObject {
                 )
                 chunks.append(contentsOf: chunked)
             } else {
-                let chunked = RAGChunker.chunkParagraphs(
-                    text: result.snippet,
-                    source: result.title,
-                    url: result.url
-                )
-                chunks.append(contentsOf: chunked)
+                // Ignore sources that cannot be reduced to Markdown and delete them from active sources.
+                #if DEBUG
+                debugLog("Pruning source unable to be reduced to Markdown: \(result.url)")
+                #endif
             }
         }
+        onValidSourcesUpdated?(validResults)
         let chunkingDuration = Date().timeIntervalSince(chunkingStart)
         #if DEBUG
         debugTimings.append(TimingMetric(
@@ -443,7 +446,7 @@ class AIService: ObservableObject {
             summary = await generateSummaryWithFoundationModels(
                 query: query,
                 context: selected.selectedContext,
-                results: results,
+                results: validResults,
                 temperature: temperature,
                 maxTokens: maxTokens,
                 language: language,
