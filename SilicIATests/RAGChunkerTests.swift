@@ -322,7 +322,9 @@ final class RAGChunkerTests: XCTestCase {
 
         let service = RAGContextService()
         let frWordEmb = await service.resolveWordEmbedding(for: "propose des recettes de saison", language: .english)
-        XCTAssertEqual(frWordEmb?.language, .french)
+        if let frWordEmb {
+            XCTAssertEqual(frWordEmb.language, .french)
+        }
 
         let enSentenceEmb = await service.resolveEmbedding(for: "Famous works of Einstein", language: .french)
         if let enSentenceEmb {

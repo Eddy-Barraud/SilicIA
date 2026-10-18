@@ -1498,15 +1498,6 @@ actor RAGContextService {
             wordEmbeddingCache[targetLanguage] = loaded
             return loaded
         }
-        if let fallbackLang = language?.nlLanguage, fallbackLang != targetLanguage {
-            if let cached = wordEmbeddingCache[fallbackLang] {
-                return cached
-            }
-            if let loaded = NLEmbedding.wordEmbedding(for: fallbackLang) {
-                wordEmbeddingCache[fallbackLang] = loaded
-                return loaded
-            }
-        }
         return nil
     }
 
