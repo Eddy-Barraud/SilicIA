@@ -48,16 +48,6 @@ struct AppSettings: Codable, Equatable {
     var maxResponseTokens: Int = 1000
     var temperature: Double = 0.7
     var maxContextTokens: Int = 2916
-    private var _isFirstGuessEnabled: Bool = true
-    var isFirstGuessEnabled: Bool {
-        get {
-            guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _isFirstGuessEnabled
-        }
-        set {
-            _isFirstGuessEnabled = newValue
-        }
-    }
     private var _isReaderViewAndSummaryEnabled: Bool = false
     var isReaderViewAndSummaryEnabled: Bool {
         get {
@@ -105,7 +95,6 @@ struct AppSettings: Codable, Equatable {
         case maxResponseTokens
         case temperature
         case maxContextTokens
-        case isFirstGuessEnabled
         case isReaderViewAndSummaryEnabled
         case isWebSummariesEnabled
         case useWebVision
@@ -155,8 +144,6 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.maxResponseTokens
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
             ?? Self.defaultSettings.temperature
-        isFirstGuessEnabled = try container.decodeIfPresent(Bool.self, forKey: .isFirstGuessEnabled)
-            ?? Self.defaultSettings.isFirstGuessEnabled
         if let readerAndSummary = try container.decodeIfPresent(Bool.self, forKey: .isReaderViewAndSummaryEnabled) {
             isReaderViewAndSummaryEnabled = readerAndSummary
         } else if let legacyWebSummaries = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled) {
@@ -194,7 +181,6 @@ struct AppSettings: Codable, Equatable {
         try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
-        try container.encode(isFirstGuessEnabled, forKey: .isFirstGuessEnabled)
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isReaderViewAndSummaryEnabled)
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
         try container.encode(useWebVision, forKey: .useWebVision)
@@ -253,7 +239,6 @@ struct AppSettings: Codable, Equatable {
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         if !FoundationModelAvailability.check().isAvailable {
             copy.useToolCalling = false
-            copy.isFirstGuessEnabled = false
             copy.isReaderViewAndSummaryEnabled = false
         }
         return copy

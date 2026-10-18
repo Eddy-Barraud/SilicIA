@@ -42,7 +42,6 @@ class AIService: ObservableObject {
 
     @Published var debugTimings: [TimingMetric] = []
     @Published var debugNotes: [String] = []
-    var lastFirstGuessDuration: Double? = nil
     #endif
 
     private let webScraper = WebScrapingService()
@@ -67,79 +66,6 @@ class AIService: ObservableObject {
         #if DEBUG
         print("[AIService] \(message)")
         #endif
-    }
-
-
-    /// Generates a tiny no-context intuition to provide immediate feedback.
-    func generateFirstGuess(
-        query: String,
-        language: ModelLanguage = .french,
-        temperature: Double = 0.3,
-        maxTokens: Int = 150,
-        onPartialUpdate: ((String) -> Void)? = nil
-    ) async -> String {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return "" }
-
-        #if DEBUG
-        let firstGuessStart = Date()
-        defer {
-            let elapsed = Date().timeIntervalSince(firstGuessStart)
-            self.lastFirstGuessDuration = elapsed
-            print(String(format: "[Timing][FirstGuess] Generated intuition in %.3f s", elapsed))
-        }
-        #endif
-
-        do {
-            // Fresh, ephemeral session per call — first guess is a one-shot,
-            // context-free intuition with no memory of prior searches, so a
-            // long-lived session would only accumulate dead transcript and
-            // eventually overflow the window. It's released when this scope
-            // exits.
-            let session = LanguageModelSession(
-                instructions: Self.buildFirstGuessInstructions(for: language)
-            )
-            let prompt = PromptLoader.loadPrompt(
-                mode: "quick",
-                feature: "search",
-                language: language,
-                replacements: ["query": trimmedQuery]
-            ) ?? fallbackFirstGuessPrompt(for: trimmedQuery, language: language)
-
-            let options = GenerationOptions(
-                temperature: temperature,
-                maximumResponseTokens: maxTokens
-            )
-
-            if let onPartialUpdate {
-                var latestPartial = ""
-                let responseStream = session.streamResponse(to: prompt, options: options)
-                for try await snapshot in responseStream {
-                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !partial.isEmpty, partial != latestPartial else { continue }
-                    latestPartial = partial
-                    onPartialUpdate(partial)
-                }
-
-                if !latestPartial.isEmpty {
-                    return latestPartial
-                }
-            }
-
-            let response = try await session.respond(to: prompt, options: options)
-            let content = String(describing: response.content)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if content.isEmpty { return "" }
-
-            return ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(content)
-        } catch {
-            // FoundationModels failed (likely Apple Intelligence unavailable —
-            // the app's launch check surfaces this to the user). Return empty
-            // rather than a hand-rolled placeholder.
-            return ""
-        }
     }
 
     /// Summarizes a single web page using Foundation Models and returns both the summary and clean markdown/text.
@@ -487,14 +413,8 @@ class AIService: ObservableObject {
             "┃ │  └─ NLEmbedding Ranking:   \(String(format: "%.3f s (%.2f ms)", effectiveRankingDuration, effectiveRankingDuration * 1000.0))",
             "┃ └─ LLM Answering: \(String(format: "%.3f s (%.1f%%)", totalLLMAnsweringDuration, llmPercent))"
         ]
-        if let firstGuessDuration = lastFirstGuessDuration, firstGuessDuration > 0.0 {
-            breakdownLines.append("┃    ├─ First Guess (parallel): \(String(format: "%.3f s", firstGuessDuration))")
-            breakdownLines.append("┃    ├─ Time to First Token:    \(String(format: "%.3f s", totalLLMAnsweringDuration))")
-            breakdownLines.append("┃    └─ Streaming (excluded):   \(String(format: "%.3f s", streamingDuration))")
-        } else {
-            breakdownLines.append("┃    ├─ Time to First Token:    \(String(format: "%.3f s", totalLLMAnsweringDuration))")
-            breakdownLines.append("┃    └─ Streaming (excluded):   \(String(format: "%.3f s", streamingDuration))")
-        }
+        breakdownLines.append("┃    ├─ Time to First Token:    \(String(format: "%.3f s", totalLLMAnsweringDuration))")
+        breakdownLines.append("┃    └─ Streaming (excluded):   \(String(format: "%.3f s", streamingDuration))")
         breakdownLines.append("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
         let breakdownLog = breakdownLines.joined(separator: "\n")
@@ -784,12 +704,6 @@ class AIService: ObservableObject {
             Never wrap non-mathematical text in LaTeX and never use \\begin{ environments (such as \\begin{array}).
             """
         }
-    }
-
-    /// Builds instructions for an ultra-short first-guess response.
-    private static func buildFirstGuessInstructions(for language: ModelLanguage) -> String {
-        PromptLoader.loadPrompt(mode: "quick", feature: "search", variant: "instructions", language: language)
-            ?? fallbackFirstGuessInstructions(for: language)
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
@@ -1097,32 +1011,6 @@ class AIService: ObservableObject {
             return txt_response
     }
 
-    private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
-        switch language {
-        case .french:
-            return """
-            Tu produis une première estimation rapide avant la récupération web.
-            Réponds directement à la question de l'utilisateur en deux phrases maximum.
-            Ne reformule pas ces instructions et ne parle pas d'outils ou de contexte manquant.
-            Réponds en français.
-            """
-        case .spanish:
-            return """
-            Produces una primera estimación rápida antes de recuperar resultados web.
-            Responde directamente a la pregunta del usuario en un máximo de dos frases.
-            No reformules estas instrucciones y no hables de herramientas ni de contexto faltante.
-            Responde en español.
-            """
-        case .english:
-            return """
-            You produce a quick first guess before web retrieval.
-            Answer the user question directly in at most two sentences.
-            Do not restate these instructions and do not mention tools or missing context.
-            Respond in English.
-            """
-        }
-    }
-
     private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
         switch language {
         case .french:
@@ -1148,41 +1036,6 @@ class AIService: ObservableObject {
             Provide a direct answer or topic overview, then 1 to 3 key points.
             Never introduce yourself or state what model or company you are from. Start directly with the summary content.
             If information is uncertain, state it explicitly.
-            """
-        }
-    }
-
-    private func fallbackFirstGuessPrompt(for query: String, language: ModelLanguage) -> String {
-        switch language {
-        case .french:
-            return """
-            Question: \(query)
-
-            Réponds de manière courte, précise et factuelle.
-            Réponds en français.
-            Réponds en deux phrases maximum.
-            Si pertinent, inclus une expression mathématique courte.
-            Format de sortie attendu : LaTeX pour les expressions mathématiques, avec $...$ en inline.
-            """
-        case .spanish:
-            return """
-            Pregunta: \(query)
-
-            Responde de forma breve, precisa y factual.
-            Responde en español.
-            Responde en dos frases como máximo.
-            Si corresponde, incluye una expresión matemática corta.
-            Formato requerido: LaTeX para expresiones matemáticas, con $...$ en línea.
-            """
-        case .english:
-            return """
-            Question: \(query)
-
-            Answer in a short, precise and factual manner.
-            Answer in English.
-            Answer in at most two sentences.
-            If relevant, include a short mathematical expression.
-            Required output format: LaTeX for mathematical expressions, using $...$ inline.
             """
         }
     }

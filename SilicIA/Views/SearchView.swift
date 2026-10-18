@@ -23,7 +23,6 @@ import WebKit
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
-    private static let firstGuessTokenCap = 220
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
@@ -154,9 +153,6 @@ struct SearchView: View {
     // Generation timer
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
-    @State private var firstGuessElapsedSeconds: Double? = nil
-    @State private var firstGuessText = ""
-    @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
@@ -315,15 +311,6 @@ struct SearchView: View {
                 }
             }
         }
-        .onChange(of: settings) {
-            // Persistence is automatic via AppSettingsStore; this handler
-            // only reacts to the first-guess toggle being switched off.
-            if !settings.isFirstGuessEnabled {
-                firstGuessText = ""
-                firstGuessElapsedSeconds = nil
-                isGeneratingFirstGuess = false
-            }
-        }
         .onChange(of: initialQuery) {
             consumeInitialQueryIfNeeded()
         }
@@ -473,10 +460,10 @@ struct SearchView: View {
                 Spacer()
 
                 // Swap send → stop while any phase is running (web search,
-                // RAG scoring, first-guess, AI summary). Tapping rotates
+                // RAG scoring, AI summary). Tapping rotates
                 // `activeSearchRequestID`, which every in-flight task
                 // checks before publishing — same mechanism as `goHome()`.
-                let isBusy = searchService.isSearching || aiService.isSummarizing || isGeneratingFirstGuess
+                let isBusy = searchService.isSearching || aiService.isSummarizing
                 if isBusy {
                     Button(action: cancelCurrentSearch) {
                         Image(systemName: "stop.circle.fill")
@@ -598,7 +585,7 @@ struct SearchView: View {
 
                 if FoundationModelAvailability.check().isAvailable {
                     Button {
-                        let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
+                        let textToCopy = aiService.summary
                         guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                         PlatformClipboard.copyPlainText(textToCopy)
                         didCopySummary = true
@@ -612,10 +599,10 @@ struct SearchView: View {
                     }
                     .buttonStyle(.plain)
                     .help(L.t("common.copy", language: settings.language))
-                    .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                if aiService.isSummarizing || (settings.isFirstGuessEnabled && isGeneratingFirstGuess) {
+                if aiService.isSummarizing {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
@@ -624,28 +611,6 @@ struct SearchView: View {
             if case .unavailable(let reason) = FoundationModelAvailability.check() {
                 ModelAvailabilityNotice(reason: reason, language: settings.language, drawBackground: false)
             } else {
-                if settings.isFirstGuessEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L.t("search.summary.firstGuess", language: settings.language))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-
-                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        } else if !firstGuessText.isEmpty {
-                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
-                        } else {
-                            Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        }
-                    }
-
-                    Divider()
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L.t("search.summary.webContextAnswer", language: settings.language))
                         .font(.subheadline)
@@ -701,12 +666,6 @@ struct SearchView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 3) {
-                            if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
-                                Text(L.t("search.summary.timeToFirst", language: settings.language, elapsed))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-
                             if let elapsed = summaryElapsedSeconds {
                                 Text(L.t("search.summary.generatedIn", language: settings.language, elapsed))
                                     .font(.caption2)
@@ -730,25 +689,6 @@ struct SearchView: View {
                     .scaleEffect(1.5)
                 Text(L.t("search.loading.searching", language: settings.language))
                     .foregroundColor(.secondary)
-
-                if settings.isFirstGuessEnabled && !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L.t("search.summary.firstGuess", language: settings.language))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-
-                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        } else if !firstGuessText.isEmpty {
-                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
-                        }
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .subtleAccentCard(cornerRadius: 12)
-                }
             }
             .padding()
         }
@@ -870,23 +810,6 @@ struct SearchView: View {
             }
             .disabled(!FoundationModelAvailability.check().isAvailable)
             .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            // First Guess Toggle
-            VStack(alignment: .leading, spacing: 4) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isFirstGuessEnabled) {
-                    Text(L.t("search.settings.firstGuessToggle", language: settings.language))
-                        .font(.subheadline)
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
 
             // Reader View and Summary Toggle
             VStack(alignment: .leading, spacing: 4) {
@@ -1448,9 +1371,6 @@ struct SearchView: View {
         errorMessage = nil
         aiService.summary = ""
         aiService.citations = ""
-        firstGuessText = ""
-        firstGuessElapsedSeconds = nil
-        isGeneratingFirstGuess = false
         showingSummary = !noAIOnly
         isNoAIMode = noAIOnly
         summaryStartTime = nil
@@ -1460,36 +1380,6 @@ struct SearchView: View {
         aiService.debugNotes = []
         #endif
 
-        let isModelAvailable = FoundationModelAvailability.check().isAvailable
-        if !noAIOnly && settings.isFirstGuessEnabled && isModelAvailable {
-            isGeneratingFirstGuess = true
-            Task {
-                let firstGuessStart = Date()
-                let firstGuess = await aiService.generateFirstGuess(
-                    query: trimmedQuery,
-                    language: settings.language,
-                    maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap),
-                    onPartialUpdate: { partial in
-                        guard activeSearchRequestID == requestID else { return }
-                        firstGuessText = partial
-                    }
-                )
-                guard activeSearchRequestID == requestID else { return }
-                guard settings.isFirstGuessEnabled else {
-                    firstGuessText = ""
-                    firstGuessElapsedSeconds = nil
-                    isGeneratingFirstGuess = false
-                    return
-                }
-                firstGuessText = firstGuess
-                #if DEBUG
-                debugLog(firstGuessText)
-                #endif
-                firstGuessElapsedSeconds = Date().timeIntervalSince(firstGuessStart)
-                isGeneratingFirstGuess = false
-            }
-        }
-        
         Task {
             do {
                 let fetchedResults = try await searchService.search(
@@ -1522,10 +1412,6 @@ struct SearchView: View {
                 #if DEBUG
                 debugLog("performSearch failed: \(error.localizedDescription)")
                 #endif
-            }
-
-            if activeSearchRequestID == requestID {
-                isGeneratingFirstGuess = false
             }
         }
     }
@@ -1610,7 +1496,7 @@ struct SearchView: View {
 
     /// Resets all search and summary state to the initial home screen.
     /// Cancels every in-flight search phase: rotates the request ID so
-    /// pending RAG / first-guess / summary tasks stop publishing, clears
+    /// pending RAG / summary tasks stop publishing, clears
     /// the busy flags, and tears down the AIService streaming state so a
     /// fresh search starts cleanly.
     private func cancelCurrentSearch() {
@@ -1618,7 +1504,6 @@ struct SearchView: View {
         // Flip the published flags so the UI swaps the stop button back to
         // send immediately. The discarded tasks will see the request-ID
         // mismatch and exit without touching state.
-        isGeneratingFirstGuess = false
         aiService.isSummarizing = false
         searchService.isSearching = false
         summaryStartTime = nil
@@ -1632,9 +1517,6 @@ struct SearchView: View {
         matchingScoresByURL = [:]
         showingSummary = false
         isNoAIMode = false
-        firstGuessText = ""
-        firstGuessElapsedSeconds = nil
-        isGeneratingFirstGuess = false
         aiService.summary = ""
         aiService.citations = ""
         errorMessage = nil

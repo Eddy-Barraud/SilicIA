@@ -124,16 +124,6 @@ final class ModelAnsweringTests: XCTestCase {
 
     func testKeywordQueryDoesNotLeakModelSelfIntroduction() async {
         let aiService = AIService()
-        let firstGuess = await aiService.generateFirstGuess(query: "Michelin company", language: .english, maxTokens: 200)
-        XCTAssertFalse(
-            firstGuess.lowercased().contains("foundation model"),
-            "First guess leaked foundation model self-intro: \(firstGuess)"
-        )
-        XCTAssertFalse(
-            firstGuess.lowercased().contains("developed by apple"),
-            "First guess leaked developed by apple: \(firstGuess)"
-        )
-
         let nonToolSummary = await aiService.summarize(
             query: "Michelin company",
             results: [],
