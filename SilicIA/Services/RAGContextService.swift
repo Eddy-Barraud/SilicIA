@@ -98,8 +98,8 @@ struct RAGChunker {
         return lines.allSatisfy { $0.hasPrefix("#") }
     }
 
-    /// Splits markdown text by extracting tables intact (Pass 1), applying a
-    /// hybrid 3-sentence sliding window on continuous narrative prose (Pass 2, no \n\n paragraph splitting),
+    /// Splits markdown text by extracting tables intact (Pass 1), chunking
+    /// continuous narrative prose into non-overlapping groups of 3 sentences (Pass 2, no repetition),
     /// and merging small chunks (< 200 chars) and isolated titles in document order (Pass 3).
     static func chunkMarkdown(
         text: String,
@@ -107,7 +107,6 @@ struct RAGChunker {
         url: String? = nil,
         pdfPage: Int? = nil,
         windowSize: Int = 3,
-        stride: Int = 1,
         minCharacters: Int = 200
     ) -> [RAGChunk] {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,13 +129,12 @@ struct RAGChunker {
                     ))
                 }
             case .prose(let proseText):
-                let proseChunks = slidingWindowProseChunks(
+                let proseChunks = nonOverlappingProseChunks(
                     prose: proseText,
                     source: source,
                     url: url,
                     pdfPage: pdfPage,
-                    windowSize: windowSize,
-                    stride: stride
+                    windowSize: windowSize
                 )
                 rawChunks.append(contentsOf: proseChunks)
             }
@@ -146,14 +144,14 @@ struct RAGChunker {
     }
 
     /// Backward-compatible entry point for web/Wikipedia markdown chunking.
-    /// Preserves Markdown tables intact and applies a 3-sentence sliding window with document-order merging.
+    /// Preserves Markdown tables intact and applies 3-sentence non-overlapping chunking with document-order merging.
     static func chunkParagraphs(
         text: String,
         source: String,
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        chunkMarkdown(text: text, source: source, url: url, pdfPage: pdfPage, windowSize: 3, stride: 1, minCharacters: minimumChunkCharacters)
+        chunkMarkdown(text: text, source: source, url: url, pdfPage: pdfPage, windowSize: 3, minCharacters: minimumChunkCharacters)
     }
 
     private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
@@ -200,13 +198,12 @@ struct RAGChunker {
         return segments
     }
 
-    private static func slidingWindowProseChunks(
+    private static func nonOverlappingProseChunks(
         prose: String,
         source: String,
         url: String?,
         pdfPage: Int?,
-        windowSize: Int,
-        stride: Int
+        windowSize: Int
     ) -> [InternalChunk] {
         let clean = prose.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
@@ -227,22 +224,14 @@ struct RAGChunker {
             return [InternalChunk(text: clean, isTable: false, source: source, url: url, pdfPage: pdfPage)]
         }
 
-        if sentences.count <= windowSize {
-            let joined = joinSentences(sentences)
-            return [InternalChunk(text: joined, isTable: false, source: source, url: url, pdfPage: pdfPage)]
-        }
-
         var chunks: [InternalChunk] = []
         var i = 0
         while i < sentences.count {
             let end = min(i + windowSize, sentences.count)
-            let window = Array(sentences[i..<end])
-            let joined = joinSentences(window)
+            let block = Array(sentences[i..<end])
+            let joined = joinSentences(block)
             chunks.append(InternalChunk(text: joined, isTable: false, source: source, url: url, pdfPage: pdfPage))
-            if end == sentences.count {
-                break
-            }
-            i += max(1, stride)
+            i += windowSize
         }
 
         return chunks

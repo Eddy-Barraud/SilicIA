@@ -402,29 +402,33 @@ final class RAGChunkerTests: XCTestCase {
         }
     }
 
-    func testThreeSentenceSlidingWindow() {
+    func testThreeSentenceNonOverlappingChunkingWithoutStride() {
         let text = """
-        Première phrase détaillée sur les statistiques officielles de l'emploi en France métropolitaine. Deuxième phrase analysant en profondeur le taux de chômage au cours du premier trimestre 2026. Troisième phrase comparant méthodiquement l'évolution observée avec celle de l'année précédente. Quatrième phrase expliquant la situation spécifique et les difficultés rencontrées par les jeunes. Cinquième phrase concluant sur les perspectives économiques et les prévisions du marché du travail.
+        Première phrase détaillée sur les statistiques officielles de l'emploi en France métropolitaine. Deuxième phrase analysant en profondeur le taux de chômage au cours du premier trimestre 2026. Troisième phrase comparant méthodiquement l'évolution observée avec celle de l'année précédente. Quatrième phrase expliquant la situation spécifique et les difficultés rencontrées par les jeunes. Cinquième phrase concluant sur les perspectives économiques et les prévisions du marché du travail. Sixième phrase résumant les recommandations pour les politiques publiques de l'emploi.
         """
 
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "INSEE", windowSize: 3, stride: 1)
-        // 5 sentences with windowSize 3 and stride 1 produces:
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "INSEE", windowSize: 3)
+        // 6 sentences with non-overlapping blocks of 3 produces exactly 2 chunks:
         // Chunk 0: [S1, S2, S3]
-        // Chunk 1: [S2, S3, S4]
-        // Chunk 2: [S3, S4, S5]
-        XCTAssertEqual(chunks.count, 3)
+        // Chunk 1: [S4, S5, S6]
+        // Zero repetition between chunks!
+        XCTAssertEqual(chunks.count, 2)
 
+        // Chunk 0 has S1, S2, S3 but NO S4, S5, S6
         XCTAssertTrue(chunks[0].text.contains("Première phrase"))
+        XCTAssertTrue(chunks[0].text.contains("Deuxième phrase"))
         XCTAssertTrue(chunks[0].text.contains("Troisième phrase"))
         XCTAssertFalse(chunks[0].text.contains("Quatrième phrase"))
+        XCTAssertFalse(chunks[0].text.contains("Cinquième phrase"))
+        XCTAssertFalse(chunks[0].text.contains("Sixième phrase"))
 
-        XCTAssertTrue(chunks[1].text.contains("Deuxième phrase"))
-        XCTAssertTrue(chunks[1].text.contains("Quatrième phrase"))
+        // Chunk 1 has S4, S5, S6 but NO S1, S2, S3
         XCTAssertFalse(chunks[1].text.contains("Première phrase"))
-
-        XCTAssertTrue(chunks[2].text.contains("Troisième phrase"))
-        XCTAssertTrue(chunks[2].text.contains("Cinquième phrase"))
-        XCTAssertFalse(chunks[2].text.contains("Deuxième phrase"))
+        XCTAssertFalse(chunks[1].text.contains("Deuxième phrase"))
+        XCTAssertFalse(chunks[1].text.contains("Troisième phrase"))
+        XCTAssertTrue(chunks[1].text.contains("Quatrième phrase"))
+        XCTAssertTrue(chunks[1].text.contains("Cinquième phrase"))
+        XCTAssertTrue(chunks[1].text.contains("Sixième phrase"))
 
         // All chunks must be >= 200 chars
         for chunk in chunks {
