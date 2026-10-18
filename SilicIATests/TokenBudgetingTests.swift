@@ -40,6 +40,32 @@ final class TokenBudgetingTests: XCTestCase {
 
         XCTAssertGreaterThan(TokenBudgeting.estimatedContextWords(forTokens: 100), 0)
         XCTAssertGreaterThanOrEqual(TokenBudgeting.estimatedContextWords(forTokens: 0), 1)
+
+        XCTAssertEqual(TokenBudgeting.estimatedOutputWords(forTokens: 1000), 600)
+        XCTAssertEqual(TokenBudgeting.estimatedContextWords(forTokens: 3096), 1857)
+    }
+
+    func testTokenBudgetSliderSplit4096() {
+        XCTAssertEqual(AppSettings.totalTokensBudget, 4096)
+
+        // Default settings split 4096 tokens
+        let settings = AppSettings()
+        XCTAssertEqual(settings.maxContextTokens + settings.maxResponseTokens, 4096)
+
+        // Any slider position splits 4096
+        for contextTokens in stride(from: 300, through: 3846, by: 50) {
+            let responseTokens = AppSettings.totalTokensBudget - contextTokens
+            XCTAssertEqual(contextTokens + responseTokens, 4096)
+            XCTAssertGreaterThanOrEqual(contextTokens, AppSettings.maxContextTokensRange.lowerBound)
+            XCTAssertLessThanOrEqual(contextTokens, AppSettings.maxContextTokensRange.upperBound)
+            XCTAssertGreaterThanOrEqual(responseTokens, AppSettings.maxResponseTokensRange.lowerBound)
+            XCTAssertLessThanOrEqual(responseTokens, AppSettings.maxResponseTokensRange.upperBound)
+
+            let inputWords = TokenBudgeting.estimatedContextWords(forTokens: contextTokens)
+            let outputWords = TokenBudgeting.estimatedOutputWords(forTokens: responseTokens)
+            XCTAssertGreaterThan(inputWords, 0)
+            XCTAssertGreaterThan(outputWords, 0)
+        }
     }
 
     func testToolBudgetScalesAndClampsAtFloor() {

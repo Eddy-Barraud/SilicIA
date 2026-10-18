@@ -43,11 +43,11 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
-    var maxDuckDuckGoResults: Int = 6
+    var maxDuckDuckGoResults: Int = 4
     var maxWikipediaResults: Int = 2
     var maxResponseTokens: Int = 1000
     var temperature: Double = 0.7
-    var maxContextTokens: Int = 2916
+    var maxContextTokens: Int = 3096
     private var _isReaderViewAndSummaryEnabled: Bool = false
     var isReaderViewAndSummaryEnabled: Bool {
         get {
@@ -180,24 +180,19 @@ struct AppSettings: Codable, Equatable {
     }
 
     // Value ranges for validation
-    static let maxDuckDuckGoResultsRange = 1...20
-    static let maxWikipediaResultsRange = 1...20
+    static let maxDuckDuckGoResultsRange = 4...12
+    static let maxWikipediaResultsRange = 2...12
     /// Combined per-search cap derived from per-source ranges; used by callers that need a
     /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
     static let maxSearchResultsRange = 2...40
-    static let maxResponseTokensRange = 500...3500
+    static let totalTokensBudget = 4096
+    static let maxResponseTokensRange = 250...3796
     static let temperatureRange = 0.3...1.0
-    static let maxContextTokensRange = 300...3500
+    static let maxContextTokensRange = 300...3846
 
     static func maxAllowedContextTokens(forResponseTokens responseTokens: Int) -> Int {
         let clampedResponse = min(max(responseTokens, maxResponseTokensRange.lowerBound), maxResponseTokensRange.upperBound)
-        let budgetCap = TokenBudgeting.maxAvailableContextTokens(
-            maxOutputTokens: clampedResponse,
-            instructionTokens: TokenBudgeting.instructionTokens,
-            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-            minContextTokens: TokenBudgeting.minContextTokens
-        )
-        return min(maxContextTokensRange.upperBound, max(maxContextTokensRange.lowerBound, budgetCap))
+        return max(maxContextTokensRange.lowerBound, totalTokensBudget - clampedResponse)
     }
 
     private func normalized() -> AppSettings {
@@ -205,13 +200,9 @@ struct AppSettings: Codable, Equatable {
         copy.maxDuckDuckGoResults = min(max(copy.maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
         copy.maxWikipediaResults = min(max(copy.maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)
         copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
-        copy.maxContextTokens = TokenBudgeting.clampedContextTokens(
-            requestedContextTokens: copy.maxContextTokens,
-            maxOutputTokens: copy.maxResponseTokens,
-            settingsRange: Self.maxContextTokensRange,
-            instructionTokens: TokenBudgeting.instructionTokens,
-            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-            minContextTokens: TokenBudgeting.minContextTokens
+        copy.maxContextTokens = min(
+            max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound),
+            Self.totalTokensBudget - copy.maxResponseTokens
         )
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         if !FoundationModelAvailability.check().isAvailable {

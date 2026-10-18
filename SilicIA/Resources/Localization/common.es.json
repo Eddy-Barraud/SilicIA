@@ -13,5 +13,10 @@
   "common.openPage": "Abrir página",
   "common.startOver": "Reiniciar",
   "common.you": "Usted",
-  "common.assistant": "Asistente"
+  "common.assistant": "Asistente",
+  "settings.tokenBudget.title": "Presupuesto de tokens (4096 tokens)",
+  "settings.tokenBudget.context": "Contexto (Entrada)",
+  "settings.tokenBudget.response": "Respuesta (Salida)",
+  "settings.tokenBudget.tokens": "%lld tokens",
+  "settings.tokenBudget.approxWords": "~%lld palabras"
 }

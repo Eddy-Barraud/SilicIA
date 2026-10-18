@@ -113,25 +113,7 @@ struct ChatView: View {
     @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
     @State private var loggedAssistantSnapshots: [ChatMessage.ID: String] = [:]
 
-    private var estimatedMaxOutputCharacters: Int {
-        TokenBudgeting.estimatedOutputCharacters(forTokens: settings.maxResponseTokens)
-    }
 
-    private var estimatedMaxOutputSentences: Int {
-        TokenBudgeting.estimatedOutputSentences(forTokens: settings.maxResponseTokens)
-    }
-
-    private var maxAllowedContextTokensForCurrentResponse: Int {
-        AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
-    }
-
-    private var effectiveContextTokens: Int {
-        min(settings.maxContextTokens, maxAllowedContextTokensForCurrentResponse)
-    }
-
-    private var estimatedMaxContextWords: Int {
-        TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokens)
-    }
 
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
@@ -345,59 +327,11 @@ struct ChatView: View {
             .disabled(!FoundationModelAvailability.check().isAvailable)
             .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.maxResponseTokens", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(settings.maxResponseTokens)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { Double(settings.maxResponseTokens) },
-                    set: {
-                        settings.maxResponseTokens = Int($0)
-                        settings.maxContextTokens = min(
-                            settings.maxContextTokens,
-                            AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
-                        )
-                    }
-                ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
-
-                Text(L.t("chat.settings.estimatedOutput", language: settings.language, Int64(estimatedMaxOutputCharacters), Int64(estimatedMaxOutputSentences)))
-                .font(.caption)
-                .foregroundColor(.secondary)
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.maxContextTokens", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text("\(effectiveContextTokens)")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: Binding(
-                    get: { Double(effectiveContextTokens) },
-                    set: { settings.maxContextTokens = Int($0) }
-                ), in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(maxAllowedContextTokensForCurrentResponse), step: 50)
-
-                Text(L.t("chat.settings.estimatedContext", language: settings.language, Int64(estimatedMaxContextWords)))
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-                if effectiveContextTokens < settings.maxContextTokens {
-                    Text(L.t("chat.settings.contextCapped", language: settings.language))
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                }
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
+            // Token Budget (Unified Input/Output Slider)
+            TokenBudgetSliderView(
+                settings: $settingsStore.settings,
+                language: settings.language
+            )
 
             if mode != .pdfTalkme {
             VStack(alignment: .leading, spacing: 8) {

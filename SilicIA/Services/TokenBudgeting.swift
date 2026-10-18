@@ -219,6 +219,10 @@ nonisolated enum TokenBudgeting {
         max(1, estimatedContextCharacters(forTokens: tokens) / avgCharsPerWord)
     }
 
+    static func estimatedOutputWords(forTokens tokens: Int) -> Int {
+        max(1, estimatedOutputCharacters(forTokens: tokens) / avgCharsPerWord)
+    }
+
     static func estimatedTokens(forApproxWords words: Int) -> Int {
         max(1, Int((Double(max(words, 0)) * Double(avgCharsPerWord)) / Double(avgCharsPerToken)))
     }
