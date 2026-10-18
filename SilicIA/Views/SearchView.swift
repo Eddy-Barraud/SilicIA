@@ -24,7 +24,6 @@ import WebKit
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
     private static let firstGuessTokenCap = 220
-    private static let deepSearchDerivedQueryCount = 3
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
@@ -151,7 +150,6 @@ struct SearchView: View {
         nonmutating set { settingsStore.settings = newValue }
     }
     @State private var showSettings = false
-    @State private var activeGenerationProfile: AIService.GenerationProfile = .fast
 
     // Generation timer
     @State private var summaryStartTime: Date? = nil
@@ -461,7 +459,7 @@ struct SearchView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Action row: Chat + Extensive left-aligned, send arrow right.
+            // Action row: Chat left-aligned, send arrow right.
             HStack(spacing: 8) {
                 Button(action: handleChatButtonTap) {
                     Label(chatButtonTitle, systemImage: "bubble.left.and.bubble.right")
@@ -471,18 +469,6 @@ struct SearchView: View {
                 .controlSize(.small)
                 .disabled(isChatButtonDisabled)
                 .accessibilityLabel(chatButtonTitle)
-
-                Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
-                    Label(
-                        L.t("search.button.deep", language: settings.language),
-                        systemImage: "sparkle.magnifyingglass"
-                    )
-                    .font(.subheadline)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isPrimaryDisabled)
-                .accessibilityLabel(L.t("search.button.deep", language: settings.language))
 
                 Spacer()
 
@@ -505,7 +491,7 @@ struct SearchView: View {
                     .help(L.t("search.button.stop", language: settings.language))
                     .accessibilityLabel(L.t("search.button.stop", language: settings.language))
                 } else {
-                    Button(action: { performSearch(generationProfile: .fast) }) {
+                    Button(action: { performSearch() }) {
                         Image(systemName: "arrow.up.circle.fill")
                             .resizable()
                             .frame(width: 28, height: 28)
@@ -1440,7 +1426,7 @@ struct SearchView: View {
 
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
-    private func performSearch(maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
+    private func performSearch(maxScrapingChars: Int? = nil, noAIOnly: Bool = false) {
         #if canImport(UIKit)
         dismissKeyboard()
         #endif
@@ -1467,7 +1453,6 @@ struct SearchView: View {
         isGeneratingFirstGuess = false
         showingSummary = !noAIOnly
         isNoAIMode = noAIOnly
-        activeGenerationProfile = generationProfile
         summaryStartTime = nil
         summaryElapsedSeconds = nil
         #if DEBUG
@@ -1507,44 +1492,14 @@ struct SearchView: View {
         
         Task {
             do {
-
-                let fetchedResults: [SearchResult]
-                var allQueries: [String] = [trimmedQuery]
-
-                if generationProfile == .deep && !noAIOnly {
-                    let derivedQueries = await aiService.expandSearchQueries(
-                        query: trimmedQuery,
-                        language: settings.language,
-                        maxDerivedQueries: Self.deepSearchDerivedQueryCount
-                    )
-                    allQueries = [trimmedQuery] + derivedQueries
-
-                    #if DEBUG
-                    debugLog(
-                        "deep query expansion count: expectedDerived=\(Self.deepSearchDerivedQueryCount), obtainedDerived=\(derivedQueries.count), inputTotal=\(1 + derivedQueries.count)"
-                    )
-                    debugLog("deep query expansion: \(allQueries.joined(separator: " | "))")
-                    #endif
-
-                    fetchedResults = try await searchService.search(
-                        queries: allQueries,
-                        maxDuckDuckGoResultsPerQuery: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
-                        maxWikipediaResultsPerQuery: settings.maxWikipediaResults,
-                        mergedLimit: (settings.maxDuckDuckGoResults + settings.maxWikipediaResults + Self.aiSummaryOverfetchResults) * Self.deepSearchDerivedQueryCount,
-                        language: settings.language,
-                        useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
-                    )
-                } else {
-                    fetchedResults = try await searchService.search(
-                        query: trimmedQuery,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
-                        maxWikipediaResults: settings.maxWikipediaResults,
-                        language: settings.language,
-                        useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
-                    )
-                }
+                let fetchedResults = try await searchService.search(
+                    query: trimmedQuery,
+                    maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                    maxWikipediaResults: settings.maxWikipediaResults,
+                    language: settings.language,
+                    useDuckDuckGo: settings.useDuckDuckGo,
+                    useWikipedia: settings.useWikipedia
+                )
 
                 guard activeSearchRequestID == requestID else { return }
                 searchResults = Array(fetchedResults.prefix(resultsCount))
@@ -1556,9 +1511,7 @@ struct SearchView: View {
                     await generateSummary(
                         maxScrapingResults: resultsCount,
                         maxScrapingChars: scrapingChars,
-                        summaryResults: fetchedResults,
-                        generationProfile: generationProfile,
-                        queries: generationProfile == .deep ? allQueries : nil
+                        summaryResults: fetchedResults
                     )
                 }
             } catch {
@@ -1583,13 +1536,13 @@ struct SearchView: View {
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
             Task {
-                await generateSummary(generationProfile: activeGenerationProfile)
+                await generateSummary()
             }
         }
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil, queries: [String]? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
@@ -1601,8 +1554,6 @@ struct SearchView: View {
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
-            profile: generationProfile ?? activeGenerationProfile,
-            queries: queries,
             useToolCalling: settings.useToolCalling,
             useWebVision: settings.useWebVision,
             maxDuckDuckGoResults: settings.maxDuckDuckGoResults,

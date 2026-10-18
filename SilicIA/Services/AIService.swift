@@ -12,11 +12,6 @@ import FoundationModels
 @MainActor
 /// Generates search summaries using Foundation Models with deterministic fallbacks.
 class AIService: ObservableObject {
-    enum GenerationProfile: String {
-        case fast
-        case deep
-    }
-
     @Published var isSummarizing = false
     @Published var summary: String = ""
     /// Results the `webSearch` tool has fetched during the current
@@ -30,9 +25,8 @@ class AIService: ObservableObject {
 
     // Properties to support real-time RAG scoring during tool calling
     private var activeQuery: String = ""
-    private var activeQueries: [String]? = nil
     private var activeEffectiveMaxTokens: Int = 1000
-    private var activeContextUtilizationFactor: Double = 0.65
+    private var activeContextUtilizationFactor: Double = 0.80
     private var activeOnMatchingScores: (([String: Double]) -> Void)? = nil
 
     private var toolRAGScrapeDuration: Double = 0.0
@@ -66,21 +60,7 @@ class AIService: ObservableObject {
     // overhead + output are reserved) that the search-summary path fills
     // with retrieved context. Higher = the model sees more sources per
     // answer, using more of the 4096-token budget.
-    //
-    // These sit alongside a second, implicit safety margin: char↔token
-    // conversion uses `avgCharsPerToken = 3`, but real-world English is
-    // closer to 4 chars/token, so a budget computed in "3-char tokens"
-    // already underfills the real tokenizer by ~25%. The factors below
-    // are tuned on top of that headroom.
-    //
-    // Deep search matches the chat path's `RAGSelectionOptions.default`
-    // (0.8) so a thorough search uses the window as fully as a chat turn
-    // does; fast search stays a notch lower to keep its first-answer
-    // latency down without leaving half the window empty (was 0.50).
-    private static let fastSummaryContextUtilizationFactor = 0.65
-    private static let deepSummaryContextUtilizationFactor = 0.80
-    private static let fastSummaryScrapingResultCap = 6
-    private static let fastSummaryScrapingCharacterCap = 4500
+    private static let summaryContextUtilizationFactor = 0.80
 
     // MARK: - Cached LaTeX-sanitizer regexes
     private func debugLog(_ message: String) {
@@ -159,42 +139,6 @@ class AIService: ObservableObject {
             // the app's launch check surfaces this to the user). Return empty
             // rather than a hand-rolled placeholder.
             return ""
-        }
-    }
-
-    /// Expands one query into up to `maxDerivedQueries` related web-search
-    /// queries via the on-device language model. Returns an empty array if
-    /// Foundation Models is unavailable or fails — callers fall back to
-    /// running the single original query.
-    func expandSearchQueries(
-        query: String,
-        language: ModelLanguage = .french,
-        maxDerivedQueries: Int = 3
-    ) async -> [String] {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty, maxDerivedQueries > 0 else { return [] }
-
-        do {
-            // Fresh, ephemeral session per call (see generateFirstGuess) —
-            // query expansion is stateless, so it never needs to persist.
-            let session = LanguageModelSession(
-                instructions: Self.buildQueryExpanderInstructions(for: language)
-            )
-            let raw = String(describing: try await session.respond(
-                to: queryExpanderPrompt(for: trimmedQuery, language: language, maxDerivedQueries: maxDerivedQueries),
-                options: GenerationOptions(temperature: 0.2, maximumResponseTokens: 140)
-            ).content)
-
-            let parsed = parseDerivedQueries(
-                raw,
-                originalQuery: trimmedQuery,
-                maxDerivedQueries: maxDerivedQueries
-            )
-            debugLog("query expansion: expected=\(maxDerivedQueries), kept=\(parsed.count) — \(parsed.joined(separator: " | "))")
-            return parsed
-        } catch {
-            debugLog("query expansion failed: \(error.localizedDescription)")
-            return []
         }
     }
 
@@ -282,20 +226,16 @@ class AIService: ObservableObject {
     /// Summarize search results using Foundation Models or fallback to NLP.
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
-    /// - Parameter queries: Full query set (user + derived). When more than one query is provided
-    ///   (Deep search), the RAG selection ranks chunks via cosine similarity against the
-    ///   combined query vector.
     /// - Parameter generateAnswer: When false, the method still scrapes,
     ///   chunks, ranks and emits per-source match scores (so the caller can
     ///   render retrieval-ranked source cards), but skips the Foundation
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, profile: GenerationProfile = .fast, queries: [String]? = nil, useToolCalling: Bool = false, useWebVision: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, useToolCalling: Bool = false, useWebVision: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
-        self.activeQueries = queries
         self.activeOnMatchingScores = onMatchingScores
         // Reset the tool-results accumulator at the start of every
         // summarize call so previous turns don't bleed into the new one.
@@ -310,15 +250,10 @@ class AIService: ObservableObject {
         #if DEBUG
         debugTimings = []
         debugNotes = []
-        let summarizeStart = Date()
         #endif
 
-        let effectiveScrapingResults = profile == .fast
-            ? min(maxScrapingResults, Self.fastSummaryScrapingResultCap)
-            : maxScrapingResults
-        let effectiveScrapingChars = profile == .fast
-            ? min(maxScrapingChars, Self.fastSummaryScrapingCharacterCap)
-            : maxScrapingChars
+        let effectiveScrapingResults = max(0, maxScrapingResults)
+        let effectiveScrapingChars = max(0, maxScrapingChars)
 
         // Scrape only URLs without provider-supplied full content.
         let urlsToScrape = results.compactMap { result -> String? in
@@ -399,9 +334,7 @@ class AIService: ObservableObject {
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
         )
-        let contextUtilizationFactor = profile == .deep
-            ? Self.deepSummaryContextUtilizationFactor
-            : Self.fastSummaryContextUtilizationFactor
+        let contextUtilizationFactor = Self.summaryContextUtilizationFactor
         self.activeEffectiveMaxTokens = effectiveMaxTokens
         self.activeContextUtilizationFactor = contextUtilizationFactor
 
@@ -411,7 +344,6 @@ class AIService: ObservableObject {
             query: query,
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor,
-            queries: queries,
             language: language
         )
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
@@ -436,7 +368,7 @@ class AIService: ObservableObject {
         // search-summary prompt. Only chunks that survived budgeting are
         // included — the rest of the scraped pages are discarded before
         // the prompt is built.
-        print(selected.debugDescription(label: "AIService → search summary (profile=\(profile))"))
+        print(selected.debugDescription(label: "AIService → search summary"))
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
@@ -451,7 +383,6 @@ class AIService: ObservableObject {
                 temperature: temperature,
                 maxTokens: maxTokens,
                 language: language,
-                profile: profile,
                 useToolCalling: useToolCalling,
                 useWebVision: useWebVision,
                 corpusChunks: selected.selectedChunks.map(\.chunk),
@@ -489,7 +420,7 @@ class AIService: ObservableObject {
                     query: query,
                     maxOutputTokens: effectiveMaxTokens,
                     contextUtilizationFactor: contextUtilizationFactor,
-                    queries: queries
+                    language: language
                 )
                 let toolRankElapsed = Date().timeIntervalSince(toolRankStart)
                 toolRAGRankingDuration += toolRankElapsed
@@ -591,7 +522,6 @@ class AIService: ObservableObject {
             let toolChunks = await chunkResultsForRAG(toolFetchedResults)
             if !toolChunks.isEmpty {
                 let query = activeQuery
-                let queries = activeQueries
                 let maxTokens = activeEffectiveMaxTokens
                 let factor = activeContextUtilizationFactor
                 Task {
@@ -599,8 +529,7 @@ class AIService: ObservableObject {
                         chunks: toolChunks,
                         query: query,
                         maxOutputTokens: maxTokens,
-                        contextUtilizationFactor: factor,
-                        queries: queries
+                        contextUtilizationFactor: factor
                     )
                     let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
                     await MainActor.run {
@@ -644,7 +573,6 @@ class AIService: ObservableObject {
     /// a tool that isn't attached.
     private func buildInstructions(
         for language: ModelLanguage,
-        isDeepProfile: Bool,
         maxOutputTokens: Int,
         useToolCalling: Bool = false,
         webSearchAvailable: Bool = true
@@ -656,8 +584,8 @@ class AIService: ObservableObject {
             language: language,
             replacements: [
                 "maxOutputTokens": "\(maxOutputTokens)",
-                "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
-                "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+                "keyPointsRange": "1 to 3",
+                "keyPointsRangeFr": "1 à 3"
             ]
         )
             ?? fallbackSummaryInstructions(for: language)
@@ -683,11 +611,10 @@ class AIService: ObservableObject {
         corpusChunkCount: Int,
         webSearchAvailable: Bool,
         language: ModelLanguage,
-        isDeepProfile: Bool,
         maxOutputTokens: Int,
         groundingContext: String = ""
     ) -> String {
-        let keyPoints = isDeepProfile ? (language == .french ? "4 à 6" : "4 to 6") : (language == .french ? "1 à 3" : "1 to 3")
+        let keyPoints = language == .french ? "1 à 3" : "1 to 3"
         let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasGrounding = !trimmedGrounding.isEmpty
         let corpusHint = loadSearchCorpusHint(
@@ -865,162 +792,7 @@ class AIService: ObservableObject {
             ?? fallbackFirstGuessInstructions(for: language)
     }
 
-    /// Builds instructions for query expansion during deep web search.
-    private static func buildQueryExpanderInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
-            return """
-            Retourne des requêtes de recherche web pour la question.
-            """
-        }
-
-        return """
-        Return web search queries for the question.
-        """
-    }
-
-    /// Prompt used to produce search-query expansions in the active UI language.
-    private func queryExpanderPrompt(for query: String, language: ModelLanguage, maxDerivedQueries: Int) -> String {
-        if language == .french {
-            return """
-            Question: \(query)
-
-            Retourne exactement \(maxDerivedQueries) requêtes de recherche web pour la question, en texte brut, une par ligne, sans numérotation, sans commentaires.
-            """
-        }
-
-        return """
-        Question: \(query)
-
-        Output exactly \(maxDerivedQueries) search queries for the question, plain text, one per line, no numbering, no comments.
-        """
-    }
-
-    /// Parses one-query-per-line model output and removes duplicates/noise.
-    private func parseDerivedQueries(_ raw: String, originalQuery: String, maxDerivedQueries: Int) -> [String] {
-        var seen = Set<String>()
-        let normalizedOriginal = normalizeQueryKey(originalQuery)
-        seen.insert(normalizedOriginal)
-
-        let queries = raw
-            .components(separatedBy: .newlines)
-            .map { sanitizeDerivedQueryLine($0) }
-            .filter { !$0.isEmpty }
-            .filter { !isRawURLSearchQuery($0) }
-            .filter { isMeaningfullyDifferentFromOriginal($0, originalQuery: originalQuery) }
-            .filter { candidate in
-                seen.insert(normalizeQueryKey(candidate)).inserted
-            }
-            .filter { !isNearDuplicate(ofAny: $0, in: [originalQuery]) }
-
-        return Array(queries.prefix(maxDerivedQueries))
-    }
-
-    /// Removes bullets/numbering artifacts and trims wrapping quotes.
-    private func sanitizeDerivedQueryLine(_ line: String) -> String {
-        let withoutPrefix = line.replacingOccurrences(
-            of: #"^\s*(?:[-*•]|\d+[.)])\s*"#,
-            with: "",
-            options: .regularExpression
-        )
-
-        return withoutPrefix
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Normalizes a query for case-insensitive deduplication.
-    private func normalizeQueryKey(_ query: String) -> String {
-        query
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Detects lines that are raw links instead of plain search query text.
-    private func isRawURLSearchQuery(_ candidate: String) -> Bool {
-        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-
-        if trimmed.range(
-            of: #"^(?i)(?:https?://|www\.)\S+$"#,
-            options: .regularExpression
-        ) != nil {
-            return true
-        }
-
-        if trimmed.contains(" ") {
-            return false
-        }
-
-        guard let components = URLComponents(string: trimmed) else {
-            return false
-        }
-
-        let hasSchemeAndHost =
-            (components.scheme?.isEmpty == false) &&
-            (components.host?.isEmpty == false)
-
-        return hasSchemeAndHost
-    }
-
-    /// Tokenizes text for lightweight lexical-similarity checks.
-    private func queryTokenSet(_ query: String) -> Set<String> {
-        let normalized = normalizeQueryKey(query)
-        let separators = CharacterSet.alphanumerics.inverted
-        let tokens = normalized
-            .components(separatedBy: separators)
-            .filter { $0.count >= 3 }
-
-        return Set(tokens)
-    }
-
-    /// Returns true when candidate adds enough novel tokens vs original query.
-    private func isMeaningfullyDifferentFromOriginal(_ candidate: String, originalQuery: String) -> Bool {
-        let candidateTokens = queryTokenSet(candidate)
-        let originalTokens = queryTokenSet(originalQuery)
-        guard !candidateTokens.isEmpty else { return false }
-
-        let novelTokens = candidateTokens.subtracting(originalTokens)
-        return novelTokens.count >= 2
-    }
-
-    /// Rejects near-duplicate variants using Jaccard overlap on token sets.
-    private func isNearDuplicate(ofAny candidate: String, in existingQueries: [String]) -> Bool {
-        let candidateTokens = queryTokenSet(candidate)
-        guard !candidateTokens.isEmpty else { return true }
-
-        for existing in existingQueries {
-            let existingTokens = queryTokenSet(existing)
-            guard !existingTokens.isEmpty else { continue }
-
-            let intersectionCount = candidateTokens.intersection(existingTokens).count
-            let unionCount = candidateTokens.union(existingTokens).count
-            guard unionCount > 0 else { continue }
-
-            let similarity = Double(intersectionCount) / Double(unionCount)
-            if similarity >= 0.75 {
-                return true
-            }
-        }
-
-        return false
-    }
-
     /// Generates the final summary through Foundation Models with context budgeting.
-    /// Generates a search summary with resilience around the on-device
-    /// model's transient failures — notably the intermittent
-    /// `GenerationError -1`, which is usually tool-calling transcript
-    /// overflow tipping past the 4096-token window on an unlucky run:
-    ///   1. Run as requested (tool-calling or classical).
-    ///   2. On a transient error, retry ONCE with a fresh session — the
-    ///      exact same input frequently succeeds on a second attempt.
-    ///   3. If tool calling was on and still failing, fall back to the
-    ///      classical (no-tools) path, which builds no tool transcript and
-    ///      so sidesteps the window pressure behind most -1 failures.
-    /// Deterministic rejections (guardrail / unsupported locale) skip the
-    /// retry — a retry only reproduces them. User cancellation
-    /// short-circuits everything. Returns "" only when every avenue fails.
     private func generateSummaryWithFoundationModels(
         query: String,
         context: String,
@@ -1028,7 +800,6 @@ class AIService: ObservableObject {
         temperature: Double = 0.3,
         maxTokens: Int = 1000,
         language: ModelLanguage = .french,
-        profile: GenerationProfile = .fast,
         useToolCalling: Bool = false,
         useWebVision: Bool = false,
         corpusChunks: [RAGChunk] = [],
@@ -1043,7 +814,7 @@ class AIService: ObservableObject {
             return try await runSummaryGeneration(
                 query: query, context: context, results: results,
                 temperature: temperature, maxTokens: maxTokens, language: language,
-                profile: profile, useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
                 maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                 onPartialUpdate: onPartialUpdate
@@ -1054,15 +825,13 @@ class AIService: ObservableObject {
             let diagnosis = Self.classifyGenerationError(error)
             noteGenerationFailure(stage: "attempt 1 (toolCalling=\(useToolCalling))", label: diagnosis.label)
 
-            // Attempt 2 — retry once for transient failures, same mode. The
-            // session is rebuilt fresh inside runSummaryGeneration, so a
-            // nondeterministic tool-loop overflow often clears on retry.
+            // Attempt 2 — retry once for transient failures, same mode.
             if diagnosis.isTransient {
                 do {
                     return try await runSummaryGeneration(
                         query: query, context: context, results: results,
                         temperature: temperature, maxTokens: maxTokens, language: language,
-                        profile: profile, useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                        useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
                         maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                         onPartialUpdate: onPartialUpdate
@@ -1074,17 +843,14 @@ class AIService: ObservableObject {
                 }
             }
 
-            // Attempt 3 — drop the tools. The classical prompt-stuffing path
-            // builds no tool transcript, so it avoids the context-window
-            // pressure behind most -1 failures. Only meaningful if we were
-            // using tools in the first place.
+            // Attempt 3 — drop the tools.
             if useToolCalling {
                 do {
                     print("ℹ️ Falling back to non-tool generation after tool-calling failure")
                     return try await runSummaryGeneration(
                         query: query, context: context, results: results,
                         temperature: temperature, maxTokens: maxTokens, language: language,
-                        profile: profile, useToolCalling: false, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                        useToolCalling: false, useWebVision: useWebVision, corpusChunks: corpusChunks,
                         maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                         onPartialUpdate: onPartialUpdate
@@ -1109,12 +875,7 @@ class AIService: ObservableObject {
     }
 
     /// Classifies a generation error into a log label + whether retrying is
-    /// worthwhile. We deliberately don't switch on specific
-    /// `LanguageModelSession.GenerationError` enum cases — their set shifts
-    /// across OS versions — but surface the case name via
-    /// `String(describing:)` so logs show the real cause (e.g.
-    /// `GenerationError.exceededContextWindowSize`) instead of a bare "-1",
-    /// and treat deterministic rejections as non-retryable.
+    /// worthwhile.
     nonisolated private static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
         if let genError = error as? LanguageModelSession.GenerationError {
             let full = String(describing: genError)
@@ -1144,7 +905,6 @@ class AIService: ObservableObject {
         temperature: Double = 0.3,
         maxTokens: Int = 1000,
         language: ModelLanguage = .french,
-        profile: GenerationProfile = .fast,
         useToolCalling: Bool = false,
         useWebVision: Bool = false,
         corpusChunks: [RAGChunk] = [],
@@ -1158,7 +918,6 @@ class AIService: ObservableObject {
             // does not accumulate and overflow the context window.
             let instructions = buildInstructions(
                 for: language,
-                isDeepProfile: profile == .deep,
                 maxOutputTokens: maxTokens,
                 useToolCalling: useToolCalling,
                 webSearchAvailable: useToolCalling && (useDuckDuckGo || useWikipedia)
@@ -1167,10 +926,6 @@ class AIService: ObservableObject {
             var toolBudget: Int = 0
             if useToolCalling {
                 let webSearchAvailable = useDuckDuckGo || useWikipedia
-                // Tool budget is sized from the clamped response cap. We
-                // recompute it here (rather than reuse the `effectiveMaxTokens`
-                // computed below) because session construction precedes the
-                // prompt step — same clamp, same inputs, so the value matches.
                 let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
                     requestedMaxTokens: maxTokens,
                     instructionTokens: TokenBudgeting.instructionTokens,
@@ -1189,15 +944,7 @@ class AIService: ObservableObject {
                         maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo,
                         useWikipedia: useWikipedia,
-                        // Mirror every webSearch reply into `toolFetchedResults`
-                        // so SearchView can surface the sources as cards with
-                        // RAG match scores once the model finishes. Deduped on
-                        // the published side via `appendUniqueResults`.
                         onWebResults: { results in
-                            // The Task gets its OWN `[weak self]` capture so it
-                            // doesn't reach into an enclosing mutable `self`
-                            // binding (which Swift 6 flags as capturing a var in
-                            // concurrently-executing code).
                             Task { @MainActor [weak self = self] in
                                 await self?.appendUniqueResults(results)
                             }
@@ -1222,14 +969,6 @@ class AIService: ObservableObject {
                 session = LanguageModelSession(instructions: instructions)
             }
 
-            let isDeepProfile = profile == .deep
-
-            // Token budget for the final summary. In tool-calling mode the
-            // response cap must reserve the tool appendix + schema overhead
-            // (~600t) so the answer can't grow large enough to leave no room
-            // for the tool transcript — otherwise a high response setting
-            // (slider reaches 3500) overflows the 4096 window and the model
-            // fails to respond. The prompt-stuffing path keeps the base clamp.
             let effectiveMaxTokens = useToolCalling
                 ? TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
                 : TokenBudgeting.clampedOutputTokens(
@@ -1240,7 +979,7 @@ class AIService: ObservableObject {
                 )
             let maxContextChars = TokenBudgeting.maxContextCharacters(
                 maxOutputTokens: effectiveMaxTokens,
-                contextUtilizationFactor: isDeepProfile ? Self.deepSummaryContextUtilizationFactor : Self.fastSummaryContextUtilizationFactor
+                contextUtilizationFactor: Self.summaryContextUtilizationFactor
             )
             
             // If context fits, use it all; otherwise intelligently select summaries
@@ -1299,7 +1038,6 @@ class AIService: ObservableObject {
                     corpusChunkCount: corpusChunks.count,
                     webSearchAvailable: useDuckDuckGo || useWikipedia,
                     language: language,
-                    isDeepProfile: isDeepProfile,
                     maxOutputTokens: effectiveMaxTokens,
                     groundingContext: toolGroundingContext
                 )
@@ -1312,21 +1050,20 @@ class AIService: ObservableObject {
                         "query": query,
                         "context": selectedContext,
                         "maxOutputTokens": "\(effectiveMaxTokens)",
-                        "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
-                        "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+                        "keyPointsRange": "1 to 3",
+                        "keyPointsRangeFr": "1 à 3"
                     ]
                 ) ?? fallbackSummaryPrompt(
                     query: query,
                     context: selectedContext,
                     language: language,
-                    isDeepProfile: isDeepProfile,
                     maxOutputTokens: effectiveMaxTokens
                 )
             }
 
             #if DEBUG
             debugNotes.append(
-                "generation profile=\(profile.rawValue), budget: reqTokens=\(maxTokens), effTokens=\(effectiveMaxTokens), contextCharsIn=\(context.count), contextCharsUsed=\(selectedContext.count), promptChars=\(prompt.count)"
+                "budget: reqTokens=\(maxTokens), effTokens=\(effectiveMaxTokens), contextCharsIn=\(context.count), contextCharsUsed=\(selectedContext.count), promptChars=\(prompt.count)"
             )
             DebugRAGStorage.shared.logFinalPrompt(prompt, label: "SearchSummary")
             #endif
@@ -1454,7 +1191,6 @@ class AIService: ObservableObject {
         query: String,
         context: String,
         language: ModelLanguage,
-        isDeepProfile: Bool,
         maxOutputTokens: Int
     ) -> String {
         if language == .french {
@@ -1466,7 +1202,7 @@ class AIService: ObservableObject {
 
             Réponds avec :
             1. Une réponse directe ou une présentation générale du sujet.
-            2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
+            2. 1 à 3 points clés.
             Limite : \(maxOutputTokens) tokens maximum.
             Format de sortie attendu : LaTeX pour les expressions mathématiques.
             Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
@@ -1483,7 +1219,7 @@ class AIService: ObservableObject {
 
         Respond with:
         1. A direct answer or topic overview.
-        2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
+        2. 1 to 3 key points.
         Limit: \(maxOutputTokens) tokens maximum.
         Required output format: LaTeX for mathematical expressions.
         When relevant, include mathematical formulas in simple LaTeX.

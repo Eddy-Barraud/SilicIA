@@ -283,7 +283,6 @@ final class RAGChunkerTests: XCTestCase {
             temperature: 0.3,
             maxTokens: 300,
             language: .english,
-            profile: .fast,
             generateAnswer: false
         )
 

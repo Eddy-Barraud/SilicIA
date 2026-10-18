@@ -50,7 +50,6 @@ final class MonetizationTests: XCTestCase {
         )
         // Full access while paywall is dormant
         XCTAssertTrue(entitlements.hasPremiumAccess)
-        XCTAssertTrue(entitlements.canUseDeepSearch)
         XCTAssertTrue(entitlements.canAttachDocuments)
         XCTAssertTrue(entitlements.canUseMultipleWebSourcesPerProvider)
         XCTAssertTrue(entitlements.canUseToolCalling)

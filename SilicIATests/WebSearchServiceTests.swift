@@ -281,7 +281,6 @@ final class WebSearchServiceTests: XCTestCase {
             maxScrapingResults: 2,
             maxScrapingChars: 4000,
             language: .english,
-            profile: .fast,
             generateAnswer: false,
             onMatchingScores: { scores in
                 reportedScores = scores
@@ -295,6 +294,36 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertEqual(updatedValidSources?.count, 1, "Unconvertible source should be deleted from active sources")
         XCTAssertEqual(updatedValidSources?.first?.url, validSource.url, "Only the valid Markdown source should remain")
         XCTAssertNil(reportedScores[unconvertibleSource.url], "Deleted source must not receive a RAG matching score")
+    }
+
+    @MainActor
+    func testSummarizeRespectsUserMaxScrapingResultsWithoutProfileClamping() async {
+        let aiService = AIService()
+        let results = (1...12).map { index in
+            SearchResult(
+                title: "Source \(index)",
+                url: "http://127.0.0.1:1/source-\(index)",
+                snippet: "Snippet \(index)"
+            )
+        }
+
+        _ = await aiService.summarize(
+            query: "propose des recettes de saison",
+            results: results,
+            maxScrapingResults: 12,
+            maxScrapingChars: 7000,
+            language: .french,
+            generateAnswer: false
+        )
+
+        #if DEBUG
+        let statsNote = aiService.debugNotes.first { $0.contains("scrape stats:") }
+        XCTAssertNotNil(statsNote, "Expected scrape stats debug note")
+        XCTAssertTrue(
+            statsNote?.contains("requested=12") == true,
+            "Expected requested=12 (user settings respected without fast-profile clamping to 6), got: \(statsNote ?? "nil")"
+        )
+        #endif
     }
 }
 

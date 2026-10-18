@@ -74,9 +74,6 @@ final class Entitlements: ObservableObject {
     // `hasPremiumAccess`) so the paid line can later be split per-feature
     // without touching call sites, and so each site documents its intent.
 
-    /// (1) "Extensive" deep search in SearchView.
-    var canUseDeepSearch: Bool { hasPremiumAccess }
-
     /// (2) Attaching PDFs and images as chat/search context.
     var canAttachDocuments: Bool { hasPremiumAccess }
 

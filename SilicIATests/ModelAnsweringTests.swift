@@ -142,7 +142,6 @@ final class ModelAnsweringTests: XCTestCase {
             temperature: 0.3,
             maxTokens: 300,
             language: .english,
-            profile: .fast,
             useToolCalling: false,
             generateAnswer: true
         )
@@ -171,7 +170,6 @@ final class ModelAnsweringTests: XCTestCase {
             temperature: 0.3,
             maxTokens: 300,
             language: .english,
-            profile: .fast,
             useToolCalling: true,
             generateAnswer: true
         )
