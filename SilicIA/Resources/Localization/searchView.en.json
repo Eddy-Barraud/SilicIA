@@ -39,6 +39,6 @@
   "search.settings.estimatedOutput": "Estimated max output: %lld characters (%lld sentences)",
   "search.settings.maxContextTokens": "Max Context Tokens",
   "search.settings.estimatedContext": "Estimated context: ~%lld words",
-  "search.settings.contextCapped": "Context is automatically capped by the current response-token limit.",
-  "search.settings.modelLanguage": "Model Language"
+  "search.settings.modelLanguage": "Model Language",
+  "search.settings.offlineMode": "Offline mode: web sources disabled."
 }

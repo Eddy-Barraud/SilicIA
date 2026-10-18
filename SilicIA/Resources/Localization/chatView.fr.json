@@ -25,6 +25,6 @@
   "chat.settings.searchSources": "Sources de recherche",
   "chat.settings.maxDDG": "Résultats max (DDG)",
   "chat.settings.maxWiki": "Résultats max (Wikipedia)",
-  "chat.settings.selectAtLeastOne": "Sélectionnez au moins une source.",
-  "chat.settings.modelLanguage": "Langue du modèle"
+  "chat.settings.modelLanguage": "Langue du modèle",
+  "chat.settings.offlineMode": "Mode hors-ligne : sources web désactivées."
 }

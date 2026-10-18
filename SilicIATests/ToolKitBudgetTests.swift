@@ -57,7 +57,12 @@ final class ToolKitBudgetTests: XCTestCase {
     }
 
     @MainActor
-    private func makeConfig(webSearchAvailable: Bool, hasCorpus: Bool = true) -> ToolKit.Configuration {
+    private func makeConfig(
+        webSearchAvailable: Bool,
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) -> ToolKit.Configuration {
         let chunks: [RAGChunk] = hasCorpus ? [
             RAGChunk(source: "document.pdf", text: "Sample document passage for budgeting tests.", url: nil, pdfPage: 1)
         ] : []
@@ -69,8 +74,8 @@ final class ToolKitBudgetTests: XCTestCase {
             webScraper: WebScrapingService(),
             maxDuckDuckGoResults: 6,
             maxWikipediaResults: 2,
-            useDuckDuckGo: true,
-            useWikipedia: true
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -94,5 +99,57 @@ final class ToolKitBudgetTests: XCTestCase {
         XCTAssertFalse(noCorpusTools.compactMap { $0 as? WikipediaTool }.isEmpty)
         XCTAssertTrue(noCorpusTools.compactMap { $0 as? RAGSearchTool }.isEmpty,
                       "searchContext must be omitted when there are no corpus chunks")
+    }
+
+    /// When both sources are disabled, neither webSearch nor wikipediaSearch is present,
+    /// leaving the LLM completely offline.
+    @MainActor
+    func testOfflineModeWhenBothSourcesDisabled() {
+        let (tools, _, _) = ToolKit.assemble(
+            config: makeConfig(
+                webSearchAvailable: true,
+                hasCorpus: false,
+                useDuckDuckGo: false,
+                useWikipedia: false
+            ),
+            responseTokens: 500
+        )
+        XCTAssertTrue(tools.compactMap { $0 as? WebSearchTool }.isEmpty, "webSearch must be omitted when useDuckDuckGo is false")
+        XCTAssertTrue(tools.compactMap { $0 as? WikipediaTool }.isEmpty, "wikipediaSearch must be omitted when useWikipedia is false")
+        XCTAssertTrue(tools.compactMap { $0 as? RAGSearchTool }.isEmpty, "searchContext must be omitted when no corpus")
+        // Only offline utilities remain (DateTimeTool and CalculatorTool)
+        let toolNames = tools.map(\.name)
+        XCTAssertTrue(toolNames.contains("currentDateTime"))
+        XCTAssertTrue(toolNames.contains("calculate"))
+    }
+
+    /// When one source is enabled and the other is disabled, only the enabled source is registered.
+    @MainActor
+    func testIndependentSourceToggling() {
+        // Internet (DuckDuckGo) only
+        let (ddgTools, _, _) = ToolKit.assemble(
+            config: makeConfig(
+                webSearchAvailable: true,
+                hasCorpus: false,
+                useDuckDuckGo: true,
+                useWikipedia: false
+            ),
+            responseTokens: 500
+        )
+        XCTAssertFalse(ddgTools.compactMap { $0 as? WebSearchTool }.isEmpty, "webSearch must be registered")
+        XCTAssertTrue(ddgTools.compactMap { $0 as? WikipediaTool }.isEmpty, "wikipediaSearch must be omitted")
+
+        // Wikipedia only
+        let (wikiTools, _, _) = ToolKit.assemble(
+            config: makeConfig(
+                webSearchAvailable: true,
+                hasCorpus: false,
+                useDuckDuckGo: false,
+                useWikipedia: true
+            ),
+            responseTokens: 500
+        )
+        XCTAssertTrue(wikiTools.compactMap { $0 as? WebSearchTool }.isEmpty, "webSearch must be omitted")
+        XCTAssertFalse(wikiTools.compactMap { $0 as? WikipediaTool }.isEmpty, "wikipediaSearch must be registered")
     }
 }

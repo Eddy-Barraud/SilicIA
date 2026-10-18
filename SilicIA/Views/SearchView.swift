@@ -345,21 +345,25 @@ struct SearchView: View {
 
                 Spacer(minLength: 0)
             } else {
-                // Reset action sits on the leading edge so it mirrors the
-                // chat tab's "new conversation" button position.
-                headerIconButton(
-                    systemImage: "arrow.counterclockwise",
-                    label: L.t("common.startOver", language: settings.language),
-                    action: { goHome() }
-                )
+                ZStack {
+                    SourceToggleButtons(settingsStore: settingsStore)
 
-                Spacer()
+                    HStack(spacing: 4) {
+                        headerIconButton(
+                            systemImage: "arrow.counterclockwise",
+                            label: L.t("common.startOver", language: settings.language),
+                            action: { goHome() }
+                        )
 
-                headerIconButton(
-                    systemImage: "gearshape",
-                    label: L.t("common.settings", language: settings.language),
-                    action: { showSettings = true }
-                )
+                        Spacer()
+
+                        headerIconButton(
+                            systemImage: "gearshape",
+                            label: L.t("common.settings", language: settings.language),
+                            action: { showSettings = true }
+                        )
+                    }
+                }
             }
         }
         .padding()
@@ -874,9 +878,12 @@ struct SearchView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(L.t("search.settings.selectAtLeastOne", language: settings.language))
+                    HStack(spacing: 4) {
+                        Image(systemName: "wifi.slash")
+                        Text(L.t("search.settings.offlineMode", language: settings.language))
+                    }
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.secondary)
                 }
             }
 

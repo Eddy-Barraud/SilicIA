@@ -39,6 +39,6 @@
   "search.settings.estimatedOutput": "Salida máx estimada: %lld caracteres (%lld frases)",
   "search.settings.maxContextTokens": "Tokens de contexto máx",
   "search.settings.estimatedContext": "Contexto estimado: ~%lld palabras",
-  "search.settings.contextCapped": "El contexto se limita automáticamente con el límite de tokens de respuesta actual.",
-  "search.settings.modelLanguage": "Idioma del modelo"
+  "search.settings.modelLanguage": "Idioma del modelo",
+  "search.settings.offlineMode": "Modo sin conexión: fuentes web desactivadas."
 }

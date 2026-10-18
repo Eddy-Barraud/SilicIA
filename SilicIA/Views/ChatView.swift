@@ -66,9 +66,9 @@ struct ChatView: View {
     var pdfRemovalRequests: AnyPublisher<URL, Never>? = nil
 
     /// In `.pdfTalkme` mode, web search is force-disabled regardless of
-    /// the AppStorage flag — the host app is offline-only.
+    /// settings — the host app is offline-only.
     private var effectiveIsWebSearchEnabled: Bool {
-        mode == .pdfTalkme ? false : isWebSearchEnabled
+        mode == .pdfTalkme ? false : (settings.useDuckDuckGo || settings.useWikipedia)
     }
     private var effectiveUseDuckDuckGo: Bool {
         mode == .pdfTalkme ? false : settings.useDuckDuckGo
@@ -242,31 +242,37 @@ struct ChatView: View {
     /// minimum 44pt tap target, with `.help` (macOS hover) and
     /// `.accessibilityLabel` (VoiceOver) on every entry.
     private var chatHeaderView: some View {
-        HStack(spacing: 4) {
-            headerIconButton(
-                systemImage: "square.and.pencil",
-                label: L.t("common.new", language: settings.language),
-                action: { startOver() }
-            )
+        ZStack {
+            if mode != .pdfTalkme {
+                SourceToggleButtons(settingsStore: settingsStore)
+            }
 
-            Spacer()
+            HStack(spacing: 4) {
+                headerIconButton(
+                    systemImage: "square.and.pencil",
+                    label: L.t("common.new", language: settings.language),
+                    action: { startOver() }
+                )
 
-            headerIconButton(
-                systemImage: "clock.arrow.circlepath",
-                label: L.t("common.history", language: settings.language),
-                action: { showHistory = true }
-            )
+                Spacer()
 
-            headerIconButton(
-                systemImage: "gearshape",
-                label: L.t("common.settings", language: settings.language),
-                action: {
-                    #if canImport(UIKit)
-                    dismissKeyboard()
-                    #endif
-                    showSettings = true
-                }
-            )
+                headerIconButton(
+                    systemImage: "clock.arrow.circlepath",
+                    label: L.t("common.history", language: settings.language),
+                    action: { showHistory = true }
+                )
+
+                headerIconButton(
+                    systemImage: "gearshape",
+                    label: L.t("common.settings", language: settings.language),
+                    action: {
+                        #if canImport(UIKit)
+                        dismissKeyboard()
+                        #endif
+                        showSettings = true
+                    }
+                )
+            }
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
@@ -440,9 +446,12 @@ struct ChatView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(L.t("chat.settings.selectAtLeastOne", language: settings.language))
+                    HStack(spacing: 4) {
+                        Image(systemName: "wifi.slash")
+                        Text(L.t("chat.settings.offlineMode", language: settings.language))
+                    }
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.secondary)
                 }
             }
             }
