@@ -98,7 +98,7 @@ nonisolated enum ToolKit {
 
         var tools: [any Tool] = []
         if !config.corpusChunks.isEmpty {
-            var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget)
+            var ragTool = RAGSearchTool(chunks: config.corpusChunks, tokenBudget: tokenBudget, language: config.language)
             ragTool.governor = governor
             ragTool.transcriptRecorder = transcriptRecorder
             tools.append(ragTool)

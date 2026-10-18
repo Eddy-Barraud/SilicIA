@@ -302,6 +302,64 @@ final class RAGChunkerTests: XCTestCase {
         #endif
     }
 
+    func testQueryLanguageDetectionAndFrenchNLEmbeddingRanking() async {
+        // 1. Verify query language detection matches the actual user query language regardless of UI fallback
+        XCTAssertEqual(
+            RAGContextService.detectQueryLanguage(for: "propose des recettes de saison", fallback: .english),
+            .french
+        )
+        XCTAssertEqual(
+            RAGContextService.detectQueryLanguage(for: "Famous works of Einstein", fallback: .french),
+            .english
+        )
+        XCTAssertEqual(
+            RAGContextService.detectQueryLanguage(for: "¿Cuáles son las recetas de temporada?", fallback: .english),
+            .spanish
+        )
+
+        let service = RAGContextService()
+        let frWordEmb = await service.resolveWordEmbedding(for: "propose des recettes de saison", language: .english)
+        XCTAssertEqual(frWordEmb?.language, .french)
+
+        let enSentenceEmb = await service.resolveEmbedding(for: "Famous works of Einstein", language: .french)
+        if let enSentenceEmb {
+            XCTAssertEqual(enSentenceEmb.language, .english)
+        }
+
+        // 2. Verify seasonal recipe chunks rank strictly above off-topic "Star Academy (France)" chunks
+        let starAcademyChunk = RAGChunk(
+            source: "Star Academy (France)",
+            text: "Star Academy est une émission de télévision française de télé-réalité musicale diffusée sur TF1. Chaque saison voit une promotion d'élèves au château de Dammarie-les-Lys avec une avance sur recette d'un million d'euros pour le gagnant de la saison.",
+            url: "https://fr.wikipedia.org/wiki/Star_Academy_(France)",
+            pdfPage: nil
+        )
+        let recipeChunk1 = RAGChunk(
+            source: "Recettes de saison : cuisine d'automne et d'hiver",
+            text: "Découvrez nos meilleures idées de recettes de saison faciles et gourmandes : velouté de potimarron, gratin de courge butternut, tarte aux pommes et poires de saison.",
+            url: "https://www.marmiton.org/recettes/saison",
+            pdfPage: nil
+        )
+        let recipeChunk2 = RAGChunk(
+            source: "Menu et recette de saison du mois",
+            text: "Cuisiner des fruits et légumes de saison permet de préparer chaque recette avec des produits frais : soupe de légumes, quiche aux poireaux et compote maison.",
+            url: "https://www.cuisineaz.com/recettes-de-saison",
+            pdfPage: nil
+        )
+
+        let result = await service.selectContext(
+            chunks: [starAcademyChunk, recipeChunk1, recipeChunk2],
+            query: "propose des recettes de saison",
+            maxOutputTokens: 500,
+            language: .english
+        )
+
+        XCTAssertEqual(result.rankedChunks.count, 3)
+        let topTwoURLs = Set(result.rankedChunks.prefix(2).compactMap(\.chunk.url))
+        XCTAssertTrue(topTwoURLs.contains("https://www.marmiton.org/recettes/saison"))
+        XCTAssertTrue(topTwoURLs.contains("https://www.cuisineaz.com/recettes-de-saison"))
+        XCTAssertEqual(result.rankedChunks.last?.chunk.url, "https://fr.wikipedia.org/wiki/Star_Academy_(France)")
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size

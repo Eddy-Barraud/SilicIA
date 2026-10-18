@@ -411,7 +411,8 @@ class AIService: ObservableObject {
             query: query,
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor,
-            queries: queries
+            queries: queries,
+            language: language
         )
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
         #if DEBUG

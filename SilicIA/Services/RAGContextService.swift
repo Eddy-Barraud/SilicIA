@@ -868,6 +868,32 @@ struct RAGSelectionResult {
 actor RAGContextService {
     /// In-memory cache of sentence embeddings by language to avoid repeated disk reads.
     private var embeddingCache: [NLLanguage: NLEmbedding] = [:]
+    /// In-memory cache of word embeddings by language for languages where sentence embeddings are unavailable.
+    private var wordEmbeddingCache: [NLLanguage: NLEmbedding] = [:]
+
+    /// Stop words excluded from lexical/stem and word-embedding term vectors so grammatical articles
+    /// (e.g. "des", "les", "the") do not dilute topical terms.
+    private nonisolated static let rankingStopWords: Set<String> = [
+        // French
+        "les", "des", "une", "dans", "pour", "par", "sur", "avec", "sans", "sous",
+        "aux", "ces", "ses", "nos", "vos", "leur", "leurs", "cet", "cette", "mon", "ton", "son",
+        "mais", "donc", "car", "que", "qui", "quoi", "dont", "ou", "comment", "pourquoi", "quand",
+        "quel", "quelle", "quels", "quelles", "est", "sont", "etre", "avoir", "fait", "faire",
+        "plus", "moins", "tres", "tout", "tous", "toute", "toutes", "comme", "aussi", "meme",
+        "entre", "vers", "chez", "depuis", "pendant", "avant", "apres", "alors", "ainsi",
+        "propose", "proposer", "donne", "donner", "explique", "expliquer",
+        // English
+        "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "been",
+        "have", "has", "had", "not", "but", "what", "which", "who", "whom", "whose",
+        "when", "where", "why", "how", "can", "could", "would", "should", "will", "shall",
+        "into", "onto", "upon", "about", "above", "below", "between", "through", "during",
+        "before", "after", "more", "most", "some", "such", "than", "too", "very", "also",
+        // Spanish
+        "los", "las", "una", "unos", "unas", "del", "por", "para", "con", "sin", "sobre",
+        "entre", "hasta", "desde", "como", "pero", "mas", "menos", "muy", "todo", "toda",
+        "todos", "todas", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
+        "que", "quien", "quienes", "cual", "cuales", "cuando", "donde", "porque", "son", "esta"
+    ]
 
     init() {
         // Preload commonly used language embeddings in background
@@ -876,15 +902,74 @@ actor RAGContextService {
         }
     }
 
-    /// Preloads sentence embeddings for supported languages into memory.
+    /// Preloads sentence and word embeddings for supported languages into memory.
     func preloadEmbeddings() {
         let defaultLanguages: [NLLanguage] = [.english, .french, .spanish]
         for lang in defaultLanguages {
             if embeddingCache[lang] == nil, let emb = NLEmbedding.sentenceEmbedding(for: lang) {
                 embeddingCache[lang] = emb
             }
+            if wordEmbeddingCache[lang] == nil, let wordEmb = NLEmbedding.wordEmbedding(for: lang) {
+                wordEmbeddingCache[lang] = wordEmb
+            }
         }
     }
+
+    /// Detects the dominant language of the user query using `NLLanguageRecognizer`,
+    /// falling back to `fallback` (or `.english`) only when the query itself is undetermined or ambiguous.
+    nonisolated static func detectQueryLanguage(for query: String, fallback: ModelLanguage? = nil) -> NLLanguage {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return fallback?.nlLanguage ?? .english
+        }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 3)
+        if let dominant = recognizer.dominantLanguage,
+           dominant != .undetermined,
+           let confidence = hypotheses[dominant],
+           confidence >= 0.45 {
+            return dominant
+        }
+
+        // Lexical cue check for short queries where NLLanguageRecognizer confidence can be split
+        let words = Set(tokenizeStatic(trimmed))
+        let frenchCues: Set<String> = [
+            "les", "des", "une", "dans", "pour", "avec", "sur", "aux", "est", "sont",
+            "quel", "quelle", "quels", "quelles", "comment", "pourquoi", "recette", "recettes", "saison"
+        ]
+        let spanishCues: Set<String> = [
+            "los", "las", "una", "unos", "unas", "del", "para", "con", "sobre",
+            "cual", "cuales", "como", "donde", "porque"
+        ]
+        let englishCues: Set<String> = [
+            "the", "and", "with", "from", "what", "which", "where", "when", "why", "how", "famous", "works"
+        ]
+
+        let frCount = words.intersection(frenchCues).count
+        let esCount = words.intersection(spanishCues).count
+        let enCount = words.intersection(englishCues).count
+        if frCount > esCount && frCount > enCount {
+            return .french
+        }
+        if esCount > frCount && esCount > enCount {
+            return .spanish
+        }
+        if enCount > frCount && enCount > esCount {
+            return .english
+        }
+
+        if let dominant = recognizer.dominantLanguage,
+           dominant != .undetermined,
+           let confidence = hypotheses[dominant],
+           confidence >= 0.30 {
+            return dominant
+        }
+
+        return fallback?.nlLanguage ?? .english
+    }
+
     /// - Parameter query: User query to rank against.
     /// - Parameter historyTokens: Tokens consumed by conversation history.
     /// - Parameter maxOutputTokens: Requested response-token budget used to compute remaining context space.
@@ -892,6 +977,7 @@ actor RAGContextService {
     ///   When nil, `options.contextUtilizationFactor` is used.
     /// - Parameter queries: When provided (Deep search), chunks are ranked by cosine similarity
     ///   against a combined TF vector built from every query (user + derived queries).
+    /// - Parameter language: Optional fallback language if the query language cannot be determined.
     func selectContext(
         chunks: [RAGChunk],
         query: String,
@@ -899,6 +985,7 @@ actor RAGContextService {
         maxOutputTokens: Int,
         contextUtilizationFactor: Double? = nil,
         queries: [String]? = nil,
+        language: ModelLanguage? = nil,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
@@ -930,7 +1017,8 @@ actor RAGContextService {
         // numeric tokens introduced by query expansion, not just the user's
         // original wording.
         let numericQueryString = (queries?.joined(separator: " ")).map { $0.isEmpty ? query : $0 } ?? query
-        let embedding = resolveEmbedding(for: query)
+        let embedding = resolveEmbedding(for: query, language: language)
+        let wordEmbedding = resolveWordEmbedding(for: query, language: language)
         let queryEmbeddingInfo: (unitVector: [Double], query: String, embedding: NLEmbedding)? = {
             guard let embedding, let rawVec = embedding.vector(for: query) else { return nil }
             let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
@@ -1000,26 +1088,53 @@ actor RAGContextService {
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
         if combinedQueryVector == nil, let qInfo = queryEmbeddingInfo {
             for candidate in topCosineCandidates {
-                let semanticScore = nlEmbeddingRelevanceScore(
+                var semanticScore = nlEmbeddingRelevanceScore(
                     chunk: candidate.chunk,
                     query: qInfo.query,
                     unitQueryVector: qInfo.unitVector,
                     embedding: qInfo.embedding,
                     options: options
                 )
-                let combinedScore = semanticScore + candidate.baseScore * 0.25
+                if let wordEmbedding {
+                    let wordScore = wordEmbeddingSemanticScore(
+                        chunk: candidate.chunk,
+                        query: query,
+                        wordEmbedding: wordEmbedding
+                    )
+                    semanticScore = semanticScore * 0.75 + wordScore * 0.25
+                }
+                let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
         } else if combinedQueryVector == nil, let embedding {
             for candidate in topCosineCandidates {
-                let semanticScore = nlEmbeddingRelevanceScore(
+                var semanticScore = nlEmbeddingRelevanceScore(
                     chunk: candidate.chunk,
                     query: query,
                     unitQueryVector: nil,
                     embedding: embedding,
                     options: options
                 )
-                let combinedScore = semanticScore + candidate.baseScore * 0.25
+                if let wordEmbedding {
+                    let wordScore = wordEmbeddingSemanticScore(
+                        chunk: candidate.chunk,
+                        query: query,
+                        wordEmbedding: wordEmbedding
+                    )
+                    semanticScore = semanticScore * 0.75 + wordScore * 0.25
+                }
+                let combinedScore = semanticScore + candidate.baseScore * 0.35
+                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
+            }
+        } else if combinedQueryVector == nil, let wordEmbedding {
+            for candidate in topCosineCandidates {
+                let wordScore = wordEmbeddingSemanticScore(
+                    chunk: candidate.chunk,
+                    query: query,
+                    wordEmbedding: wordEmbedding,
+                    includeBoostsWithOptions: options
+                )
+                let combinedScore = wordScore + candidate.baseScore * 0.45
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
         } else {
@@ -1129,26 +1244,105 @@ actor RAGContextService {
         return max(options.minContextTokens * options.avgCharsPerToken, budgetedTokens * options.avgCharsPerToken)
     }
 
-    private func resolveEmbedding(for query: String) -> NLEmbedding? {
-        let recognizer = NLLanguageRecognizer()
-        recognizer.processString(query)
-        let language = recognizer.dominantLanguage ?? .english
+    /// Resolves the `NLEmbedding` sentence embedding matching the detected user query language.
+    /// Does not fall back to `.english` when the query is in another language so non-English queries
+    /// are never scored with an English sentence embedding.
+    func resolveEmbedding(for query: String, language: ModelLanguage? = nil) -> NLEmbedding? {
+        let targetLanguage = Self.detectQueryLanguage(for: query, fallback: language)
 
-        if let cached = embeddingCache[language] {
+        if let cached = embeddingCache[targetLanguage] {
             return cached
         }
-        if let loaded = NLEmbedding.sentenceEmbedding(for: language) {
-            embeddingCache[language] = loaded
+        if let loaded = NLEmbedding.sentenceEmbedding(for: targetLanguage) {
+            embeddingCache[targetLanguage] = loaded
             return loaded
         }
-        if let englishCached = embeddingCache[.english] {
-            return englishCached
+        return nil
+    }
+
+    /// Resolves the `NLEmbedding` word embedding matching the detected user query language.
+    func resolveWordEmbedding(for query: String, language: ModelLanguage? = nil) -> NLEmbedding? {
+        let targetLanguage = Self.detectQueryLanguage(for: query, fallback: language)
+
+        if let cached = wordEmbeddingCache[targetLanguage] {
+            return cached
         }
-        if let englishLoaded = NLEmbedding.sentenceEmbedding(for: .english) {
-            embeddingCache[.english] = englishLoaded
-            return englishLoaded
+        if let loaded = NLEmbedding.wordEmbedding(for: targetLanguage) {
+            wordEmbeddingCache[targetLanguage] = loaded
+            return loaded
+        }
+        if let fallbackLang = language?.nlLanguage, fallbackLang != targetLanguage {
+            if let cached = wordEmbeddingCache[fallbackLang] {
+                return cached
+            }
+            if let loaded = NLEmbedding.wordEmbedding(for: fallbackLang) {
+                wordEmbeddingCache[fallbackLang] = loaded
+                return loaded
+            }
         }
         return nil
+    }
+
+    /// Computes semantic similarity between `query` and `chunk` using the query language's `NLEmbedding.wordEmbedding`.
+    private func wordEmbeddingSemanticScore(
+        chunk: RAGChunk,
+        query: String,
+        wordEmbedding: NLEmbedding,
+        includeBoostsWithOptions options: RAGSelectionOptions? = nil
+    ) -> Double {
+        let queryTerms = contentTokens(from: query)
+        let chunkTerms = contentTokens(from: "\(chunk.source) \(chunk.text)")
+        guard !queryTerms.isEmpty, !chunkTerms.isEmpty else {
+            if let options {
+                return relevanceScore(chunk: chunk, query: query, options: options)
+            }
+            return 0
+        }
+
+        // For each query term, find its best semantic match among chunk terms in the target language's word embedding space.
+        var totalSimilarity = 0.0
+        var evaluatedQueryTerms = 0
+
+        let uniqueChunkTerms = Array(Set(chunkTerms).prefix(64))
+        for qTerm in Set(queryTerms) {
+            let qStem = Self.stemStatic(qTerm)
+            var bestTermSim = 0.0
+            let hasQVector = wordEmbedding.contains(qTerm) || wordEmbedding.contains(qStem)
+            let qLookup = wordEmbedding.contains(qTerm) ? qTerm : qStem
+
+            for cTerm in uniqueChunkTerms {
+                let cStem = Self.stemStatic(cTerm)
+                if qStem == cStem {
+                    bestTermSim = 1.0
+                    break
+                }
+                if hasQVector {
+                    let cLookup = wordEmbedding.contains(cTerm) ? cTerm : (wordEmbedding.contains(cStem) ? cStem : nil)
+                    if let cLookup {
+                        let dist = wordEmbedding.distance(between: qLookup, and: cLookup, distanceType: .cosine)
+                        if !dist.isNaN {
+                            let sim = max(0.0, 1.0 - dist / 2.0)
+                            if sim > bestTermSim {
+                                bestTermSim = sim
+                            }
+                        }
+                    }
+                }
+            }
+            totalSimilarity += bestTermSim
+            evaluatedQueryTerms += 1
+        }
+
+        var score = evaluatedQueryTerms > 0 ? (totalSimilarity / Double(evaluatedQueryTerms)) * 2.0 : 0.0
+        if let options {
+            if chunk.text.count > options.longChunkCharacterThreshold {
+                score += options.longChunkBonusScore
+            }
+            score += Self.numericRelevanceBoost(text: chunk.text, query: query, options: options)
+            score += Self.equationRelevanceBoost(text: chunk.text, query: query, options: options)
+            score += Self.figureRelevanceBoost(chunk: chunk, query: query, options: options)
+        }
+        return score
     }
 
     private func nlEmbeddingRelevanceScore(
@@ -1190,11 +1384,11 @@ actor RAGContextService {
     }
 
     private func relevanceScore(chunk: RAGChunk, query: String, options: RAGSelectionOptions) -> Double {
-        let queryWords = Set(tokenize(query).filter { $0.count > 2 })
+        let queryWords = Set(contentTokens(from: query).map(Self.stemStatic))
         guard !queryWords.isEmpty else { return 0 }
 
         let text = chunk.text
-        let textWords = Set(tokenize(text))
+        let textWords = Set(contentTokens(from: "\(chunk.source) \(text)").map(Self.stemStatic))
         var score = 0.0
         for word in queryWords where textWords.contains(word) {
             score += 1.0
@@ -1208,19 +1402,20 @@ actor RAGContextService {
         return score
     }
 
-    /// Builds a term-frequency vector from the union of query tokens.
+    /// Builds a stem-frequency vector from the union of content query tokens.
     private func combinedTermVector(from queries: [String]) -> [String: Double] {
         var vector: [String: Double] = [:]
         for query in queries {
-            for term in tokenize(query) where term.count > 2 {
-                vector[term, default: 0] += 1
+            for term in contentTokens(from: query) {
+                let stem = Self.stemStatic(term)
+                vector[stem, default: 0] += 1
             }
         }
         return vector
     }
 
     /// Cosine similarity between a chunk and a precomputed query term vector,
-    /// with the legacy long-chunk bonus preserved for tie-breaking.
+    /// with sublinear TF scaling and multi-term coverage bonus to prevent single-word polysemous hijacking.
     private func cosineRelevanceScore(
         chunk: RAGChunk,
         queryVector: [String: Double],
@@ -1231,30 +1426,39 @@ actor RAGContextService {
 
         let text = chunk.text
         var textVector: [String: Double] = [:]
-        for term in tokenize(text) where term.count > 2 {
-            textVector[term, default: 0] += 1
+        for term in contentTokens(from: "\(chunk.source) \(text)") {
+            let stem = Self.stemStatic(term)
+            textVector[stem, default: 0] += 1
         }
         guard !textVector.isEmpty else { return 0 }
 
         var dot = 0.0
+        var matchedQueryTerms = 0
         for (term, weight) in queryVector {
-            if let textWeight = textVector[term] {
-                dot += weight * textWeight
+            if let rawCount = textVector[term], rawCount > 0 {
+                // Sublinear TF scaling (1 + ln(tf)) prevents a single repeated polysemous word (e.g. "saison")
+                // from dominating chunks that match multiple distinct query terms.
+                let scaledTextWeight = 1.0 + log(rawCount)
+                dot += weight * scaledTextWeight
+                matchedQueryTerms += 1
             }
         }
 
         let queryNorm = sqrt(queryVector.values.reduce(0) { $0 + $1 * $1 })
-        let textNorm = sqrt(textVector.values.reduce(0) { $0 + $1 * $1 })
+        let textNorm = sqrt(textVector.values.reduce(0) {
+            let scaled = 1.0 + log(max(1.0, $1))
+            return $0 + scaled * scaled
+        })
         guard queryNorm > 0, textNorm > 0 else { return 0 }
 
         var score = dot / (queryNorm * textNorm)
+        if queryVector.count >= 2 {
+            let coverageRatio = Double(matchedQueryTerms) / Double(queryVector.count)
+            score += coverageRatio * 0.45
+        }
         if text.count > options.longChunkCharacterThreshold {
             score += options.longChunkBonusScore
         }
-        // Apply the same numeric-aware nudge as the bag-of-words path so the
-        // two scorers behave consistently when the query mentions concrete
-        // values. Without this, deep-search (cosine path) was systematically
-        // worse than fast-search at picking stat-heavy chunks.
         score += Self.numericRelevanceBoost(text: text, query: numericQueryString, options: options)
         score += Self.equationRelevanceBoost(text: text, query: numericQueryString, options: options)
         score += Self.figureRelevanceBoost(chunk: chunk, query: numericQueryString, options: options)
@@ -1635,6 +1839,37 @@ actor RAGContextService {
 
     private func tokenize(_ text: String) -> [String] {
         Self.tokenizeStatic(text)
+    }
+
+    private func contentTokens(from text: String) -> [String] {
+        Self.tokenizeStatic(text).filter { token in
+            guard token.count > 2 else { return false }
+            let folded = token.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            return !Self.rankingStopWords.contains(token) && !Self.rankingStopWords.contains(folded)
+        }
+    }
+
+    nonisolated static func stemStatic(_ token: String) -> String {
+        var str = token.lowercased()
+        guard str.count > 3 else { return str }
+        if str.hasSuffix("ies") && str.count > 4 {
+            str.removeLast(3)
+            str.append("y")
+            return str
+        }
+        if (str.hasSuffix("sses") || str.hasSuffix("xes") || str.hasSuffix("shes") || str.hasSuffix("ches")) && str.count > 4 {
+            str.removeLast(2)
+            return str
+        }
+        if str.hasSuffix("aux") && str.count > 4 {
+            str.removeLast(2)
+            str.append("l")
+            return str
+        }
+        if (str.hasSuffix("s") && !str.hasSuffix("ss")) || str.hasSuffix("x") {
+            str.removeLast()
+        }
+        return str
     }
 
     private nonisolated static func tokenizeStatic(_ text: String) -> [String] {

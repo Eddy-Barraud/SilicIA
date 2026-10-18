@@ -207,7 +207,8 @@ final class ChatService: ObservableObject {
             query: message,
             historyTokens: historyTokens,
             maxOutputTokens: effectiveMaxOutputTokens,
-            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
+            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor,
+            language: language
         )
         // Cap the selected context with a single primary strategy:
         //   1. Word-aware truncation (semantic boundaries — preferred).

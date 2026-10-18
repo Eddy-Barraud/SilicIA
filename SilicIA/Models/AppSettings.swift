@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NaturalLanguage
 
 /// Supported output languages for generated model responses.
 nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
@@ -18,6 +19,14 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
         case .english: return "en"
         case .french: return "fr"
         case .spanish: return "es"
+        }
+    }
+
+    var nlLanguage: NLLanguage {
+        switch self {
+        case .english: return .english
+        case .french: return .french
+        case .spanish: return .spanish
         }
     }
 

@@ -67,6 +67,9 @@ struct RAGSearchTool: Tool {
     /// memberwise init without a budget — useful for tests.
     var tokenBudget: Int = 1500
 
+    /// Fallback language when the tool query is too short for `NLLanguageRecognizer`.
+    var language: ModelLanguage? = nil
+
     /// Shared per-generation loop breaker. Refuses duplicate / over-budget
     /// calls. Optional so direct callers / tests are unaffected.
     var governor: ToolCallGovernor?
@@ -120,7 +123,8 @@ struct RAGSearchTool: Tool {
         let result = await service.selectContext(
             chunks: chunks,
             query: trimmed,
-            maxOutputTokens: tokenBudget
+            maxOutputTokens: tokenBudget,
+            language: language
         )
 
         let top = Array(result.selectedChunks.prefix(limit))
