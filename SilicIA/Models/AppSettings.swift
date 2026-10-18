@@ -45,9 +45,9 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 4
     var maxWikipediaResults: Int = 2
-    var maxResponseTokens: Int = 1000
+    var maxResponseTokens: Int = 500
     var temperature: Double = 0.7
-    var maxContextTokens: Int = 3096
+    var maxContextTokens: Int = 3500
     private var _isReaderViewAndSummaryEnabled: Bool = false
     var isReaderViewAndSummaryEnabled: Bool {
         get {
@@ -185,7 +185,7 @@ struct AppSettings: Codable, Equatable {
     /// Combined per-search cap derived from per-source ranges; used by callers that need a
     /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
     static let maxSearchResultsRange = 2...40
-    static let totalTokensBudget = 4096
+    static let totalTokensBudget = 4000
     static let maxResponseTokensRange = 250...3796
     static let temperatureRange = 0.3...1.0
     static let maxContextTokensRange = 300...3846
