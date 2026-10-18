@@ -414,7 +414,6 @@ class AIService: ObservableObject {
 
         let breakdownLog = breakdownLines.joined(separator: "\n")
         print(breakdownLog)
-        debugNotes.append(breakdownLog)
         #endif
 
         self.summary = summary

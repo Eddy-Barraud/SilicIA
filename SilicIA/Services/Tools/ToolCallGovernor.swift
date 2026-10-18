@@ -169,7 +169,7 @@ actor ToolCallGovernor {
         }
 
         #if DEBUG
-        print("[ToolGovernor] tool=\(tool) attempt=\(totalAttempts)/\(maxTotalCalls) decision=\(decision) args=\"\(arguments.prefix(80))\"")
+        print("[ToolGovernor] tool=\(tool) attempt=\(totalAttempts)/\(maxTotalCalls) decision=\(decision) args=\"\(arguments)\"")
         #endif
         return decision
     }
