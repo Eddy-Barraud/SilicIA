@@ -325,6 +325,38 @@ final class WebSearchServiceTests: XCTestCase {
         )
         #endif
     }
+
+    @MainActor
+    func testSearchWikipediaRetrievesCleanMarkdownWithoutHTML() async throws {
+        let service = WebSearchService()
+        let results = try await service.searchWikipedia(query: "Jupiter", language: .english, limit: 1)
+        XCTAssertFalse(results.isEmpty, "Wikipedia search for 'Jupiter' should return at least one result")
+        guard let first = results.first else { return }
+        XCTAssertTrue(first.url.contains("wikipedia.org"), "URL should be a Wikipedia URL: \(first.url)")
+        let content = first.retrievedContent ?? ""
+        XCTAssertFalse(content.isEmpty, "Retrieved content should not be empty")
+        XCTAssertFalse(content.contains("<div"), "Retrieved content must not contain raw HTML <div> tags")
+        XCTAssertFalse(content.contains("</div>"), "Retrieved content must not contain raw HTML </div> tags")
+        XCTAssertFalse(content.contains("<p>"), "Retrieved content must not contain raw HTML <p> tags")
+        XCTAssertFalse(content.contains("</p>"), "Retrieved content must not contain raw HTML </p> tags")
+    }
+
+    @MainActor
+    func testWikipediaToolExecution() async throws {
+        let service = WebSearchService()
+        var reportedResults: [SearchResult] = []
+        var tool = WikipediaTool(
+            webSearchService: service,
+            maxWikipediaResults: 2,
+            language: .english
+        )
+        tool.onResults = { reportedResults = $0 }
+        let output = try await tool.call(arguments: WikipediaTool.Arguments(query: "Paris", maxResults: 1))
+        XCTAssertFalse(output.isEmpty)
+        XCTAssertTrue(output.contains("Paris"))
+        XCTAssertFalse(reportedResults.isEmpty)
+        XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
+    }
 }
 
 

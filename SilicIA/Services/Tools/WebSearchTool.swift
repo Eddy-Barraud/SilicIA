@@ -36,13 +36,12 @@ struct WebSearchTool: Tool {
 
     let name = "webSearch"
     let description = """
-    Search the web (DuckDuckGo + Wikipedia) and return the top results' \
+    Search the web via DuckDuckGo and return the top results' \
     titles, URLs, and scraped content. Use this whenever the question \
-    requires current information, recent events, or details beyond your \
-    training data — and only when needed; do NOT call this for arithmetic, \
-    definitions, or anything you can answer directly. You may call multiple \
-    times in a single turn with refined queries if the first batch was \
-    incomplete.
+    requires current information, recent events, websites, technical documentation, \
+    or details beyond your training data — and only when needed; do NOT call this \
+    for arithmetic or anything you can answer directly. You may call multiple \
+    times in a single turn with refined queries if the first batch was incomplete.
     """
 
     /// Injected by ChatService so the tool reuses the existing scraping
@@ -50,9 +49,7 @@ struct WebSearchTool: Tool {
     let webSearchService: WebSearchService
     let webScraper: WebScrapingService
     let maxDuckDuckGoResults: Int
-    let maxWikipediaResults: Int
     let useDuckDuckGo: Bool
-    let useWikipedia: Bool
     let language: ModelLanguage
 
     /// Optional sink that receives the URLs / titles / scraped content the
@@ -129,15 +126,15 @@ struct WebSearchTool: Tool {
         guard !trimmed.isEmpty else {
             return "Error: empty query. Provide focused keywords (3–6 words usually works best)."
         }
-        guard useDuckDuckGo || useWikipedia else {
+        guard useDuckDuckGo else {
             return """
-            Web search is not available in this conversation: both \
-            DuckDuckGo and Wikipedia are disabled in settings. Answer the \
+            Web search is not available in this conversation: \
+            DuckDuckGo is disabled in settings. Answer the \
             user from your own knowledge instead.
             """
         }
 
-        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, Self.maxResultsCap))
+        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, min(maxDuckDuckGoResults, Self.maxResultsCap)))
 
         // Derive per-page char cap from the total token budget. We split
         // the budget evenly across the model-requested result count,
@@ -151,30 +148,11 @@ struct WebSearchTool: Tool {
             (totalChars / max(1, limit)) - Self.overheadCharsPerResult
         )
 
-        // Suppress Wikipedia when the model asked for current/recent
-        // information. Wikipedia's keyword search dutifully returns the
-        // closest encyclopedic article ("Crise des subprimes" for
-        // "actualité des marchés cette semaine"), which is exactly the
-        // wrong content for a time-sensitive query — DDG already covers
-        // current news in the same call. Only kicks in when the model's
-        // query carries temporal cues; definitional queries unaffected.
-        let temporal = RAGContextService.hasTemporalIntent(trimmed)
-        let effectiveUseWikipedia = useWikipedia && !temporal
-        #if DEBUG
-        if useWikipedia && !effectiveUseWikipedia {
-            print("[Tool:webSearch] suppressing Wikipedia for temporal query: \"\(trimmed)\"")
-        }
-        #endif
-
         let results: [SearchResult]
         do {
-            results = try await webSearchService.search(
+            results = try await webSearchService.searchDuckDuckGo(
                 query: trimmed,
-                maxDuckDuckGoResults: maxDuckDuckGoResults,
-                maxWikipediaResults: maxWikipediaResults,
-                language: language,
-                useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                limit: limit
             )
         } catch is CancellationError {
             // User pressed Stop while the tool was running — re-throw so the

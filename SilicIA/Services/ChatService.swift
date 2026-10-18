@@ -239,7 +239,9 @@ final class ChatService: ObservableObject {
                 maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
                 hasContext: hasContext,
                 webSearchAvailable: webSearchAvailable,
-                hasCorpus: !chunks.isEmpty
+                hasCorpus: !chunks.isEmpty,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia
             )
             let assembled = ToolKit.assemble(
                 config: ToolKit.Configuration(
@@ -1132,7 +1134,9 @@ final class ChatService: ObservableObject {
         hasContext: Bool = true,
         appendToolsAppendix: Bool = true,
         webSearchAvailable: Bool = false,
-        hasCorpus: Bool = true
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         let variant = hasContext ? "instructions" : "instructions.no_context"
         let base = PromptLoader.loadPrompt(
@@ -1149,7 +1153,9 @@ final class ChatService: ObservableObject {
         return base + "\n\n" + toolCallingInstructionsAppendix(
             for: language,
             webSearchAvailable: webSearchAvailable,
-            hasCorpus: hasCorpus
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -1159,13 +1165,17 @@ final class ChatService: ObservableObject {
     private func toolCallingInstructionsAppendix(
         for language: ModelLanguage,
         webSearchAvailable: Bool,
-        hasCorpus: Bool = true
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         ToolKit.instructionsAppendix(
             for: language,
             tone: .chat,
             webSearchAvailable: webSearchAvailable,
-            hasCorpus: hasCorpus
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 

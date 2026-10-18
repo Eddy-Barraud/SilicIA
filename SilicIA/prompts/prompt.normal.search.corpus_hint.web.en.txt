@@ -1,2 +1,2 @@
-No chunks were pre-fetched. Use `webSearch` to get the information.
+No chunks were pre-fetched. Use search tools (`webSearch` or `wikipediaSearch`) to get the information.
 

@@ -486,8 +486,12 @@ class AIService: ObservableObject {
     private func buildInstructions(
         for language: ModelLanguage,
         maxOutputTokens: Int,
-        webSearchAvailable: Bool = true
+        webSearchAvailable: Bool = true,
+        hasCorpus: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
+        let maxSentences = TokenBudgeting.estimatedOutputSentences(forTokens: maxOutputTokens)
         let base = PromptLoader.loadPrompt(
             mode: "normal",
             feature: "search",
@@ -495,6 +499,7 @@ class AIService: ObservableObject {
             language: language,
             replacements: [
                 "maxOutputTokens": "\(maxOutputTokens)",
+                "maxOutputSentences": "\(maxSentences)",
                 "keyPointsRange": "1 to 3",
                 "keyPointsRangeFr": "1 à 3"
             ]
@@ -503,17 +508,20 @@ class AIService: ObservableObject {
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
     /// Per-language user-turn prompt for the search-summary tool-calling
     /// path. Differs from the prompt-stuffing template in two key ways:
     ///   1. NO pre-baked context block — the model is expected to call
-    ///      `searchContext` / `webSearch` / `currentDateTime` as needed.
+    ///      `searchContext` / `webSearch` / `wikipediaSearch` / `currentDateTime` as needed.
     ///   2. Explicitly nudges the model to use the tools that match the
     ///      query shape (time-relative → currentDateTime first;
-    ///      factual lookup → searchContext + webSearch; arithmetic →
+    ///      factual lookup → searchContext + webSearch / wikipediaSearch; arithmetic →
     ///      calculate). Without this, the model often just answers from
     ///      memory and the tools sit unused.
     private static func toolCallingSearchPrompt(
@@ -535,6 +543,7 @@ class AIService: ObservableObject {
         )
 
         let contextBlock = localizedSearchContextBlock(from: trimmedGrounding, language: language)
+        let maxOutputSentences = TokenBudgeting.estimatedOutputSentences(forTokens: maxOutputTokens)
 
         if let loaded = PromptLoader.loadPrompt(
             mode: "normal",
@@ -546,6 +555,7 @@ class AIService: ObservableObject {
                 "corpusHint": corpusHint,
                 "keyPoints": keyPoints,
                 "maxOutputTokens": "\(maxOutputTokens)",
+                "maxOutputSentences": "\(maxOutputSentences)",
                 "groundingContext": contextBlock
             ]
         ) {
@@ -557,6 +567,7 @@ class AIService: ObservableObject {
             corpusHint: corpusHint,
             keyPoints: keyPoints,
             maxOutputTokens: maxOutputTokens,
+            maxOutputSentences: maxOutputSentences,
             language: language,
             groundingContext: contextBlock
         )
@@ -583,9 +594,9 @@ class AIService: ObservableObject {
     ) -> String {
         if hasGrounding {
             switch language {
-            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext` ou `webSearch`."
-            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext` o `webSearch`."
-            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext` or `webSearch`."
+            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext`, `webSearch` ou `wikipediaSearch`."
+            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext`, `webSearch` o `wikipediaSearch`."
+            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext`, `webSearch`, or `wikipediaSearch`."
             }
         } else if chunkCount > 0 {
             if let loaded = PromptLoader.loadPrompt(
@@ -612,9 +623,9 @@ class AIService: ObservableObject {
                 return loaded
             }
             switch language {
-            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise `webSearch` pour obtenir l'information."
-            case .spanish: return "No hay fragmentos pre-recuperados. Usa `webSearch` para obtener la información."
-            case .english: return "No chunks were pre-fetched. Use `webSearch` to get the information."
+            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise les outils de recherche (`webSearch` ou `wikipediaSearch`) pour obtenir l'information."
+            case .spanish: return "No hay fragmentos pre-recuperados. Usa las herramientas de búsqueda (`webSearch` o `wikipediaSearch`) para obtener la información."
+            case .english: return "No chunks were pre-fetched. Use search tools (`webSearch` or `wikipediaSearch`) to get the information."
             }
         } else {
             if let loaded = PromptLoader.loadPrompt(
@@ -638,6 +649,7 @@ class AIService: ObservableObject {
         corpusHint: String,
         keyPoints: String,
         maxOutputTokens: Int,
+        maxOutputSentences: Int,
         language: ModelLanguage,
         groundingContext: String = ""
     ) -> String {
@@ -647,14 +659,14 @@ class AIService: ObservableObject {
             \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
-            Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext` ou `webSearch`).
+            Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext`, `webSearch` ou `wikipediaSearch`).
             Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
             Si la question nécessite un calcul, utilise `calculate`.
 
             Réponds avec :
             1. Une réponse directe ou une présentation générale du sujet.
             2. \(keyPoints) points clés.
-            Limite : \(maxOutputTokens) tokens.
+            Limite : \(maxOutputSentences) phrases.
             Format de sortie attendu : texte clair en Markdown.
             Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
             N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \\begin{ (comme \\begin{array}).
@@ -664,14 +676,14 @@ class AIService: ObservableObject {
             \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
-            Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext` o `webSearch`).
+            Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext`, `webSearch` o `wikipediaSearch`).
             Si la pregunta es temporalmente relativa ('hoy', 'pronto', 'próximo'), llama a `currentDateTime` ANTES de cualquier otra tarea.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
             Responde con:
             1. Una respuesta directa o una descripción general del tema.
             2. \(keyPoints) puntos clave.
-            Límite: \(maxOutputTokens) tokens.
+            Límite: \(maxOutputSentences) frases.
             Formato de salida esperado: texto claro en Markdown.
             Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
             Nunca uses LaTeX para texto ordinario ni utilices entornos \\begin{ (como \\begin{array}).
@@ -681,14 +693,14 @@ class AIService: ObservableObject {
             \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
-            If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext` or `webSearch`) first.
+            If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext`, `webSearch`, or `wikipediaSearch`) first.
             If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
             If the question requires a calculation, use `calculate`.
 
             Respond with:
             1. A direct answer or topic overview.
             2. \(keyPoints) key points.
-            Limit: \(maxOutputTokens) tokens.
+            Limit: \(maxOutputSentences) sentences.
             Expected output format: clear Markdown prose.
             When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
             Never wrap non-mathematical text in LaTeX and never use \\begin{ environments (such as \\begin{array}).
@@ -801,7 +813,10 @@ class AIService: ObservableObject {
         let instructions = buildInstructions(
             for: language,
             maxOutputTokens: maxTokens,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: !corpusChunks.isEmpty,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
         let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxTokens,

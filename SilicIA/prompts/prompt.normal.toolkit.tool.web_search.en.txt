@@ -1,2 +1,1 @@
-- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current or recent information, technical procedures, APIs, documentation, or facts beyond your training data — not for basic arithmetic.
-
+- `webSearch(query, maxResults?)` : search the web via DuckDuckGo with focused keywords. Use this for recent information, news, websites, technical documentation, or specific facts.

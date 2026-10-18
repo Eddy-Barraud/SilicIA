@@ -110,7 +110,7 @@ nonisolated enum ToolKit {
         tools.append(calcTool)
         tools.append(dateTool)
 
-        if config.webSearchAvailable {
+        if config.webSearchAvailable && config.useDuckDuckGo {
             // webSearch gets a TIGHTER budget than the other tools: its
             // reply (several scraped pages) is the dominant transcript
             // consumer and the main cause of context-window overflow
@@ -121,9 +121,7 @@ nonisolated enum ToolKit {
                 webSearchService: config.webSearchService,
                 webScraper: config.webScraper,
                 maxDuckDuckGoResults: config.maxDuckDuckGoResults,
-                maxWikipediaResults: config.maxWikipediaResults,
                 useDuckDuckGo: config.useDuckDuckGo,
-                useWikipedia: config.useWikipedia,
                 language: config.language,
                 tokenBudget: webSearchBudget
             )
@@ -133,29 +131,46 @@ nonisolated enum ToolKit {
             webTool.transcriptRecorder = transcriptRecorder
             tools.append(webTool)
         }
+
+        if config.webSearchAvailable && config.useWikipedia {
+            var wikiTool = WikipediaTool(
+                webSearchService: config.webSearchService,
+                maxWikipediaResults: config.maxWikipediaResults,
+                language: config.language,
+                tokenBudget: tokenBudget
+            )
+            wikiTool.onResults = config.onWebResults
+            wikiTool.governor = governor
+            wikiTool.transcriptRecorder = transcriptRecorder
+            tools.append(wikiTool)
+        }
         return (tools, tokenBudget, transcriptRecorder)
     }
 
     /// Per-language paragraph appended onto the system instructions when
     /// tool calling is enabled. The `tone` selects the `searchContext`
     /// description; the other three tool descriptions are tone-agnostic.
-    /// The `webSearch` entry is included only when the tool is actually
-    /// in the kit so the model isn't told to call something that isn't
-    /// attached. `hasCorpus` controls whether `searchContext` is advertised.
+    /// The `webSearch` and `wikipediaSearch` entries are included only when
+    /// those tools are enabled and attached. `hasCorpus` controls whether
+    /// `searchContext` is advertised.
     static func instructionsAppendix(
         for language: ModelLanguage,
         tone: ToolCallingTone,
         webSearchAvailable: Bool,
-        hasCorpus: Bool = true
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         let header = loadHeader(for: language)
         let searchContextLine = loadSearchContextLine(for: language, tone: tone)
         let calculateLine = loadCalculateLine(for: language)
         let dateTimeLine = loadDateTimeLine(for: language)
         let webSearchLine = loadWebSearchLine(for: language)
+        let wikipediaSearchLine = loadWikipediaSearchLine(for: language)
+        let hasActiveSearch = webSearchAvailable && (useDuckDuckGo || useWikipedia)
         let footer = loadFooter(
             for: language,
-            hasSearchOrCorpus: (hasCorpus || webSearchAvailable)
+            hasSearchOrCorpus: (hasCorpus || hasActiveSearch)
         )
 
         var toolLines: [String] = []
@@ -163,8 +178,11 @@ nonisolated enum ToolKit {
             toolLines.append(searchContextLine)
         }
         toolLines.append(contentsOf: [calculateLine, dateTimeLine])
-        if webSearchAvailable {
+        if webSearchAvailable && useDuckDuckGo {
             toolLines.append(webSearchLine)
+        }
+        if webSearchAvailable && useWikipedia {
+            toolLines.append(wikipediaSearchLine)
         }
 
         let toolsBlock = toolLines.joined(separator: "\n")
@@ -254,11 +272,25 @@ nonisolated enum ToolKit {
         }
         switch language {
         case .french:
-            return "- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les procédures techniques, les API, la documentation ou tout ce qui dépasse tes données d'entraînement — pas pour les calculs arithmétiques."
+            return "- `webSearch(query, maxResults?)` : interroge le web via DuckDuckGo avec une requête ciblée (mots-clés précis). Utilise-le pour les informations récentes, actualités, sites web, procédures techniques ou faits précis."
         case .spanish:
-            return "- `webSearch(query, maxResults?)`: consulta la web (DuckDuckGo + Wikipedia) con una consulta que TÚ formulas a partir de la pregunta del usuario. Úsala para información reciente, procedimientos técnicos, APIs, documentación o cualquier dato más allá de tus datos de entrenamiento — no para cálculos aritméticos."
+            return "- `webSearch(query, maxResults?)` : consulta la web vía DuckDuckGo con palabras clave específicas. Úsala para información reciente, noticias, sitios web, documentación técnica o hechos específicos."
         case .english:
-            return "- `webSearch(query, maxResults?)`: query the web (DuckDuckGo + Wikipedia) with a focused query YOU compose from the user's question. Use this for current or recent information, technical procedures, APIs, documentation, or facts beyond your training data — not for basic arithmetic."
+            return "- `webSearch(query, maxResults?)` : search the web via DuckDuckGo with focused keywords. Use this for recent information, news, websites, technical documentation, or specific facts."
+        }
+    }
+
+    private static func loadWikipediaSearchLine(for language: ModelLanguage) -> String {
+        if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.wikipedia_search", language: language) {
+            return loaded
+        }
+        switch language {
+        case .french:
+            return "- `wikipediaSearch(query, maxResults?)` : recherche un article encyclopédique sur Wikipédia. La requête DOIT être très courte (1 ou 2 mots maximum : concept simple, nom de personne, lieu, machine, technique). Ne pose jamais de question ni de phrase complète."
+        case .spanish:
+            return "- `wikipediaSearch(query, maxResults?)` : busca un artículo enciclopédico en Wikipedia. La consulta DEBE ser muy concisa (1 o 2 palabras máximo: concepto simple, nombre de persona, lugar, máquina, técnica). Nunca uses oraciones completas ni preguntas."
+        case .english:
+            return "- `wikipediaSearch(query, maxResults?)` : search for an encyclopedic article on Wikipedia. The query MUST be very concise (1 or 2 words max: simple concept, person name, place, machine, technique). Never use full sentences or questions."
         }
     }
 

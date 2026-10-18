@@ -29,10 +29,13 @@ final class ToolKitBudgetTests: XCTestCase {
             responseTokens: 500
         )
         let defaultWebTool = defaultTools.compactMap { $0 as? WebSearchTool }.first
+        let defaultWikiTool = defaultTools.compactMap { $0 as? WikipediaTool }.first
         let defaultRagTool = defaultTools.compactMap { $0 as? RAGSearchTool }.first
         XCTAssertNotNil(defaultWebTool)
+        XCTAssertNotNil(defaultWikiTool)
         XCTAssertNotNil(defaultRagTool)
         XCTAssertEqual(defaultWebTool?.tokenBudget, min(defaultSharedBudget, TokenBudgeting.webSearchReplyTokenCap))
+        XCTAssertEqual(defaultWikiTool?.tokenBudget, defaultSharedBudget)
         XCTAssertEqual(defaultRagTool?.tokenBudget, defaultSharedBudget)
 
         // Richer profile: shared budget exceeds cap, webSearch is held to ceiling
@@ -43,9 +46,12 @@ final class ToolKitBudgetTests: XCTestCase {
         XCTAssertGreaterThan(richSharedBudget, TokenBudgeting.webSearchReplyTokenCap,
                              "Need a profile where the shared budget exceeds the cap for this test to be meaningful")
         let richWebTool = richTools.compactMap { $0 as? WebSearchTool }.first
+        let richWikiTool = richTools.compactMap { $0 as? WikipediaTool }.first
         let richRagTool = richTools.compactMap { $0 as? RAGSearchTool }.first
         XCTAssertEqual(richWebTool?.tokenBudget, TokenBudgeting.webSearchReplyTokenCap,
                        "webSearch should be held to the ceiling")
+        XCTAssertEqual(richWikiTool?.tokenBudget, richSharedBudget,
+                       "wikipediaSearch should keep the full shared budget")
         XCTAssertEqual(richRagTool?.tokenBudget, richSharedBudget,
                        "searchContext should keep the full shared budget")
     }
@@ -68,7 +74,7 @@ final class ToolKitBudgetTests: XCTestCase {
         )
     }
 
-    /// When web search is disabled the kit omits the webSearch tool entirely.
+    /// When web search is disabled the kit omits the webSearch and wikipediaSearch tools entirely.
     /// When no documents exist in corpus, the kit omits searchContext entirely.
     @MainActor
     func testNoWebSearchToolWhenUnavailable() {
@@ -77,6 +83,7 @@ final class ToolKitBudgetTests: XCTestCase {
             responseTokens: 500
         )
         XCTAssertTrue(tools.compactMap { $0 as? WebSearchTool }.isEmpty)
+        XCTAssertTrue(tools.compactMap { $0 as? WikipediaTool }.isEmpty)
         XCTAssertFalse(tools.compactMap { $0 as? RAGSearchTool }.isEmpty)
 
         let (noCorpusTools, _, _) = ToolKit.assemble(
@@ -84,6 +91,7 @@ final class ToolKitBudgetTests: XCTestCase {
             responseTokens: 500
         )
         XCTAssertFalse(noCorpusTools.compactMap { $0 as? WebSearchTool }.isEmpty)
+        XCTAssertFalse(noCorpusTools.compactMap { $0 as? WikipediaTool }.isEmpty)
         XCTAssertTrue(noCorpusTools.compactMap { $0 as? RAGSearchTool }.isEmpty,
                       "searchContext must be omitted when there are no corpus chunks")
     }
