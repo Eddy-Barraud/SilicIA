@@ -1,1 +1,1 @@
-- `webSearch(query, maxResults?)` : interroge le web via DuckDuckGo avec une requête ciblée (mots-clés précis). Utilise-le pour les informations récentes, actualités, sites web, procédures techniques ou faits précis.
+- `webSearch(query, maxResults?)` : recherche sur le web via DuckDuckGo avec des mots-clés ciblés. Utilise-le pour obtenir des informations actuelles, des sites web, des chiffres, des distances, des comparaisons ou des faits précis.

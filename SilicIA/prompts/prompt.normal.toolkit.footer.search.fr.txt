@@ -1,0 +1,1 @@
+Tu peux appeler ces outils plusieurs fois par tour pour obtenir des données complètes. Vérifie systématiquement les faits, dates, chiffres, distances et comparaisons en interrogeant le web (webSearch) ou Wikipédia (wikipediaSearch) avant de formuler ta réponse.

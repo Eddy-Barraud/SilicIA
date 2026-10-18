@@ -1,8 +1,8 @@
 {{groundingContext}}Sujet ou question : {{query}}
 
 {{corpusHint}}
-Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext`, `webSearch` ou `wikipediaSearch`).
-Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
+Effectue une recherche (`webSearch` ou `wikipediaSearch`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
+N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
 Si la question nécessite un calcul, utilise `calculate`.
 
 Réponds avec :
@@ -11,4 +11,4 @@ Réponds avec :
 Limite : {{maxOutputSentences}} phrases.
 Format de sortie attendu : texte clair en Markdown.
 Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
-N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \begin{ (comme \begin{array}).
+N'utilise jamais de LaTeX pour du code, des requêtes ou du texte ordinaire, et n'utilise jamais de commande \text{ ni d'environnements \begin{ (comme \begin{array}).

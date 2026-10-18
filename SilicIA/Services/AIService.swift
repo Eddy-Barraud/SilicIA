@@ -659,8 +659,8 @@ class AIService: ObservableObject {
             \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
-            Si la question concerne des étapes techniques, des procédures, de la documentation ou des faits précis, utilise d'abord les outils de recherche (`searchContext`, `webSearch` ou `wikipediaSearch`).
-            Si la question est temporellement relative (« aujourd'hui », « bientôt », « prochain »), appelle `currentDateTime` AVANT toute autre tâche.
+            Effectue une recherche (`webSearch` ou `wikipediaSearch`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
+            N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
             Si la question nécessite un calcul, utilise `calculate`.
 
             Réponds avec :
@@ -669,15 +669,15 @@ class AIService: ObservableObject {
             Limite : \(maxOutputSentences) phrases.
             Format de sortie attendu : texte clair en Markdown.
             Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
-            N'utilise jamais de LaTeX pour du texte ordinaire et n'utilise jamais d'environnements \\begin{ (comme \\begin{array}).
+            N'utilise jamais de LaTeX pour du code, des requêtes ou du texte ordinaire, et n'utilise jamais de commande \\text{ ni d'environnements \\begin{ (comme \\begin{array}).
             """
         case .spanish:
             return """
             \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
-            Si la pregunta trata sobre pasos técnicos, procedimientos, documentación o hechos específicos, utiliza primero las herramientas de búsqueda (`searchContext`, `webSearch` o `wikipediaSearch`).
-            Si la pregunta es temporalmente relativa ('hoy', 'pronto', 'próximo'), llama a `currentDateTime` ANTES de cualquier otra tarea.
+            Realiza una búsqueda (`webSearch` o `wikipediaSearch`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
+            Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
             Responde con:
@@ -686,15 +686,15 @@ class AIService: ObservableObject {
             Límite: \(maxOutputSentences) frases.
             Formato de salida esperado: texto claro en Markdown.
             Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
-            Nunca uses LaTeX para texto ordinario ni utilices entornos \\begin{ (como \\begin{array}).
+            Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \\text{ ni entornos \\begin{ (como \\begin{array}).
             """
         case .english:
             return """
             \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
-            If the question asks about technical steps, procedures, documentation, or specific facts, query search tools (`searchContext`, `webSearch`, or `wikipediaSearch`) first.
-            If the question is time-relative ("today", "soon", "next"), call `currentDateTime` BEFORE anything else.
+            Perform a search (`webSearch` or `wikipediaSearch`) to gather reliable information, exact figures, facts, or comparisons before answering.
+            Only call `currentDateTime` if the question explicitly depends on the current date or time.
             If the question requires a calculation, use `calculate`.
 
             Respond with:
@@ -703,7 +703,7 @@ class AIService: ObservableObject {
             Limit: \(maxOutputSentences) sentences.
             Expected output format: clear Markdown prose.
             When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
-            Never wrap non-mathematical text in LaTeX and never use \\begin{ environments (such as \\begin{array}).
+            Never wrap non-mathematical text, code, or queries in LaTeX, and never use \\text{ or \\begin{ environments (such as \\begin{array}).
             """
         }
     }

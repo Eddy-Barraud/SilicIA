@@ -170,6 +170,7 @@ nonisolated enum ToolKit {
         let hasActiveSearch = webSearchAvailable && (useDuckDuckGo || useWikipedia)
         let footer = loadFooter(
             for: language,
+            tone: tone,
             hasSearchOrCorpus: (hasCorpus || hasActiveSearch)
         )
 
@@ -294,7 +295,21 @@ nonisolated enum ToolKit {
         }
     }
 
-    private static func loadFooter(for language: ModelLanguage, hasSearchOrCorpus: Bool) -> String {
+    private static func loadFooter(for language: ModelLanguage, tone: ToolCallingTone, hasSearchOrCorpus: Bool) -> String {
+        if tone == .search {
+            if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.search", language: language) {
+                return loaded
+            }
+            switch language {
+            case .french:
+                return "Tu peux appeler ces outils plusieurs fois par tour pour obtenir des données complètes. Vérifie systématiquement les faits, dates, chiffres, distances et comparaisons en interrogeant le web (`webSearch`) ou Wikipédia (`wikipediaSearch`) avant de formuler ta réponse."
+            case .spanish:
+                return "Puedes llamar a estas herramientas varias veces en un turno para obtener información completa. Verifica sistemáticamente los hechos, fechas, cifras, distancias y comparaciones consultando la web (`webSearch`) o Wikipedia (`wikipediaSearch`) antes de redactar tu respuesta."
+            case .english:
+                return "You may call these tools multiple times per turn to gather complete information. Always verify facts, dates, figures, distances, and comparisons by searching the web (`webSearch`) or Wikipedia (`wikipediaSearch`) before writing your answer."
+            }
+        }
+
         let variant = hasSearchOrCorpus ? "footer.with_search" : "footer.direct"
         if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: variant, language: language) {
             return loaded

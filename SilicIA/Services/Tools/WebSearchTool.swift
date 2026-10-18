@@ -37,11 +37,10 @@ struct WebSearchTool: Tool {
     let name = "webSearch"
     let description = """
     Search the web via DuckDuckGo and return the top results' \
-    titles, URLs, and scraped content. Use this whenever the question \
-    requires current information, recent events, websites, technical documentation, \
-    or details beyond your training data — and only when needed; do NOT call this \
-    for arithmetic or anything you can answer directly. You may call multiple \
-    times in a single turn with refined queries if the first batch was incomplete.
+    titles, URLs, and scraped content. Use this to verify facts, statistics, \
+    figures, distances, comparisons, recent events, websites, or technical \
+    documentation. You may call multiple times in a single turn with refined \
+    queries if the first batch was incomplete.
     """
 
     /// Injected by ChatService so the tool reuses the existing scraping

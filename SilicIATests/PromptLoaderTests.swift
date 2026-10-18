@@ -102,6 +102,9 @@ final class PromptLoaderTests: XCTestCase {
             let footerSearch = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.with_search", language: language)
             XCTAssertNotNil(footerSearch, "Missing footer with_search for \(language.code)")
 
+            let footerSearchMode = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.search", language: language)
+            XCTAssertNotNil(footerSearchMode, "Missing footer search for \(language.code)")
+
             let footerDirect = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.direct", language: language)
             XCTAssertNotNil(footerDirect, "Missing footer direct for \(language.code)")
         }
