@@ -317,11 +317,11 @@ nonisolated enum ToolKit {
         if hasSearchOrCorpus {
             switch language {
             case .french:
-                return "Tu peux appeler ces outils plusieurs fois par tour si la première réponse est incomplète. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Pour les définitions basiques ou la culture générale courante, réponds directement à partir de tes connaissances sans mentionner de contexte manquant."
+                return "Tu peux appeler ces outils pour vérifier les faits, définitions, dates ou chiffres avant de formuler ta réponse. Tu peux les appeler plusieurs fois par tour si nécessaire. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Ne mentionne jamais de contexte manquant."
             case .spanish:
-                return "Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Para definiciones básicas o conceptos generales cotidianos, responde directamente a partir de tus conocimientos sin mencionar la falta de contexto."
+                return "Puedes llamar a estas herramientas para verificar hechos, definiciones, fechas o cifras antes de formular tu respuesta. Puedes llamarlas varias veces en un turno si es necesario. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Nunca menciones la falta de contexto."
             case .english:
-                return "You may call these tools multiple times per turn if the first result was incomplete. Cite the source of passages only when an attached document or web search was used. For basic definitions or everyday general knowledge, answer directly from your knowledge without mentioning missing context."
+                return "You may call these tools to verify facts, definitions, dates, or figures before formulating your answer. You may call them multiple times per turn if needed. Cite the source of passages only when an attached document or web search was used. Never mention missing context."
             }
         } else {
             switch language {

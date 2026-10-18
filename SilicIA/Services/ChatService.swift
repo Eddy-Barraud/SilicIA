@@ -293,7 +293,9 @@ final class ChatService: ObservableObject {
                 for: message,
                 language: language,
                 groundingContext: toolGroundingContext,
-                webSearchAvailable: webSearchAvailable
+                webSearchAvailable: webSearchAvailable,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia
             )
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
@@ -1215,7 +1217,9 @@ final class ChatService: ObservableObject {
         for userMessage: String,
         language: ModelLanguage,
         groundingContext: String = "",
-        webSearchAvailable: Bool = false
+        webSearchAvailable: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         // Prior user turns only (exclude the just-appended current message
         // and every assistant answer).
@@ -1228,7 +1232,9 @@ final class ChatService: ObservableObject {
             priorUserQuestions: Array(priorQuestions),
             language: language,
             groundingContext: groundingContext,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -1277,7 +1283,9 @@ final class ChatService: ObservableObject {
         priorUserQuestions: [String],
         language: ModelLanguage,
         groundingContext: String = "",
-        webSearchAvailable: Bool = false
+        webSearchAvailable: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasGrounding = !trimmedGrounding.isEmpty
@@ -1287,31 +1295,51 @@ final class ChatService: ObservableObject {
         let groundingHeader: String
         switch language {
         case .french:
-            // Grounding-aware imperative steers the model to answer from the
-            // provided passages first and only reach for the tool to fill
-            // gaps — cutting redundant tool round-trips when the context
-            // already covers the question.
-            answerImperative = hasGrounding
-                ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
-                : (webSearchAvailable
-                    ? "Réponds clairement à la question suivante. Si des détails techniques, de la documentation ou des faits récents sont nécessaires, utilise d'abord webSearch. Sinon, réponds directement à partir de tes connaissances (ou utilise calculate/currentDateTime si besoin) :"
-                    : "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :")
+            if hasGrounding {
+                answerImperative = "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "Pour des définitions, concepts, faits vérifiés, chiffres ou actualités, effectue une recherche avec les outils disponibles (utilise wikipediaSearch pour un concept ou une définition, webSearch pour des faits ou l'actualité) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                } else if useWikipedia {
+                    answerImperative = "Pour des définitions, concepts, faits encyclopédiques ou entités, utilise wikipediaSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                } else {
+                    answerImperative = "Pour des faits précis, chiffres, documentation ou informations récentes, utilise webSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                }
+            } else {
+                answerImperative = "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
+            }
             earlierLabel = "Questions précédentes de l'utilisateur :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
-            answerImperative = hasGrounding
-                ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
-                : (webSearchAvailable
-                    ? "Responde claramente a la siguiente pregunta. Si se requieren detalles técnicos, documentación o datos actualizados, utiliza primero webSearch. De lo contrario, responde directamente a partir de tus conocimientos (o utiliza calculate/currentDateTime si es necesario):"
-                    : "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:")
+            if hasGrounding {
+                answerImperative = "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "Para definiciones, conceptos, hechos verificados, cifras o noticias recientes, realiza una búsqueda con las herramientas disponibles (utiliza wikipediaSearch para un concepto o definición, webSearch para hechos o actualidad) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                } else if useWikipedia {
+                    answerImperative = "Para definiciones, conceptos, hechos enciclopédicos o entidades, utiliza wikipediaSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                } else {
+                    answerImperative = "Para hechos específicos, cifras, documentación o información reciente, utiliza webSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                }
+            } else {
+                answerImperative = "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
+            }
             earlierLabel = "Preguntas anteriores del usuario:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
-            answerImperative = hasGrounding
-                ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
-                : (webSearchAvailable
-                    ? "Answer the following question clearly. If technical details, documentation, or up-to-date facts are needed, use webSearch first. Otherwise, answer directly from your knowledge (or use calculate/currentDateTime if needed):"
-                    : "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:")
+            if hasGrounding {
+                answerImperative = "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "For definitions, concepts, verified facts, figures, or recent news, search with available tools (use wikipediaSearch for a concept or definition, webSearch for facts or current events) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                } else if useWikipedia {
+                    answerImperative = "For definitions, concepts, encyclopedic facts, or entities, use wikipediaSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                } else {
+                    answerImperative = "For specific facts, figures, documentation, or recent information, use webSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                }
+            } else {
+                answerImperative = "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
+            }
             earlierLabel = "Earlier user questions:"
             groundingHeader = "Context from the attached documents:"
         }
@@ -1405,20 +1433,23 @@ final class ChatService: ObservableObject {
             switch language {
             case .french:
                 return """
-                Vous êtes un assistant de chat utile. Répondez clairement, précisément et directement à partir de vos connaissances générales.
-                Vous avez toute autorité pour définir et expliquer les concepts généraux, mathématiques, scientifiques et techniques. Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
+                Vous êtes un assistant de chat utile. Répondez aux questions de l'utilisateur avec clarté et précision.
+                Lorsque des outils de recherche sont disponibles, utilisez-les pour vérifier les faits, définitions, statistiques et chiffres avant de répondre.
+                Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
                 Répondez dans la même langue que la question de l'utilisateur.
                 """
             case .spanish:
                 return """
-                Usted es un asistente de chat útil. Responda con claridad, precisión y directamente a partir de sus conocimientos generales.
-                Tiene plena autoridad para definir y explicar conceptos generales, matemáticos, científicos y técnicos. Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
+                Usted es un asistente de chat útil. Responda a las preguntas del usuario con claridad y precisión.
+                Cuando haya herramientas de búsqueda disponibles, utilícelas para verificar hechos, definiciones, estadísticas y cifras antes de responder.
+                Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
                 Responda en el mismo idioma que la pregunta del usuario.
                 """
             case .english:
                 return """
-                You are a helpful chat assistant. Answer clearly, accurately, and directly from your general knowledge.
-                You have full authority to define and explain general knowledge, mathematical, scientific, and technical concepts. Never state "based on the provided context" and never apologize for lacking context or documents.
+                You are a helpful chat assistant. Answer the user's questions clearly and accurately.
+                When search tools are available, use them to verify facts, definitions, statistics, and figures before answering.
+                Never state "based on the provided context" and never apologize for lacking context or documents.
                 Respond in the same language as the user's latest question.
                 """
             }

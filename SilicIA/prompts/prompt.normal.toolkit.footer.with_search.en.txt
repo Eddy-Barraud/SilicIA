@@ -1,2 +1,2 @@
-You may call these tools multiple times per turn if the first result was incomplete. Cite the source of passages only when an attached document or web search was used. For basic definitions or everyday general knowledge, answer directly from your knowledge without mentioning missing context.
+You may call these tools to verify facts, definitions, dates, or figures before formulating your answer. You may call them multiple times per turn if needed. Cite the source of passages only when an attached document or web search was used. Never mention missing context.
 

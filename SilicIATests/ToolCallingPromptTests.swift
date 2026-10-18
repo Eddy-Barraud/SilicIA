@@ -104,13 +104,77 @@ final class ToolCallingPromptTests: XCTestCase {
     }
 
     func testUngroundedWebSearchPromptLocalization() {
-        let promptEN = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .english, webSearchAvailable: true)
-        XCTAssertTrue(promptEN.contains("use webSearch first"))
+        let promptEN = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: [],
+            language: .english,
+            webSearchAvailable: true,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertTrue(promptEN.contains("use wikipediaSearch for a concept or definition"))
+        XCTAssertTrue(promptEN.contains("webSearch for facts or current events"))
 
-        let promptFR = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .french, webSearchAvailable: true)
-        XCTAssertTrue(promptFR.contains("utilise d'abord webSearch"))
+        let promptFR = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: [],
+            language: .french,
+            webSearchAvailable: true,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertTrue(promptFR.contains("utilise wikipediaSearch pour un concept ou une définition"))
+        XCTAssertTrue(promptFR.contains("webSearch pour des faits ou l'actualité"))
 
-        let promptES = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .spanish, webSearchAvailable: true)
-        XCTAssertTrue(promptES.contains("utiliza primero webSearch"))
+        let promptES = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Q?",
+            priorUserQuestions: [],
+            language: .spanish,
+            webSearchAvailable: true,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertTrue(promptES.contains("utiliza wikipediaSearch para un concepto o definición"))
+        XCTAssertTrue(promptES.contains("webSearch para hechos o actualidad"))
+    }
+
+    func testChatPromptWithWikipediaOnly() {
+        let promptFR = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "qu'est ce qu'un décile ?",
+            priorUserQuestions: [],
+            language: .french,
+            webSearchAvailable: true,
+            useDuckDuckGo: false,
+            useWikipedia: true
+        )
+        XCTAssertTrue(promptFR.contains("utilise wikipediaSearch avant de répondre"))
+        XCTAssertFalse(promptFR.contains("webSearch"))
+    }
+
+    func testChatPromptWithDuckDuckGoOnly() {
+        let promptFR = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "derniers résultats de foot",
+            priorUserQuestions: [],
+            language: .french,
+            webSearchAvailable: true,
+            useDuckDuckGo: true,
+            useWikipedia: false
+        )
+        XCTAssertTrue(promptFR.contains("utilise webSearch avant de répondre"))
+        XCTAssertFalse(promptFR.contains("wikipediaSearch"))
+    }
+
+    func testChatPromptOffline() {
+        let promptFR = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "bonjour",
+            priorUserQuestions: [],
+            language: .french,
+            webSearchAvailable: false,
+            useDuckDuckGo: false,
+            useWikipedia: false
+        )
+        XCTAssertTrue(promptFR.contains("à partir de tes connaissances"))
+        XCTAssertFalse(promptFR.contains("wikipediaSearch"))
+        XCTAssertFalse(promptFR.contains("webSearch"))
     }
 }
