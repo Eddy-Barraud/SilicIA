@@ -1313,7 +1313,7 @@ actor RAGContextService {
         ranked.reserveCapacity(topCosineCandidates.count)
 
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
-        if combinedQueryVector == nil, let qInfo = queryEmbeddingInfo {
+        if let qInfo = queryEmbeddingInfo {
             for candidate in topCosineCandidates {
                 var semanticScore = nlEmbeddingRelevanceScore(
                     chunk: candidate.chunk,
@@ -1333,7 +1333,7 @@ actor RAGContextService {
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
-        } else if combinedQueryVector == nil, let embedding {
+        } else if let embedding {
             for candidate in topCosineCandidates {
                 var semanticScore = nlEmbeddingRelevanceScore(
                     chunk: candidate.chunk,
@@ -1353,7 +1353,7 @@ actor RAGContextService {
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
-        } else if combinedQueryVector == nil, let wordEmbedding {
+        } else if let wordEmbedding {
             for candidate in topCosineCandidates {
                 let wordScore = wordEmbeddingSemanticScore(
                     chunk: candidate.chunk,

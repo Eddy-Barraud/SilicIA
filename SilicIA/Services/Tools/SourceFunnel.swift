@@ -26,6 +26,8 @@ struct SourceFunnel {
 
     var onResults: (@Sendable ([SearchResult]) -> Void)? = nil
     var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
+    var onScores: (@Sendable ([String: Double]) -> Void)? = nil
+    var onRAGDuration: (@Sendable (Double, Double) -> Void)? = nil
     var governor: ToolCallGovernor? = nil
     var transcriptRecorder: ToolTranscriptRecorder? = nil
     let toolName: String = "searchSources"
@@ -182,6 +184,7 @@ struct SourceFunnel {
         onResults?(enrichedResults)
 
         // Chunk all enriched sources for RAG ranking
+        let chunkStart = Date()
         var allChunks: [RAGChunk] = []
         for result in enrichedResults {
             let text = (result.retrievedContent ?? result.snippet).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -193,6 +196,7 @@ struct SourceFunnel {
             )
             allChunks.append(contentsOf: chunks)
         }
+        let chunkElapsed = Date().timeIntervalSince(chunkStart)
 
         guard !allChunks.isEmpty else {
             return "No readable content found for the provided search queries. Answer from your own knowledge."
@@ -208,6 +212,7 @@ struct SourceFunnel {
             }
         }
 
+        let rankStart = Date()
         let selectionResult = await ragContextService.selectContext(
             chunks: allChunks,
             query: rankingQuery,
@@ -216,6 +221,11 @@ struct SourceFunnel {
             queries: allSubQueries,
             language: language
         )
+        let rankElapsed = Date().timeIntervalSince(rankStart)
+        onRAGDuration?(chunkElapsed, rankElapsed)
+
+        let scores = RAGContextService.normalizedSourceScores(from: selectionResult)
+        onScores?(scores)
 
         let topChunks = selectionResult.selectedChunks
         guard !topChunks.isEmpty else {

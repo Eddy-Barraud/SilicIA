@@ -72,6 +72,8 @@ nonisolated enum ToolKit {
         /// AIService so the cards reflect the model's tool decisions.
         var onWebResults: (@Sendable ([SearchResult]) -> Void)? = nil
         var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
+        var onScores: (@Sendable ([String: Double]) -> Void)? = nil
+        var onRAGDuration: (@Sendable (Double, Double) -> Void)? = nil
     }
 
     /// Returns the model's tool array, the per-call token budget it was
@@ -132,6 +134,8 @@ nonisolated enum ToolKit {
                 contextUtilizationFactor: config.contextUtilizationFactor,
                 onResults: config.onWebResults,
                 onScrapeDuration: config.onScrapeDuration,
+                onScores: config.onScores,
+                onRAGDuration: config.onRAGDuration,
                 governor: governor,
                 transcriptRecorder: transcriptRecorder
             )

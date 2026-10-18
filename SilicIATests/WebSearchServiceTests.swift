@@ -356,6 +356,8 @@ final class WebSearchServiceTests: XCTestCase {
         let scraper = WebScrapingService()
         let ragService = RAGContextService()
         var reportedResults: [SearchResult] = []
+        var reportedScores: [String: Double]? = nil
+        var reportedRAGDuration: (chunk: Double, rank: Double)? = nil
         let funnel = SourceFunnel(
             webSearchService: service,
             webScraper: scraper,
@@ -368,7 +370,9 @@ final class WebSearchServiceTests: XCTestCase {
             useWikipedia: true,
             responseTokens: 500,
             contextUtilizationFactor: nil,
-            onResults: { reportedResults = $0 }
+            onResults: { reportedResults = $0 },
+            onScores: { reportedScores = $0 },
+            onRAGDuration: { c, r in reportedRAGDuration = (c, r) }
         )
         let tool = WikiSourcesTool(funnel: funnel)
         let output = try await tool.call(arguments: WikiSourcesTool.Arguments(wikiQueries: ["Paris"]))
@@ -379,6 +383,9 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
         let firstContent = reportedResults.first?.retrievedContent ?? ""
         XCTAssertGreaterThan(firstContent.count, 5000, "onResults should receive full article content, not truncated excerpt")
+        XCTAssertNotNil(reportedScores, "onScores should be called with normalized source scores")
+        XCTAssertFalse(reportedScores?.isEmpty ?? true, "Reported scores should not be empty")
+        XCTAssertNotNil(reportedRAGDuration, "onRAGDuration should be called with chunking and ranking elapsed times")
     }
 
     @MainActor

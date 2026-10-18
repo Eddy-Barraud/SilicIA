@@ -28,6 +28,7 @@ class AIService: ObservableObject {
     private var activeEffectiveMaxTokens: Int = 1000
     private var activeContextUtilizationFactor: Double = 0.80
     private var activeOnMatchingScores: (([String: Double]) -> Void)? = nil
+    private var toolScoresCalculated: Bool = false
 
     private var toolRAGScrapeDuration: Double = 0.0
     private var toolRAGChunkDuration: Double = 0.0
@@ -166,6 +167,7 @@ class AIService: ObservableObject {
         // summarize call so previous turns don't bleed into the new one.
         // Tool-calling mode appends to this as the model invokes webSearch.
         toolFetchedResults = []
+        toolScoresCalculated = false
 
         lastAnswerElapsedSeconds = nil
         toolRAGScrapeDuration = 0.0
@@ -326,11 +328,9 @@ class AIService: ObservableObject {
             summary = ""
         }
 
-        // Now that the model has finished, the `toolFetchedResults` accumulator holds
-        // every URL the model actually consulted via webSearch. Chunk + score them
-        // through the same RAG pipeline so the cards render with match-score badges
-        // instead of bare 0% rings.
-        if !toolFetchedResults.isEmpty, let onMatchingScores {
+        // If the model fetched results through tools and scores have not yet been
+        // calculated by SourceFunnel, chunk + score them through the RAG pipeline.
+        if !toolScoresCalculated && !toolFetchedResults.isEmpty, let onMatchingScores {
             let toolChunkStart = Date()
             let toolChunks = await chunkResultsForRAG(toolFetchedResults)
             let toolChunkElapsed = Date().timeIntervalSince(toolChunkStart)
@@ -347,6 +347,7 @@ class AIService: ObservableObject {
                 let toolRankElapsed = Date().timeIntervalSince(toolRankStart)
                 toolRAGRankingDuration += toolRankElapsed
                 let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
+                toolScoresCalculated = true
                 onMatchingScores(scores)
             }
         }
@@ -422,7 +423,7 @@ class AIService: ObservableObject {
     }
 
     /// Appends `incoming` to `toolFetchedResults`, skipping any URL we've
-    /// already seen so multiple webSearch calls don't produce duplicate
+    /// already seen so multiple search calls don't produce duplicate
     /// cards. Order-preserving — newer URLs append at the tail.
     @MainActor
     private func appendUniqueResults(_ incoming: [SearchResult]) async {
@@ -430,28 +431,6 @@ class AIService: ObservableObject {
         let novel = incoming.filter { !existing.contains($0.url) }
         guard !novel.isEmpty else { return }
         toolFetchedResults.append(contentsOf: novel)
-
-        // Calculate scores in real-time as results arrive so they display immediately
-        if let onMatchingScores = activeOnMatchingScores, !toolFetchedResults.isEmpty {
-            let toolChunks = await chunkResultsForRAG(toolFetchedResults)
-            if !toolChunks.isEmpty {
-                let query = activeQuery
-                let maxTokens = activeEffectiveMaxTokens
-                let factor = activeContextUtilizationFactor
-                Task {
-                    let toolSelected = await ragContextService.selectContext(
-                        chunks: toolChunks,
-                        query: query,
-                        maxOutputTokens: maxTokens,
-                        contextUtilizationFactor: factor
-                    )
-                    let scores = RAGContextService.normalizedSourceScores(from: toolSelected)
-                    await MainActor.run {
-                        onMatchingScores(scores)
-                    }
-                }
-            }
-        }
     }
 
     /// Chunks a list of `SearchResult`s for RAG scoring in tool-calling
@@ -852,6 +831,20 @@ class AIService: ObservableObject {
                     #if DEBUG
                     Task { @MainActor [weak self = self] in
                         self?.toolRAGScrapeDuration += duration
+                    }
+                    #endif
+                },
+                onScores: { scores in
+                    Task { @MainActor [weak self = self] in
+                        self?.toolScoresCalculated = true
+                        self?.activeOnMatchingScores?(scores)
+                    }
+                },
+                onRAGDuration: { chunkElapsed, rankElapsed in
+                    #if DEBUG
+                    Task { @MainActor [weak self = self] in
+                        self?.toolRAGChunkDuration += chunkElapsed
+                        self?.toolRAGRankingDuration += rankElapsed
                     }
                     #endif
                 }
