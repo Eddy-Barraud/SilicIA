@@ -525,6 +525,10 @@ class WebSearchService: ObservableObject {
             throw SearchError.parsingFailed
         }
 
+        if html.contains("anomaly-modal") || html.contains("anomaly.js") || html.contains("bots use DuckDuckGo too") {
+            throw SearchError.botChallengeDetected
+        }
+
         var results: [SearchResult] = []
         let components = html.components(separatedBy: "class=\"result__a\"")
 
@@ -632,6 +636,7 @@ enum SearchError: LocalizedError {
     case invalidResponse
     case parsingFailed
     case networkError
+    case botChallengeDetected
 
     /// Provides user-facing descriptions for search errors.
     var errorDescription: String? {
@@ -644,6 +649,8 @@ enum SearchError: LocalizedError {
             return "Failed to parse search results"
         case .networkError:
             return "Network error occurred"
+        case .botChallengeDetected:
+            return "Search provider bot challenge detected"
         }
     }
 }
