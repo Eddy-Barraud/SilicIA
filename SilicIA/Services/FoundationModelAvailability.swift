@@ -195,10 +195,6 @@ enum FoundationModelAvailability {
         }
     }
 
-    /// Indication that Tool Calling needs Apple Intelligence.
-    static func toolCallingNotice(language: ModelLanguage) -> String {
-        return appleIntelligenceRequiredNotice(language: language)
-    }
 
     // MARK: - Opening Settings
 

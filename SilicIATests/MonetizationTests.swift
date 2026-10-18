@@ -52,7 +52,6 @@ final class MonetizationTests: XCTestCase {
         XCTAssertTrue(entitlements.hasPremiumAccess)
         XCTAssertTrue(entitlements.canAttachDocuments)
         XCTAssertTrue(entitlements.canUseMultipleWebSourcesPerProvider)
-        XCTAssertTrue(entitlements.canUseToolCalling)
         XCTAssertTrue(entitlements.canExceedFreeOutputTokens)
 
         // Clamps are no-ops while dormant

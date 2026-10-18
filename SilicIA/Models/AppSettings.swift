@@ -66,20 +66,6 @@ struct AppSettings: Codable, Equatable {
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
     var language: ModelLanguage = .systemPreferred()
-    private var _useToolCalling: Bool = true
-    /// Experimental: when true, ChatService runs the model with on-demand
-    /// `searchContext` + `calculate` tools instead of stuffing pre-selected
-    /// RAG chunks into the prompt. Off by default — gives the user a
-    /// reversible escape hatch while the tool path matures.
-    var useToolCalling: Bool {
-        get {
-            guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _useToolCalling
-        }
-        set {
-            _useToolCalling = newValue
-        }
-    }
 
     /// Combined per-search result cap exposed for callers that still need a single number
     /// (e.g. results display limit, scraping cap).
@@ -99,7 +85,6 @@ struct AppSettings: Codable, Equatable {
         case useDuckDuckGo
         case useWikipedia
         case language
-        case useToolCalling
     }
 
     private enum LegacyCodingKeys: String, CodingKey {
@@ -155,8 +140,6 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.useWikipedia
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
-        useToolCalling = try container.decodeIfPresent(Bool.self, forKey: .useToolCalling)
-            ?? Self.defaultSettings.useToolCalling
 
         if let storedContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens) {
             maxContextTokens = storedContextTokens
@@ -182,7 +165,6 @@ struct AppSettings: Codable, Equatable {
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
         try container.encode(language, forKey: .language)
-        try container.encode(useToolCalling, forKey: .useToolCalling)
     }
 
     /// Persists settings in UserDefaults for future launches.
@@ -233,7 +215,6 @@ struct AppSettings: Codable, Equatable {
         )
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         if !FoundationModelAvailability.check().isAvailable {
-            copy.useToolCalling = false
             copy.isReaderViewAndSummaryEnabled = false
         }
         return copy

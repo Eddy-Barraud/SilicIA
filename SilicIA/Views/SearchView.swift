@@ -62,7 +62,6 @@ struct SearchView: View {
     /// visible (and therefore the summary card) even though
     /// `searchResults` is intentionally empty in this mode.
     private var hasToolDrivenSummary: Bool {
-        guard settings.useToolCalling else { return false }
         guard hasAttemptedSearch else { return false }
         return aiService.isSummarizing
             || !aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -292,7 +291,7 @@ struct SearchView: View {
         // checking hasAttemptedSearch so a stale post-cancel notification
         // doesn't repopulate the cards on the welcome screen.
         .onChange(of: aiService.toolFetchedResults) { _, newResults in
-            guard settings.useToolCalling, hasAttemptedSearch else { return }
+            guard hasAttemptedSearch else { return }
             searchResults = newResults
         }
         .onAppear {
@@ -955,31 +954,6 @@ struct SearchView: View {
                 .pickerStyle(.segmented)
             }
 
-            // Tool-calling toggle — mirrors the ChatView setting on the
-            // same `settings.useToolCalling` field, so the two views stay
-            // in sync. Enables the model to call searchContext / calculate
-            // / currentDateTime / webSearch on demand instead of receiving
-            // a pre-baked context block in the summary prompt.
-            VStack(alignment: .leading, spacing: 8) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.useToolCalling) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Tool calling (experimental)")
-                            .font(.subheadline)
-                        Text("Lets the model query the web, search the corpus, calculate, and get the current date on demand instead of relying on the pre-baked search summary.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
         }
         .padding()
         .glassCard(cornerRadius: 16)
@@ -1427,7 +1401,6 @@ struct SearchView: View {
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
-            useToolCalling: settings.useToolCalling,
             maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,

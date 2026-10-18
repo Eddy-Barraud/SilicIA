@@ -47,7 +47,7 @@ final class ModelAnsweringTests: XCTestCase {
 
     /// Sends one message with offline, modest-length settings and returns
     /// after the model finishes.
-    private func ask(_ question: String, useToolCalling: Bool = false) async {
+    private func ask(_ question: String) async {
         await chatService.sendMessage(
             question,
             contextInput: "",
@@ -61,8 +61,7 @@ final class ModelAnsweringTests: XCTestCase {
             maxResponseTokens: 200,
             maxContextTokens: 1000,
             useDuckDuckGo: false,
-            useWikipedia: false,
-            useToolCalling: useToolCalling
+            useWikipedia: false
         )
     }
 
@@ -91,7 +90,7 @@ final class ModelAnsweringTests: XCTestCase {
     // MARK: - Tool-calling path (governor + loop breaker)
 
     func testToolCallingQuestionFinishesCleanly() async {
-        await ask("Briefly, what is a factorial?", useToolCalling: true)
+        await ask("Briefly, what is a factorial?")
         XCTAssertEqual(chatService.messages.count, 2)
         assertLastAnswerClean()
         let answer = chatService.messages.last?.content ?? ""
@@ -101,7 +100,7 @@ final class ModelAnsweringTests: XCTestCase {
     }
 
     func testToolCallingMathematicalQuestionDirectAnswerWithoutContext() async {
-        await ask("What is a cubic spline interpolation?", useToolCalling: true)
+        await ask("What is a cubic spline interpolation?")
         XCTAssertEqual(chatService.messages.count, 2)
         assertLastAnswerClean()
         let answer = chatService.messages.last?.content ?? ""
@@ -132,7 +131,6 @@ final class ModelAnsweringTests: XCTestCase {
             temperature: 0.3,
             maxTokens: 300,
             language: .english,
-            useToolCalling: false,
             generateAnswer: true
         )
         XCTAssertFalse(
@@ -160,7 +158,6 @@ final class ModelAnsweringTests: XCTestCase {
             temperature: 0.3,
             maxTokens: 300,
             language: .english,
-            useToolCalling: true,
             generateAnswer: true
         )
         let text = summary.summary

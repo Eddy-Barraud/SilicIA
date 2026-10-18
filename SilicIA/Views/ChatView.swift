@@ -463,31 +463,6 @@ struct ChatView: View {
                 }
                 .pickerStyle(.segmented)
             }
-
-            // Tool-calling toggle — experimental path where the model
-            // pulls context via `searchContext` and `calculate` instead
-            // of receiving pre-baked RAG chunks in the prompt. Off by
-            // default while behaviour matures.
-            VStack(alignment: .leading, spacing: 8) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.useToolCalling) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Tool calling (experimental)")
-                            .font(.subheadline)
-                        Text("Lets the model search documents and call a calculator on demand instead of receiving a pre-baked context block.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
         }
         .padding()
         .glassCard(cornerRadius: 16)
@@ -975,8 +950,7 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia,
-                useToolCalling: settings.useToolCalling
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }

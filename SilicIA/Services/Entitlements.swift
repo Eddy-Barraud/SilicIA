@@ -81,10 +81,7 @@ final class Entitlements: ObservableObject {
     /// (DuckDuckGo / Wikipedia).
     var canUseMultipleWebSourcesPerProvider: Bool { hasPremiumAccess }
 
-    /// (5) The tool-calling (experimental) toggle in settings.
-    var canUseToolCalling: Bool { hasPremiumAccess }
-
-    /// (6) Raising max output above the free-tier ceiling.
+    /// (5) Raising max output above the free-tier ceiling.
     var canExceedFreeOutputTokens: Bool { hasPremiumAccess }
 
     // MARK: - Clamps
