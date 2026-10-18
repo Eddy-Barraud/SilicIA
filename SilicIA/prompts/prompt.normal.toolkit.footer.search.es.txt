@@ -1,1 +1,1 @@
-Puedes llamar a estas herramientas varias veces en un turno para obtener información completa. Verifica sistemáticamente los hechos, fechas, cifras, distancias y comparaciones consultando la web (webSearch) o Wikipedia (wikipediaSearch) antes de redactar tu respuesta.
+Puedes llamar a estas herramientas para obtener información completa. Verifica sistemáticamente los hechos, fechas, cifras, distancias y comparaciones consultando fuentes externas (searchSources) antes de redactar tu respuesta.

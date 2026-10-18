@@ -1,0 +1,1 @@
+- `searchSources(webQueries, wikiQueries)`: search both the web (up to 2 queries) and Wikipedia (up to 2 short 1–2 word topics) simultaneously and return relevant passages. Call this tool once with all your queries before answering.

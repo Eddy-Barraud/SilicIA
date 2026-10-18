@@ -64,7 +64,7 @@ final class PromptLoaderTests: XCTestCase {
                 language: language
             )
             XCTAssertNotNil(web, "Missing web corpus hint for \(language.code)")
-            XCTAssertTrue(web?.contains("webSearch") == true)
+            XCTAssertTrue(web?.contains("searchSources") == true)
 
             let direct = PromptLoader.loadPrompt(
                 mode: "normal",
@@ -89,9 +89,17 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertNotNil(dt, "Missing currentDateTime tool prompt for \(language.code)")
             XCTAssertTrue(dt?.contains("currentDateTime") == true)
 
-            let web = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.web_search", language: language)
-            XCTAssertNotNil(web, "Missing webSearch tool prompt for \(language.code)")
-            XCTAssertTrue(web?.contains("webSearch") == true)
+            let ssBoth = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.search_sources.both", language: language)
+            XCTAssertNotNil(ssBoth, "Missing search_sources.both tool prompt for \(language.code)")
+            XCTAssertTrue(ssBoth?.contains("searchSources") == true)
+
+            let ssWeb = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.search_sources.web", language: language)
+            XCTAssertNotNil(ssWeb, "Missing search_sources.web tool prompt for \(language.code)")
+            XCTAssertTrue(ssWeb?.contains("searchSources") == true)
+
+            let ssWiki = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.search_sources.wiki", language: language)
+            XCTAssertNotNil(ssWiki, "Missing search_sources.wiki tool prompt for \(language.code)")
+            XCTAssertTrue(ssWiki?.contains("searchSources") == true)
 
             let scChat = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.search_context.chat", language: language)
             XCTAssertNotNil(scChat, "Missing searchContext chat prompt for \(language.code)")
@@ -121,7 +129,7 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertTrue(fullAppendix.contains("searchContext"))
             XCTAssertTrue(fullAppendix.contains("calculate"))
             XCTAssertTrue(fullAppendix.contains("currentDateTime"))
-            XCTAssertTrue(fullAppendix.contains("webSearch"))
+            XCTAssertTrue(fullAppendix.contains("searchSources"))
 
             let noWebAppendix = ToolKit.instructionsAppendix(
                 for: language,
@@ -132,8 +140,7 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertFalse(noWebAppendix.contains("searchContext"))
             XCTAssertTrue(noWebAppendix.contains("calculate"))
             XCTAssertTrue(noWebAppendix.contains("currentDateTime"))
-            XCTAssertFalse(noWebAppendix.contains("webSearch"))
+            XCTAssertFalse(noWebAppendix.contains("searchSources"))
         }
     }
 }
-

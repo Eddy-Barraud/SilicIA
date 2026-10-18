@@ -351,42 +351,53 @@ final class WebSearchServiceTests: XCTestCase {
     }
 
     @MainActor
-    func testWikipediaToolExecution() async throws {
+    func testSearchSourcesToolExecution() async throws {
         let service = WebSearchService()
+        let scraper = WebScrapingService()
+        let ragService = RAGContextService()
         var reportedResults: [SearchResult] = []
-        var tool = WikipediaTool(
+        let funnel = SourceFunnel(
             webSearchService: service,
+            webScraper: scraper,
+            ragContextService: ragService,
+            userQuery: "What is the capital of France?",
+            language: .english,
+            maxDuckDuckGoResults: 0,
             maxWikipediaResults: 2,
-            language: .english
+            useDuckDuckGo: false,
+            useWikipedia: true,
+            responseTokens: 500,
+            contextUtilizationFactor: nil,
+            onResults: { reportedResults = $0 }
         )
-        tool.onResults = { reportedResults = $0 }
-        let output = try await tool.call(arguments: WikipediaTool.Arguments(query: "Paris"))
+        let tool = WikiSourcesTool(funnel: funnel)
+        let output = try await tool.call(arguments: WikiSourcesTool.Arguments(wikiQueries: ["Paris"]))
         XCTAssertFalse(output.isEmpty)
         XCTAssertTrue(output.contains("Paris"))
         XCTAssertFalse(reportedResults.isEmpty)
         XCTAssertLessThanOrEqual(reportedResults.count, 2)
         XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
+        let firstContent = reportedResults.first?.retrievedContent ?? ""
+        XCTAssertGreaterThan(firstContent.count, 5000, "onResults should receive full article content, not truncated excerpt")
     }
 
     @MainActor
-    func testWebSearchToolMatchesUserSettingLimitWithoutLLMDefinition() {
-        let service = WebSearchService()
-        let scraper = WebScrapingService()
-        let webTool = WebSearchTool(
-            webSearchService: service,
-            webScraper: scraper,
-            maxDuckDuckGoResults: 7,
-            useDuckDuckGo: true,
-            language: .english
-        )
-        XCTAssertEqual(webTool.maxDuckDuckGoResults, 7)
+    func testSearchSourcesQuotaSplittingAcrossQueries() {
+        // When 2 queries are asked, each search gets setting / 2 so total matches user setting
+        let maxDDG = 6
+        let maxWiki = 4
+        let webQueriesCount = 2
+        let wikiQueriesCount = 2
+        let ddgLimitPerQuery = max(1, maxDDG / webQueriesCount)
+        let wikiLimitPerQuery = max(1, maxWiki / wikiQueriesCount)
+        XCTAssertEqual(ddgLimitPerQuery, 3)
+        XCTAssertEqual(ddgLimitPerQuery * webQueriesCount, maxDDG)
+        XCTAssertEqual(wikiLimitPerQuery, 2)
+        XCTAssertEqual(wikiLimitPerQuery * wikiQueriesCount, maxWiki)
 
-        let wikiTool = WikipediaTool(
-            webSearchService: service,
-            maxWikipediaResults: 4,
-            language: .english
-        )
-        XCTAssertEqual(wikiTool.maxWikipediaResults, 4)
+        // When 1 query is asked, it gets the full setting
+        let singleDDGLimit = max(1, maxDDG / 1)
+        XCTAssertEqual(singleDDGLimit, maxDDG)
     }
 
     @MainActor

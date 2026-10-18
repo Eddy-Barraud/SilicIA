@@ -1,2 +1,1 @@
-No hay fragmentos pre-recuperados. Usa las herramientas de búsqueda (`webSearch` o `wikipediaSearch`) para obtener la información.
-
+No hay fragmentos pre-recuperados. Usa la herramienta de búsqueda (`searchSources`) para obtener la información.

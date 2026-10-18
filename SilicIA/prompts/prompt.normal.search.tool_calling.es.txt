@@ -1,7 +1,7 @@
 {{groundingContext}}Tema o pregunta: {{query}}
 
 {{corpusHint}}
-Realiza una búsqueda (`webSearch` o `wikipediaSearch`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
+Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
 Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
 Si la pregunta requiere un cálculo, usa `calculate`.
 
@@ -12,4 +12,3 @@ Límite: {{maxOutputSentences}} frases.
 Formato de salida esperado: texto claro en Markdown.
 Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
 Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \text{ ni entornos \begin{ (como \begin{array}).
-

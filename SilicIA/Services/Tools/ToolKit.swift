@@ -51,20 +51,24 @@ nonisolated enum ToolKit {
         /// search service's regional source mix.
         let language: ModelLanguage
         /// Chunks reachable through `searchContext`. Empty in tool-only
-        /// search where the model fetches everything via `webSearch`.
+        /// search where the model fetches everything via `searchSources`.
         let corpusChunks: [RAGChunk]
-        /// Master switch for the `webSearch` tool. The caller decides
+        /// Anchor query from the user (used for RAG semantic embedding and ranking).
+        var userQuery: String = ""
+        /// Master switch for external search tools. The caller decides
         /// whether the conversation allows web access at all — typically
         /// derived from settings + per-conversation chip + mode flags.
         let webSearchAvailable: Bool
         let webSearchService: WebSearchService
         let webScraper: WebScrapingService
+        var ragContextService: RAGContextService = RAGContextService()
         let maxDuckDuckGoResults: Int
         let maxWikipediaResults: Int
         let useDuckDuckGo: Bool
         let useWikipedia: Bool
+        var contextUtilizationFactor: Double? = nil
         /// Optional sink that receives every result the model's
-        /// `webSearch` call fetched. SearchView wires it through
+        /// `searchSources` call fetched. SearchView wires it through
         /// AIService so the cards reflect the model's tool decisions.
         var onWebResults: (@Sendable ([SearchResult]) -> Void)? = nil
         var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
@@ -88,7 +92,10 @@ nonisolated enum ToolKit {
         // One loop breaker shared across every tool in this turn, so it sees
         // the whole call stream and can refuse duplicate / runaway calls
         // before they overflow the 4096-token window.
+        // `searchSources` is strictly capped at 1 call per turn.
         let governor = ToolCallGovernor(
+            maxExpensiveToolCalls: 1,
+            expensiveToolName: "searchSources",
             additionalToolCaps: [
                 "searchContext": 3
             ]
@@ -110,48 +117,41 @@ nonisolated enum ToolKit {
         tools.append(calcTool)
         tools.append(dateTool)
 
-        if config.webSearchAvailable && config.useDuckDuckGo {
-            // webSearch gets a TIGHTER budget than the other tools: its
-            // reply (several scraped pages) is the dominant transcript
-            // consumer and the main cause of context-window overflow
-            // (`GenerationError -1`). Cap it below the shared budget so a
-            // turn with one or more webSearch calls still fits the window.
-            let webSearchBudget = min(tokenBudget, TokenBudgeting.webSearchReplyTokenCap)
-            var webTool = WebSearchTool(
+        if config.webSearchAvailable {
+            let funnel = SourceFunnel(
                 webSearchService: config.webSearchService,
                 webScraper: config.webScraper,
+                ragContextService: config.ragContextService,
+                userQuery: config.userQuery,
+                language: config.language,
                 maxDuckDuckGoResults: config.maxDuckDuckGoResults,
-                useDuckDuckGo: config.useDuckDuckGo,
-                language: config.language,
-                tokenBudget: webSearchBudget
-            )
-            webTool.onResults = config.onWebResults
-            webTool.onScrapeDuration = config.onScrapeDuration
-            webTool.governor = governor
-            webTool.transcriptRecorder = transcriptRecorder
-            tools.append(webTool)
-        }
-
-        if config.webSearchAvailable && config.useWikipedia {
-            var wikiTool = WikipediaTool(
-                webSearchService: config.webSearchService,
                 maxWikipediaResults: config.maxWikipediaResults,
-                language: config.language,
-                tokenBudget: tokenBudget
+                useDuckDuckGo: config.useDuckDuckGo,
+                useWikipedia: config.useWikipedia,
+                responseTokens: responseTokens,
+                contextUtilizationFactor: config.contextUtilizationFactor,
+                onResults: config.onWebResults,
+                onScrapeDuration: config.onScrapeDuration,
+                governor: governor,
+                transcriptRecorder: transcriptRecorder
             )
-            wikiTool.onResults = config.onWebResults
-            wikiTool.governor = governor
-            wikiTool.transcriptRecorder = transcriptRecorder
-            tools.append(wikiTool)
+
+            if config.useDuckDuckGo && config.useWikipedia {
+                tools.append(SearchSourcesTool(funnel: funnel))
+            } else if config.useDuckDuckGo {
+                tools.append(WebSourcesTool(funnel: funnel))
+            } else if config.useWikipedia {
+                tools.append(WikiSourcesTool(funnel: funnel))
+            }
         }
         return (tools, tokenBudget, transcriptRecorder)
     }
 
     /// Per-language paragraph appended onto the system instructions when
     /// tool calling is enabled. The `tone` selects the `searchContext`
-    /// description; the other three tool descriptions are tone-agnostic.
-    /// The `webSearch` and `wikipediaSearch` entries are included only when
-    /// those tools are enabled and attached. `hasCorpus` controls whether
+    /// description; the other tool descriptions are tone-agnostic.
+    /// The `searchSources` entry is included only when external search
+    /// is enabled and attached. `hasCorpus` controls whether
     /// `searchContext` is advertised.
     static func instructionsAppendix(
         for language: ModelLanguage,
@@ -165,9 +165,12 @@ nonisolated enum ToolKit {
         let searchContextLine = loadSearchContextLine(for: language, tone: tone)
         let calculateLine = loadCalculateLine(for: language)
         let dateTimeLine = loadDateTimeLine(for: language)
-        let webSearchLine = loadWebSearchLine(for: language)
-        let wikipediaSearchLine = loadWikipediaSearchLine(for: language)
         let hasActiveSearch = webSearchAvailable && (useDuckDuckGo || useWikipedia)
+        let searchSourcesLine = hasActiveSearch ? loadSearchSourcesLine(
+            for: language,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        ) : nil
         let footer = loadFooter(
             for: language,
             tone: tone,
@@ -179,11 +182,8 @@ nonisolated enum ToolKit {
             toolLines.append(searchContextLine)
         }
         toolLines.append(contentsOf: [calculateLine, dateTimeLine])
-        if webSearchAvailable && useDuckDuckGo {
-            toolLines.append(webSearchLine)
-        }
-        if webSearchAvailable && useWikipedia {
-            toolLines.append(wikipediaSearchLine)
+        if let searchSourcesLine {
+            toolLines.append(searchSourcesLine)
         }
 
         let toolsBlock = toolLines.joined(separator: "\n")
@@ -267,31 +267,51 @@ nonisolated enum ToolKit {
         }
     }
 
-    private static func loadWebSearchLine(for language: ModelLanguage) -> String {
-        if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.web_search", language: language) {
-            return loaded
+    private static func loadSearchSourcesLine(
+        for language: ModelLanguage,
+        useDuckDuckGo: Bool,
+        useWikipedia: Bool
+    ) -> String {
+        let variant: String
+        if useDuckDuckGo && useWikipedia {
+            variant = "tool.search_sources.both"
+        } else if useDuckDuckGo {
+            variant = "tool.search_sources.web"
+        } else {
+            variant = "tool.search_sources.wiki"
         }
-        switch language {
-        case .french:
-            return "- `webSearch(query)` : interroge le web via DuckDuckGo avec une requête ciblée (mots-clés précis). Utilise-le pour les informations récentes, actualités, sites web, procédures techniques ou faits précis."
-        case .spanish:
-            return "- `webSearch(query)` : consulta la web vía DuckDuckGo con palabras clave específicas. Úsala para información reciente, noticias, sitios web, documentación técnica o hechos específicos."
-        case .english:
-            return "- `webSearch(query)` : search the web via DuckDuckGo with focused keywords. Use this for recent information, news, websites, technical documentation, or specific facts."
-        }
-    }
 
-    private static func loadWikipediaSearchLine(for language: ModelLanguage) -> String {
-        if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "tool.wikipedia_search", language: language) {
+        if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: variant, language: language) {
             return loaded
         }
-        switch language {
-        case .french:
-            return "- `wikipediaSearch(query)` : recherche un article encyclopédique sur Wikipédia. La requête DOIT être très courte (1 ou 2 mots maximum : concept simple, nom de personne, lieu, machine, technique). Ne pose jamais de question ni de phrase complète."
-        case .spanish:
-            return "- `wikipediaSearch(query)` : busca un artículo enciclopédico en Wikipedia. La consulta DEBE ser muy concisa (1 o 2 palabras máximo: concepto simple, nombre de persona, lugar, máquina, técnica). Nunca uses oraciones completas ni preguntas."
-        case .english:
-            return "- `wikipediaSearch(query)` : search for an encyclopedic article on Wikipedia. The query MUST be very concise (1 or 2 words max: simple concept, person name, place, machine, technique). Never use full sentences or questions."
+
+        if useDuckDuckGo && useWikipedia {
+            switch language {
+            case .french:
+                return "- `searchSources(webQueries, wikiQueries)` : recherche simultanément sur le web (jusqu'à 2 requêtes) et sur Wikipédia (jusqu'à 2 sujets courts de 1 à 2 mots) et renvoie les passages pertinents. Appelle cet outil une seule fois avec toutes tes requêtes avant de répondre."
+            case .spanish:
+                return "- `searchSources(webQueries, wikiQueries)`: busca simultáneamente en la web (hasta 2 consultas) y en Wikipedia (hasta 2 temas breves de 1 o 2 palabras) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez con todas tus consultas antes de responder."
+            case .english:
+                return "- `searchSources(webQueries, wikiQueries)`: search both the web (up to 2 queries) and Wikipedia (up to 2 short 1–2 word topics) simultaneously and return relevant passages. Call this tool once with all your queries before answering."
+            }
+        } else if useDuckDuckGo {
+            switch language {
+            case .french:
+                return "- `searchSources(webQueries)` : recherche sur le web via DuckDuckGo (jusqu'à 2 requêtes ciblées) et renvoie les passages pertinents. Appelle cet outil une seule fois avant de répondre."
+            case .spanish:
+                return "- `searchSources(webQueries)`: busca en la web mediante DuckDuckGo (hasta 2 consultas específicas) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder."
+            case .english:
+                return "- `searchSources(webQueries)`: search the web via DuckDuckGo (up to 2 targeted queries) and return relevant passages. Call this tool once before answering."
+            }
+        } else {
+            switch language {
+            case .french:
+                return "- `searchSources(wikiQueries)` : recherche des articles encyclopédiques sur Wikipédia (jusqu'à 2 sujets très courts de 1 à 2 mots chacun) et renvoie les passages pertinents. Appelle cet outil une seule fois avant de répondre."
+            case .spanish:
+                return "- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia (hasta 2 temas muy breves de 1 o 2 palabras cada uno) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder."
+            case .english:
+                return "- `searchSources(wikiQueries)`: search encyclopedic articles on Wikipedia (up to 2 very concise 1–2 word topics each) and return relevant passages. Call this tool once before answering."
+            }
         }
     }
 
@@ -302,11 +322,11 @@ nonisolated enum ToolKit {
             }
             switch language {
             case .french:
-                return "Tu peux appeler ces outils plusieurs fois par tour pour obtenir des données complètes. Vérifie systématiquement les faits, dates, chiffres, distances et comparaisons en interrogeant le web (`webSearch`) ou Wikipédia (`wikipediaSearch`) avant de formuler ta réponse."
+                return "Tu peux appeler ces outils pour obtenir des données complètes. Vérifie systématiquement les faits, dates, chiffres, distances et comparaisons en interrogeant les sources externes (`searchSources`) avant de formuler ta réponse."
             case .spanish:
-                return "Puedes llamar a estas herramientas varias veces en un turno para obtener información completa. Verifica sistemáticamente los hechos, fechas, cifras, distancias y comparaciones consultando la web (`webSearch`) o Wikipedia (`wikipediaSearch`) antes de redactar tu respuesta."
+                return "Puedes llamar a estas herramientas para obtener información completa. Verifica sistemáticamente los hechos, fechas, cifras, distancias y comparaciones consultando fuentes externas (`searchSources`) antes de redactar tu respuesta."
             case .english:
-                return "You may call these tools multiple times per turn to gather complete information. Always verify facts, dates, figures, distances, and comparisons by searching the web (`webSearch`) or Wikipedia (`wikipediaSearch`) before writing your answer."
+                return "You may call these tools to gather complete information. Always verify facts, dates, figures, distances, and comparisons by searching external sources (`searchSources`) before writing your answer."
             }
         }
 
@@ -317,11 +337,11 @@ nonisolated enum ToolKit {
         if hasSearchOrCorpus {
             switch language {
             case .french:
-                return "Tu peux appeler ces outils pour vérifier les faits, définitions, dates ou chiffres avant de formuler ta réponse. Tu peux les appeler plusieurs fois par tour si nécessaire. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Ne mentionne jamais de contexte manquant."
+                return "Tu peux appeler ces outils pour vérifier les faits, définitions, dates ou chiffres avant de formuler ta réponse. Tu peux les appeler si nécessaire. Cite la source des passages uniquement lorsqu'un document ou une recherche web a été utilisé. Ne mentionne jamais de contexte manquant."
             case .spanish:
-                return "Puedes llamar a estas herramientas para verificar hechos, definiciones, fechas o cifras antes de formular tu respuesta. Puedes llamarlas varias veces en un turno si es necesario. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Nunca menciones la falta de contexto."
+                return "Puedes llamar a estas herramientas para verificar hechos, definiciones, fechas o cifras antes de formular tu respuesta. Puedes llamarlas si es necesario. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Nunca menciones la falta de contexto."
             case .english:
-                return "You may call these tools to verify facts, definitions, dates, or figures before formulating your answer. You may call them multiple times per turn if needed. Cite the source of passages only when an attached document or web search was used. Never mention missing context."
+                return "You may call these tools to verify facts, definitions, dates, or figures before formulating your answer. You may call them if needed. Cite the source of passages only when an attached document or web search was used. Never mention missing context."
             }
         } else {
             switch language {

@@ -1,0 +1,1 @@
+- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia (hasta 2 temas muy breves de 1 o 2 palabras cada uno) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder.

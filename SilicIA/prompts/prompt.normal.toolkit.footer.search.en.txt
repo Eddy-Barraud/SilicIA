@@ -1,1 +1,1 @@
-You may call these tools multiple times per turn to gather complete information. Always verify facts, dates, figures, distances, and comparisons by searching the web (webSearch) or Wikipedia (wikipediaSearch) before writing your answer.
+You may call these tools to gather complete information. Always verify facts, dates, figures, distances, and comparisons by searching external sources (searchSources) before writing your answer.

@@ -622,7 +622,7 @@ class WebScrapingService: ObservableObject {
 
     /// Scrape content from a single URL into clean Markdown.
     /// Returns `nil` if the page cannot be fetched or safely reduced to Markdown within memory/depth limits.
-    func scrapeContent(from urlString: String, maxCharacters: Int = 5000) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int? = 5000) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
         #if DEBUG
@@ -643,7 +643,7 @@ class WebScrapingService: ObservableObject {
             print(String(format: "[Timing][Webpage] Downloaded & converted %@ to markdown in %.3f s (%d chars)", urlString, elapsed, trimmed.count))
             DebugRAGStorage.shared.saveDownloadedWebpage(markdown: trimmed, title: title, url: url)
             #endif
-            if trimmed.count > maxCharacters {
+            if let maxCharacters, trimmed.count > maxCharacters {
                 return String(trimmed.prefix(maxCharacters))
             }
             return trimmed
@@ -659,7 +659,7 @@ class WebScrapingService: ObservableObject {
     /// Scrape content from multiple URLs concurrently into clean Markdown.
     /// Sources that fail or exceed memory/DOM depth limits are omitted from the returned dictionary
     /// and recorded in `lastFailedURLs`.
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000) async -> [String: String] {
+    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int? = 5000) async -> [String: String] {
         isScrapingContent = true
         lastFailedURLs = []
         defer { isScrapingContent = false }

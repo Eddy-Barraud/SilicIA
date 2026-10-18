@@ -1,1 +1,0 @@
-- `wikipediaSearch(query)` : busca un artículo enciclopédico en Wikipedia. La consulta DEBE ser muy concisa (1 o 2 palabras máximo: concepto simple, nombre de persona, lugar, máquina, técnica). Nunca uses oraciones completas ni preguntas.

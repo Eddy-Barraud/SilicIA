@@ -312,6 +312,7 @@ class AIService: ObservableObject {
                 maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo,
                 useWikipedia: useWikipedia,
+                contextUtilizationFactor: contextUtilizationFactor,
                 onPartialUpdate: { [weak self] partial in
                     guard let self else { return }
                     if firstTokenDate == nil {
@@ -594,9 +595,9 @@ class AIService: ObservableObject {
     ) -> String {
         if hasGrounding {
             switch language {
-            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext`, `webSearch` ou `wikipediaSearch`."
-            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext`, `webSearch` o `wikipediaSearch`."
-            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext`, `webSearch`, or `wikipediaSearch`."
+            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext` ou `searchSources`."
+            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext` o `searchSources`."
+            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext` or `searchSources`."
             }
         } else if chunkCount > 0 {
             if let loaded = PromptLoader.loadPrompt(
@@ -623,9 +624,9 @@ class AIService: ObservableObject {
                 return loaded
             }
             switch language {
-            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise les outils de recherche (`webSearch` ou `wikipediaSearch`) pour obtenir l'information."
-            case .spanish: return "No hay fragmentos pre-recuperados. Usa las herramientas de búsqueda (`webSearch` o `wikipediaSearch`) para obtener la información."
-            case .english: return "No chunks were pre-fetched. Use search tools (`webSearch` or `wikipediaSearch`) to get the information."
+            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise l'outil de recherche (`searchSources`) pour obtenir l'information."
+            case .spanish: return "No hay fragmentos pre-recuperados. Usa la herramienta de búsqueda (`searchSources`) para obtener la información."
+            case .english: return "No chunks were pre-fetched. Use search tool (`searchSources`) to get the information."
             }
         } else {
             if let loaded = PromptLoader.loadPrompt(
@@ -659,7 +660,7 @@ class AIService: ObservableObject {
             \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
-            Effectue une recherche (`webSearch` ou `wikipediaSearch`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
+            Effectue une recherche (`searchSources`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
             N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
             Si la question nécessite un calcul, utilise `calculate`.
 
@@ -676,7 +677,7 @@ class AIService: ObservableObject {
             \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
-            Realiza una búsqueda (`webSearch` o `wikipediaSearch`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
+            Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
             Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
@@ -693,7 +694,7 @@ class AIService: ObservableObject {
             \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
-            Perform a search (`webSearch` or `wikipediaSearch`) to gather reliable information, exact figures, facts, or comparisons before answering.
+            Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering.
             Only call `currentDateTime` if the question explicitly depends on the current date or time.
             If the question requires a calculation, use `calculate`.
 
@@ -721,6 +722,7 @@ class AIService: ObservableObject {
         maxWikipediaResults: Int = 2,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true,
+        contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async -> String {
         // Attempt 1 — as requested.
@@ -731,6 +733,7 @@ class AIService: ObservableObject {
                 corpusChunks: corpusChunks,
                 maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
+                contextUtilizationFactor: contextUtilizationFactor,
                 onPartialUpdate: onPartialUpdate
             )
         } catch is CancellationError {
@@ -748,6 +751,7 @@ class AIService: ObservableObject {
                         corpusChunks: corpusChunks,
                         maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
+                        contextUtilizationFactor: contextUtilizationFactor,
                         onPartialUpdate: onPartialUpdate
                     )
                 } catch is CancellationError {
@@ -805,6 +809,7 @@ class AIService: ObservableObject {
         maxWikipediaResults: Int = 2,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true,
+        contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async throws -> String {
         // Always create a fresh session so that context from previous searches
@@ -828,13 +833,16 @@ class AIService: ObservableObject {
             config: ToolKit.Configuration(
                 language: language,
                 corpusChunks: corpusChunks,
+                userQuery: query,
                 webSearchAvailable: webSearchAvailable,
                 webSearchService: webSearchService,
                 webScraper: webScraper,
+                ragContextService: ragContextService,
                 maxDuckDuckGoResults: maxDuckDuckGoResults,
                 maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo,
                 useWikipedia: useWikipedia,
+                contextUtilizationFactor: contextUtilizationFactor,
                 onWebResults: { results in
                     Task { @MainActor [weak self = self] in
                         await self?.appendUniqueResults(results)
@@ -853,7 +861,7 @@ class AIService: ObservableObject {
         let toolBudget = assembled.tokenBudget
         let tools = assembled.tools
         #if DEBUG
-        debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map(\.name).joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
+        debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map { $0.name }.joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
         #endif
         let session = LanguageModelSession(tools: tools, instructions: instructions)
 

@@ -1,2 +1,1 @@
-Aucun extrait n'a été pré-récupéré. Utilise les outils de recherche (`webSearch` ou `wikipediaSearch`) pour obtenir l'information.
-
+Aucun extrait n'a été pré-récupéré. Utilise l'outil de recherche (`searchSources`) pour obtenir l'information.

@@ -1,0 +1,1 @@
+- `searchSources(webQueries)`: search the web via DuckDuckGo (up to 2 targeted queries) and return relevant passages. Call this tool once before answering.

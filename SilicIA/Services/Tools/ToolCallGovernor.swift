@@ -107,14 +107,9 @@ actor ToolCallGovernor {
     /// model that spams refused calls terminates — every attempt, allowed
     /// or refused, counts).
     let maxTotalCalls: Int
-    /// Tight ceiling on the "expensive" tool (`webSearch`) specifically. Its
-    /// replies are the largest, so a few distinct calls already approach the
-    /// window; distinct calls beyond this are refused.
-    ///
-    /// Kept in lock-step with `TokenBudgeting.webSearchReplyTokenCap`: the
-    /// window-safety invariant is `cap × replyTokens + overhead ≤ 4096`.
-    /// At 2 × 1000t the transcript stays comfortably inside the window; if
-    /// you raise this, lower the per-reply cap (and vice-versa).
+    /// Tight ceiling on the "expensive" tool (`searchSources`) specifically.
+    /// Exactly 1 funnel call is allowed per turn so all web/wiki queries are performed
+    /// simultaneously, keeping the transcript safely within the context window.
     let maxExpensiveToolCalls: Int
     /// Name of the tool treated as expensive for `maxExpensiveToolCalls`.
     private let expensiveToolName: String
@@ -129,8 +124,8 @@ actor ToolCallGovernor {
 
     init(
         maxTotalCalls: Int = 8,
-        maxExpensiveToolCalls: Int = 2,
-        expensiveToolName: String = "webSearch",
+        maxExpensiveToolCalls: Int = 1,
+        expensiveToolName: String = "searchSources",
         additionalToolCaps: [String: Int] = [:]
     ) {
         self.maxTotalCalls = maxTotalCalls

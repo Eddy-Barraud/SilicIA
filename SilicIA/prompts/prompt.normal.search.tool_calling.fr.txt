@@ -1,7 +1,7 @@
 {{groundingContext}}Sujet ou question : {{query}}
 
 {{corpusHint}}
-Effectue une recherche (`webSearch` ou `wikipediaSearch`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
+Effectue une recherche (`searchSources`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
 N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
 Si la question nécessite un calcul, utilise `calculate`.
 

@@ -1,0 +1,1 @@
+- `searchSources(webQueries, wikiQueries)` : recherche simultanément sur le web (jusqu'à 2 requêtes) et sur Wikipédia (jusqu'à 2 sujets courts de 1 à 2 mots) et renvoie les passages pertinents. Appelle cet outil une seule fois avec toutes tes requêtes avant de répondre.

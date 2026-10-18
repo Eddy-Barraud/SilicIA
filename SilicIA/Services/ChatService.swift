@@ -247,20 +247,23 @@ final class ChatService: ObservableObject {
                 config: ToolKit.Configuration(
                     language: language,
                     corpusChunks: chunks,
+                    userQuery: message,
                     webSearchAvailable: webSearchAvailable,
                     webSearchService: webSearchService,
                     webScraper: webScraper,
+                    ragContextService: ragContextService,
                     maxDuckDuckGoResults: effectiveMaxDDGResults,
                     maxWikipediaResults: effectiveMaxWikiResults,
                     useDuckDuckGo: useDuckDuckGo,
-                    useWikipedia: useWikipedia
+                    useWikipedia: useWikipedia,
+                    contextUtilizationFactor: nil
                 ),
                 responseTokens: effectiveMaxOutputTokens
             )
             let tools = assembled.tools
             let toolBudget = assembled.tokenBudget
             toolTranscriptRecorder = assembled.transcriptRecorder
-            let toolNames = tools.map(\.name).joined(separator: ", ")
+            let toolNames = tools.map { $0.name }.joined(separator: ", ")
             debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
             let session = LanguageModelSession(
                 tools: tools,
@@ -1299,11 +1302,11 @@ final class ChatService: ObservableObject {
                 answerImperative = "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
-                    answerImperative = "Pour des définitions, concepts, faits vérifiés, chiffres ou actualités, effectue une recherche avec les outils disponibles (utilise wikipediaSearch pour un concept ou une définition, webSearch pour des faits ou l'actualité) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                    answerImperative = "Pour des définitions, concepts, faits vérifiés, chiffres ou actualités, effectue une recherche avec l'outil searchSources (en fournissant jusqu'à 2 requêtes web et jusqu'à 2 sujets Wikipédia) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
                 } else if useWikipedia {
-                    answerImperative = "Pour des définitions, concepts, faits encyclopédiques ou entités, utilise wikipediaSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                    answerImperative = "Pour des définitions, concepts, faits encyclopédiques ou entités, utilise searchSources (avec jusqu'à 2 sujets Wikipédia) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
                 } else {
-                    answerImperative = "Pour des faits précis, chiffres, documentation ou informations récentes, utilise webSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                    answerImperative = "Pour des faits précis, chiffres, documentation ou informations récentes, utilise searchSources (avec jusqu'à 2 requêtes web) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
                 }
             } else {
                 answerImperative = "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
@@ -1315,11 +1318,11 @@ final class ChatService: ObservableObject {
                 answerImperative = "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
-                    answerImperative = "Para definiciones, conceptos, hechos verificados, cifras o noticias recientes, realiza una búsqueda con las herramientas disponibles (utiliza wikipediaSearch para un concepto o definición, webSearch para hechos o actualidad) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                    answerImperative = "Para definiciones, conceptos, hechos verificados, cifras o noticias recientes, realiza una búsqueda con searchSources (proporcionando hasta 2 consultas web y hasta 2 temas de Wikipedia) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
                 } else if useWikipedia {
-                    answerImperative = "Para definiciones, conceptos, hechos enciclopédicos o entidades, utiliza wikipediaSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                    answerImperative = "Para definiciones, conceptos, hechos enciclopédicos o entidades, utiliza searchSources (con hasta 2 temas de Wikipedia) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
                 } else {
-                    answerImperative = "Para hechos específicos, cifras, documentación o información reciente, utiliza webSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                    answerImperative = "Para hechos específicos, cifras, documentación o información reciente, utiliza searchSources (con hasta 2 consultas web) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
                 }
             } else {
                 answerImperative = "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
@@ -1331,11 +1334,11 @@ final class ChatService: ObservableObject {
                 answerImperative = "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
-                    answerImperative = "For definitions, concepts, verified facts, figures, or recent news, search with available tools (use wikipediaSearch for a concept or definition, webSearch for facts or current events) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                    answerImperative = "For definitions, concepts, verified facts, figures, or recent news, search with searchSources (providing up to 2 web queries and up to 2 Wikipedia topics) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
                 } else if useWikipedia {
-                    answerImperative = "For definitions, concepts, encyclopedic facts, or entities, use wikipediaSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                    answerImperative = "For definitions, concepts, encyclopedic facts, or entities, use searchSources (with up to 2 Wikipedia topics) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
                 } else {
-                    answerImperative = "For specific facts, figures, documentation, or recent information, use webSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                    answerImperative = "For specific facts, figures, documentation, or recent information, use searchSources (with up to 2 web queries) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
                 }
             } else {
                 answerImperative = "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"

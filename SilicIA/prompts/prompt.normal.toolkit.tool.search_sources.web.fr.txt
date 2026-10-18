@@ -1,0 +1,1 @@
+- `searchSources(webQueries)` : recherche sur le web via DuckDuckGo (jusqu'à 2 requêtes ciblées) et renvoie les passages pertinents. Appelle cet outil une seule fois avant de répondre.
