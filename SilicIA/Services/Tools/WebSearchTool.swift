@@ -29,9 +29,6 @@ struct WebSearchTool: Tool {
     struct Arguments {
         @Guide(description: "The search query — focused keywords, not the user's full question. Strip filler words; keep proper nouns, numbers, dates, and any unit the user mentioned. Examples: '2024 Wimbledon men final winner', 'Apple Foundation Models tool calling API', 'Paris population 2023'.")
         let query: String
-
-        @Guide(description: "Number of results to return (3–5). Prefer 4 by default so the user gets a range of sources and your answer can triangulate; use 5 for broader topic surveys. The minimum 3 ensures the user always sees several perspectives.")
-        let maxResults: Int?
     }
 
     let name = "webSearch"
@@ -62,7 +59,7 @@ struct WebSearchTool: Tool {
 
     /// Token budget for the entire tool reply (titles + URLs + scraped
     /// content). Caller-supplied so it scales with the conversation's
-    /// response cap. Divided by `defaultMaxResults` to derive the
+    /// response cap. Divided by the result count to derive the
     /// per-page character cap.
     var tokenBudget: Int = 1500
 
@@ -75,28 +72,13 @@ struct WebSearchTool: Tool {
     /// can recover from the last known-good tool state.
     var transcriptRecorder: ToolTranscriptRecorder?
 
-    /// Default result count when the model doesn't supply `maxResults`.
-    /// Five gives SearchView a useful range of cards to display and lets
-    /// the model triangulate across sources when summarising.
-    private static let defaultMaxResults = 5
-
-    /// Hard floor on the result count regardless of what the model asks
-    /// for. Models routinely pick `maxResults=1` because their training
-    /// labels low counts as "quick lookup"; for SearchView's card UX
-    /// that produces a single-source list the user reads as broken.
-    /// Three is the smallest count that conveys "we surveyed sources".
-    private static let minResults = 3
-    /// Hard ceiling so a model that asks for 10 doesn't blow the
-    /// per-call token budget.
-    private static let maxResultsCap = 5
-
     /// Overhead per result block (title + URL + headers). Roughly
     /// estimated so the derived per-page char budget leaves space for it.
     private static let overheadCharsPerResult = 120
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
-        print("[Tool:webSearch] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default")")
+        print("[Tool:webSearch] called with query=\"\(arguments.query)\" limit=\(maxDuckDuckGoResults)")
         #endif
 
         // Loop breaker: refuse duplicate / over-budget calls before doing
@@ -133,7 +115,7 @@ struct WebSearchTool: Tool {
             """
         }
 
-        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, min(maxDuckDuckGoResults, Self.maxResultsCap)))
+        let limit = max(1, maxDuckDuckGoResults)
 
         // Derive per-page char cap from the total token budget. We split
         // the budget evenly across the model-requested result count,

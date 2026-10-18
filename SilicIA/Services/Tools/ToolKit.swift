@@ -273,11 +273,11 @@ nonisolated enum ToolKit {
         }
         switch language {
         case .french:
-            return "- `webSearch(query, maxResults?)` : interroge le web via DuckDuckGo avec une requête ciblée (mots-clés précis). Utilise-le pour les informations récentes, actualités, sites web, procédures techniques ou faits précis."
+            return "- `webSearch(query)` : interroge le web via DuckDuckGo avec une requête ciblée (mots-clés précis). Utilise-le pour les informations récentes, actualités, sites web, procédures techniques ou faits précis."
         case .spanish:
-            return "- `webSearch(query, maxResults?)` : consulta la web vía DuckDuckGo con palabras clave específicas. Úsala para información reciente, noticias, sitios web, documentación técnica o hechos específicos."
+            return "- `webSearch(query)` : consulta la web vía DuckDuckGo con palabras clave específicas. Úsala para información reciente, noticias, sitios web, documentación técnica o hechos específicos."
         case .english:
-            return "- `webSearch(query, maxResults?)` : search the web via DuckDuckGo with focused keywords. Use this for recent information, news, websites, technical documentation, or specific facts."
+            return "- `webSearch(query)` : search the web via DuckDuckGo with focused keywords. Use this for recent information, news, websites, technical documentation, or specific facts."
         }
     }
 
@@ -287,11 +287,11 @@ nonisolated enum ToolKit {
         }
         switch language {
         case .french:
-            return "- `wikipediaSearch(query, maxResults?)` : recherche un article encyclopédique sur Wikipédia. La requête DOIT être très courte (1 ou 2 mots maximum : concept simple, nom de personne, lieu, machine, technique). Ne pose jamais de question ni de phrase complète."
+            return "- `wikipediaSearch(query)` : recherche un article encyclopédique sur Wikipédia. La requête DOIT être très courte (1 ou 2 mots maximum : concept simple, nom de personne, lieu, machine, technique). Ne pose jamais de question ni de phrase complète."
         case .spanish:
-            return "- `wikipediaSearch(query, maxResults?)` : busca un artículo enciclopédico en Wikipedia. La consulta DEBE ser muy concisa (1 o 2 palabras máximo: concepto simple, nombre de persona, lugar, máquina, técnica). Nunca uses oraciones completas ni preguntas."
+            return "- `wikipediaSearch(query)` : busca un artículo enciclopédico en Wikipedia. La consulta DEBE ser muy concisa (1 o 2 palabras máximo: concepto simple, nombre de persona, lugar, máquina, técnica). Nunca uses oraciones completas ni preguntas."
         case .english:
-            return "- `wikipediaSearch(query, maxResults?)` : search for an encyclopedic article on Wikipedia. The query MUST be very concise (1 or 2 words max: simple concept, person name, place, machine, technique). Never use full sentences or questions."
+            return "- `wikipediaSearch(query)` : search for an encyclopedic article on Wikipedia. The query MUST be very concise (1 or 2 words max: simple concept, person name, place, machine, technique). Never use full sentences or questions."
         }
     }
 

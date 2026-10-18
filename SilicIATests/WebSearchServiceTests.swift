@@ -360,11 +360,33 @@ final class WebSearchServiceTests: XCTestCase {
             language: .english
         )
         tool.onResults = { reportedResults = $0 }
-        let output = try await tool.call(arguments: WikipediaTool.Arguments(query: "Paris", maxResults: 1))
+        let output = try await tool.call(arguments: WikipediaTool.Arguments(query: "Paris"))
         XCTAssertFalse(output.isEmpty)
         XCTAssertTrue(output.contains("Paris"))
         XCTAssertFalse(reportedResults.isEmpty)
+        XCTAssertLessThanOrEqual(reportedResults.count, 2)
         XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
+    }
+
+    @MainActor
+    func testWebSearchToolMatchesUserSettingLimitWithoutLLMDefinition() {
+        let service = WebSearchService()
+        let scraper = WebScrapingService()
+        let webTool = WebSearchTool(
+            webSearchService: service,
+            webScraper: scraper,
+            maxDuckDuckGoResults: 7,
+            useDuckDuckGo: true,
+            language: .english
+        )
+        XCTAssertEqual(webTool.maxDuckDuckGoResults, 7)
+
+        let wikiTool = WikipediaTool(
+            webSearchService: service,
+            maxWikipediaResults: 4,
+            language: .english
+        )
+        XCTAssertEqual(wikiTool.maxWikipediaResults, 4)
     }
 
     @MainActor

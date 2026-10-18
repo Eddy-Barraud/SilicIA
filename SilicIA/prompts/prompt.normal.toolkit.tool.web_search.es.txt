@@ -1,1 +1,1 @@
-- `webSearch(query, maxResults?)` : busca en la web mediante DuckDuckGo con palabras clave específicas. Úsalo para obtener información actual, sitios web, cifras, distancias, comparaciones o hechos precisos.
+- `webSearch(query)` : busca en la web mediante DuckDuckGo con palabras clave específicas. Úsalo para obtener información actual, sitios web, cifras, distancias, comparaciones o hechos precisos.

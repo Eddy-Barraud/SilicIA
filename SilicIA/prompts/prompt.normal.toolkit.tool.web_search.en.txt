@@ -1,1 +1,1 @@
-- `webSearch(query, maxResults?)` : search the web via DuckDuckGo with targeted keywords. Use this to find current information, websites, figures, distances, comparisons, or specific facts.
+- `webSearch(query)` : search the web via DuckDuckGo with targeted keywords. Use this to find current information, websites, figures, distances, comparisons, or specific facts.

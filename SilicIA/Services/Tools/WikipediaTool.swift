@@ -16,9 +16,6 @@ struct WikipediaTool: Tool {
     struct Arguments {
         @Guide(description: "One or two words max. Simple concepts, person names, machine names, technique names, or places (e.g. 'Paris', 'Nantes', 'Albert Einstein', 'Photosynthèse', 'Machine de Turing'). Never use full sentences, questions, or conversational words.")
         let query: String
-
-        @Guide(description: "Number of articles to retrieve (1–3, default 1).")
-        let maxResults: Int?
     }
 
     let name = "wikipediaSearch"
@@ -37,14 +34,11 @@ struct WikipediaTool: Tool {
     var governor: ToolCallGovernor?
     var transcriptRecorder: ToolTranscriptRecorder?
 
-    private static let defaultMaxResults = 1
-    private static let minResults = 1
-    private static let maxResultsCap = 3
     private static let overheadCharsPerResult = 120
 
     func call(arguments: Arguments) async throws -> String {
         #if DEBUG
-        print("[Tool:wikipediaSearch] called with query=\"\(arguments.query)\" maxResults=\(arguments.maxResults.map(String.init) ?? "default")")
+        print("[Tool:wikipediaSearch] called with query=\"\(arguments.query)\" limit=\(maxWikipediaResults)")
         #endif
 
         if let governor {
@@ -72,7 +66,7 @@ struct WikipediaTool: Tool {
             return "Error: empty query. Provide a 1- or 2-word topic or concept name."
         }
 
-        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, min(maxWikipediaResults, Self.maxResultsCap)))
+        let limit = max(1, maxWikipediaResults)
 
         let totalChars = max(0, tokenBudget) * TokenBudgeting.avgCharsPerToken
         let perResultCharBudget = max(
