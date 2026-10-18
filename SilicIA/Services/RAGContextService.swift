@@ -81,28 +81,53 @@ struct RAGChunker {
         case prose(String)
     }
 
-    /// Splits markdown text by extracting tables intact (Pass 1) and applying a
-    /// hybrid 3-sentence sliding window on narrative prose (Pass 2).
+    private struct InternalChunk {
+        var text: String
+        let isTable: Bool
+        let source: String
+        let url: String?
+        let pdfPage: Int?
+    }
+
+    /// Checks if a string consists exclusively of Markdown headings (# ...).
+    static func isMarkdownHeading(_ text: String) -> Bool {
+        let lines = text.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return false }
+        return lines.allSatisfy { $0.hasPrefix("#") }
+    }
+
+    /// Splits markdown text by extracting tables intact (Pass 1), applying a
+    /// hybrid 3-sentence sliding window on continuous narrative prose (Pass 2, no \n\n paragraph splitting),
+    /// and merging small chunks (< 200 chars) and isolated titles in document order (Pass 3).
     static func chunkMarkdown(
         text: String,
         source: String,
         url: String? = nil,
         pdfPage: Int? = nil,
         windowSize: Int = 3,
-        stride: Int = 1
+        stride: Int = 1,
+        minCharacters: Int = 200
     ) -> [RAGChunk] {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanText.isEmpty else { return [] }
 
         let segments = segmentMarkdownTablesAndProse(cleanText)
-        var chunks: [RAGChunk] = []
+        var rawChunks: [InternalChunk] = []
 
         for segment in segments {
             switch segment {
             case .table(let tableText):
                 let trimmedTable = tableText.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmedTable.isEmpty {
-                    chunks.append(RAGChunk(source: source, text: trimmedTable, url: url, pdfPage: pdfPage))
+                    rawChunks.append(InternalChunk(
+                        text: trimmedTable,
+                        isTable: true,
+                        source: source,
+                        url: url,
+                        pdfPage: pdfPage
+                    ))
                 }
             case .prose(let proseText):
                 let proseChunks = slidingWindowProseChunks(
@@ -113,22 +138,22 @@ struct RAGChunker {
                     windowSize: windowSize,
                     stride: stride
                 )
-                chunks.append(contentsOf: proseChunks)
+                rawChunks.append(contentsOf: proseChunks)
             }
         }
 
-        return chunks
+        return mergeChunksInDocumentOrder(rawChunks, minCharacters: minCharacters)
     }
 
     /// Backward-compatible entry point for web/Wikipedia markdown chunking.
-    /// Preserves Markdown tables intact and applies a 3-sentence sliding window.
+    /// Preserves Markdown tables intact and applies a 3-sentence sliding window with document-order merging.
     static func chunkParagraphs(
         text: String,
         source: String,
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        chunkMarkdown(text: text, source: source, url: url, pdfPage: pdfPage, windowSize: 3, stride: 1)
+        chunkMarkdown(text: text, source: source, url: url, pdfPage: pdfPage, windowSize: 3, stride: 1, minCharacters: minimumChunkCharacters)
     }
 
     private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
@@ -182,49 +207,134 @@ struct RAGChunker {
         pdfPage: Int?,
         windowSize: Int,
         stride: Int
-    ) -> [RAGChunk] {
+    ) -> [InternalChunk] {
         let clean = prose.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !clean.isEmpty else { return [] }
 
-        let paragraphs = clean.components(separatedBy: "\n\n")
-        var chunks: [RAGChunk] = []
-
-        for para in paragraphs {
-            let trimmedPara = para.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedPara.isEmpty else { continue }
-
-            let tokenizer = NLTokenizer(unit: .sentence)
-            tokenizer.string = trimmedPara
-            var sentences: [String] = []
-            tokenizer.enumerateTokens(in: trimmedPara.startIndex..<trimmedPara.endIndex) { range, _ in
-                let s = trimmedPara[range].trimmingCharacters(in: .whitespacesAndNewlines)
-                if !s.isEmpty {
-                    sentences.append(String(s))
-                }
-                return true
+        // Tokenize sentences across the entire prose segment directly without paragraph splitting.
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = clean
+        var sentences: [String] = []
+        tokenizer.enumerateTokens(in: clean.startIndex..<clean.endIndex) { range, _ in
+            let s = clean[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            if !s.isEmpty {
+                sentences.append(String(s))
             }
+            return true
+        }
 
-            if sentences.isEmpty {
-                chunks.append(RAGChunk(source: source, text: trimmedPara, url: url, pdfPage: pdfPage))
-            } else if sentences.count <= windowSize {
-                let sep = sentences.contains(where: { $0.hasPrefix("#") || $0.hasPrefix("- ") || $0.hasPrefix("* ") }) ? "\n" : " "
-                chunks.append(RAGChunk(source: source, text: sentences.joined(separator: sep), url: url, pdfPage: pdfPage))
-            } else {
-                var i = 0
-                while i < sentences.count {
-                    let end = min(i + windowSize, sentences.count)
-                    let window = Array(sentences[i..<end])
-                    let sep = window.contains(where: { $0.hasPrefix("#") || $0.hasPrefix("- ") || $0.hasPrefix("* ") }) ? "\n" : " "
-                    chunks.append(RAGChunk(source: source, text: window.joined(separator: sep), url: url, pdfPage: pdfPage))
-                    if end == sentences.count {
-                        break
-                    }
-                    i += max(1, stride)
-                }
+        guard !sentences.isEmpty else {
+            return [InternalChunk(text: clean, isTable: false, source: source, url: url, pdfPage: pdfPage)]
+        }
+
+        if sentences.count <= windowSize {
+            let joined = joinSentences(sentences)
+            return [InternalChunk(text: joined, isTable: false, source: source, url: url, pdfPage: pdfPage)]
+        }
+
+        var chunks: [InternalChunk] = []
+        var i = 0
+        while i < sentences.count {
+            let end = min(i + windowSize, sentences.count)
+            let window = Array(sentences[i..<end])
+            let joined = joinSentences(window)
+            chunks.append(InternalChunk(text: joined, isTable: false, source: source, url: url, pdfPage: pdfPage))
+            if end == sentences.count {
+                break
             }
+            i += max(1, stride)
         }
 
         return chunks
+    }
+
+    private static func joinSentences(_ sentences: [String]) -> String {
+        var result = ""
+        for (idx, s) in sentences.enumerated() {
+            if idx == 0 {
+                result = s
+            } else {
+                let prev = sentences[idx - 1]
+                let sep = (prev.hasPrefix("#") || s.hasPrefix("#") || prev.hasPrefix("- ") || s.hasPrefix("- ") || prev.hasPrefix("* ") || s.hasPrefix("* ")) ? "\n\n" : " "
+                result += sep + s
+            }
+        }
+        return result
+    }
+
+    private static func mergeChunksInDocumentOrder(
+        _ chunks: [InternalChunk],
+        minCharacters: Int
+    ) -> [RAGChunk] {
+        guard !chunks.isEmpty else { return [] }
+        guard minCharacters > 0 else {
+            return chunks.map { RAGChunk(source: $0.source, text: $0.text, url: $0.url, pdfPage: $0.pdfPage) }
+        }
+
+        var workingChunks = chunks
+        var merged: [InternalChunk] = []
+        var i = 0
+
+        while i < workingChunks.count {
+            let c = workingChunks[i]
+            if c.isTable {
+                merged.append(c)
+                i += 1
+                continue
+            }
+
+            var accumText = c.text
+            let source = c.source
+            let url = c.url
+            let pdfPage = c.pdfPage
+            var j = i + 1
+
+            while accumText.count < minCharacters || isMarkdownHeading(accumText) {
+                if j < workingChunks.count && !workingChunks[j].isTable {
+                    let nextText = workingChunks[j].text
+                    let sep = (isMarkdownHeading(accumText) || nextText.hasPrefix("#")) ? "\n\n" : "\n\n"
+                    accumText += sep + nextText
+                    j += 1
+                } else {
+                    break
+                }
+            }
+
+            if accumText.count < minCharacters || isMarkdownHeading(accumText) {
+                // Try backward merge into the most recent non-table chunk in merged
+                var mergedBackward = false
+                for prevIdx in stride(from: merged.count - 1, through: 0, by: -1) {
+                    if !merged[prevIdx].isTable {
+                        merged[prevIdx].text += "\n\n" + accumText
+                        mergedBackward = true
+                        break
+                    }
+                }
+
+                if !mergedBackward {
+                    // Try forward merge across table into the next available non-table chunk
+                    var mergedForwardAcross = false
+                    for nextIdx in j..<workingChunks.count {
+                        if !workingChunks[nextIdx].isTable {
+                            workingChunks[nextIdx].text = accumText + "\n\n" + workingChunks[nextIdx].text
+                            mergedForwardAcross = true
+                            break
+                        }
+                    }
+
+                    if !mergedForwardAcross {
+                        // Entire document contains only this non-table text; preserve it
+                        merged.append(InternalChunk(text: accumText, isTable: false, source: source, url: url, pdfPage: pdfPage))
+                    }
+                }
+            } else {
+                merged.append(InternalChunk(text: accumText, isTable: false, source: source, url: url, pdfPage: pdfPage))
+            }
+
+            i = j
+        }
+
+        return merged.map { RAGChunk(source: $0.source, text: $0.text, url: $0.url, pdfPage: $0.pdfPage) }
     }
 
     /// Chunks text with overlap while preserving non-empty slices.

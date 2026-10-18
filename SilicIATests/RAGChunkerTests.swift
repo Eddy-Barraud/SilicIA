@@ -114,12 +114,16 @@ final class RAGChunkerTests: XCTestCase {
         """
 
         let chunks = RAGChunker.chunkParagraphs(text: sampleMarkdown, source: "Web: Example", url: "https://example.com")
-        XCTAssertEqual(chunks.count, 4)
-        XCTAssertEqual(chunks[0].text, "# Title of Article")
-        XCTAssertTrue(chunks[1].text.contains("First paragraph"))
-        XCTAssertTrue(chunks[2].text.contains("Second paragraph"))
-        XCTAssertTrue(chunks[3].text.contains("Third paragraph"))
+        // The title is never alone and chunks < 200 chars are merged in document order
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertFalse(RAGChunker.isMarkdownHeading(chunks[0].text))
+        XCTAssertTrue(chunks[0].text.contains("# Title of Article"))
+        XCTAssertTrue(chunks[0].text.contains("First paragraph"))
+        XCTAssertTrue(chunks[0].text.contains("Second paragraph"))
+        XCTAssertTrue(chunks[0].text.contains("Third paragraph"))
+        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
         XCTAssertEqual(chunks[0].url, "https://example.com")
+        XCTAssertEqual(chunks[0].source, "Web: Example")
     }
 
     func testRAGContextServiceRankingAnd4096Budgeting() async {
@@ -375,31 +379,32 @@ final class RAGChunkerTests: XCTestCase {
 
         let chunks = RAGChunker.chunkMarkdown(text: markdown, source: "Wikipedia: IVe", url: "https://wikipedia.org")
 
-        // Must produce 4 chunks: heading, intro prose, the complete intact table, and concluding prose
-        XCTAssertEqual(chunks.count, 4)
+        // Heading must not be alone; table is exempt and intact
+        XCTAssertFalse(chunks.isEmpty)
 
-        // Heading
-        XCTAssertTrue(chunks[0].text.contains("# Chronologie des dirigeants"))
+        // Find the table chunk
+        let tableChunk = chunks.first { chunk in
+            chunk.text.contains("| Président | Début de mandat |")
+        }
+        XCTAssertNotNil(tableChunk)
+        guard let tableChunk = tableChunk else { return }
 
-        // Intro prose
-        XCTAssertTrue(chunks[1].text.contains("Voici la liste des présidents"))
-
-        // Table chunk: entire table with all 4 rows intact
-        let tableChunk = chunks[2]
-        XCTAssertTrue(tableChunk.text.contains("| Président | Début de mandat | Fin de mandat | Parti politique |"))
+        // Table chunk has all 4 rows intact
         XCTAssertTrue(tableChunk.text.contains("| --- | --- | --- | --- |"))
         XCTAssertTrue(tableChunk.text.contains("| Vincent Auriol | 16 janvier 1947 | 16 janvier 1954 | SFIO |"))
         XCTAssertTrue(tableChunk.text.contains("| René Coty | 16 janvier 1954 | 8 janvier 1959 | CNIP |"))
         let tableLines = tableChunk.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         XCTAssertEqual(tableLines.count, 4)
 
-        // Concluding prose
-        XCTAssertTrue(chunks[3].text.contains("Cette période s'est achevée"))
+        // No chunk in the output should be an isolated heading
+        for chunk in chunks {
+            XCTAssertFalse(RAGChunker.isMarkdownHeading(chunk.text), "Found isolated heading chunk: \(chunk.text)")
+        }
     }
 
     func testThreeSentenceSlidingWindow() {
         let text = """
-        Première phrase sur les statistiques de l'emploi en France. Deuxième phrase détaillant le taux de chômage au premier trimestre. Troisième phrase comparant avec l'année précédente. Quatrième phrase analysant la hausse pour les jeunes. Cinquième phrase concluant sur les perspectives économiques.
+        Première phrase détaillée sur les statistiques officielles de l'emploi en France métropolitaine. Deuxième phrase analysant en profondeur le taux de chômage au cours du premier trimestre 2026. Troisième phrase comparant méthodiquement l'évolution observée avec celle de l'année précédente. Quatrième phrase expliquant la situation spécifique et les difficultés rencontrées par les jeunes. Cinquième phrase concluant sur les perspectives économiques et les prévisions du marché du travail.
         """
 
         let chunks = RAGChunker.chunkMarkdown(text: text, source: "INSEE", windowSize: 3, stride: 1)
@@ -420,6 +425,71 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertTrue(chunks[2].text.contains("Troisième phrase"))
         XCTAssertTrue(chunks[2].text.contains("Cinquième phrase"))
         XCTAssertFalse(chunks[2].text.contains("Deuxième phrase"))
+
+        // All chunks must be >= 200 chars
+        for chunk in chunks {
+            XCTAssertGreaterThanOrEqual(chunk.text.count, 200)
+        }
+    }
+
+    func testMarkdownHeadingNeverAlone() {
+        let text = """
+        ### Population de Paris : chiffres clés
+
+        Paris compte 2 103 778 habitants en 2026 selon les dernières estimations officielles de l'INSEE. La capitale fait face à des mutations démographiques notables dans certains arrondissements centraux.
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertFalse(RAGChunker.isMarkdownHeading(chunks[0].text))
+        XCTAssertTrue(chunks[0].text.contains("### Population de Paris : chiffres clés"))
+        XCTAssertTrue(chunks[0].text.contains("Paris compte 2 103 778 habitants"))
+        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
+    }
+
+    func testSmallChunksMergedInDocumentOrder() {
+        let text = """
+        Population
+        519 127
+        Densité
+        10 822 hab/km²
+
+        Lyon est la troisième commune la plus peuplée de France après Paris et Marseille. Son dynamisme économique attire chaque année de nouveaux résidents dans la métropole.
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertTrue(chunks[0].text.contains("Population"))
+        XCTAssertTrue(chunks[0].text.contains("519 127"))
+        XCTAssertTrue(chunks[0].text.contains("Lyon est la troisième commune"))
+        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
+    }
+
+    func testTrailingChunkMergedBackward() {
+        let text = """
+        Paris compte 2 103 778 habitants en 2026 selon les données publiées par l'Institut national de la statistique et des études économiques. La densité moyenne y est particulièrement élevée dans les arrondissements du centre et de l'est parisien.
+
+        Conclusion brève.
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertTrue(chunks[0].text.contains("Paris compte 2 103 778 habitants"))
+        XCTAssertTrue(chunks[0].text.contains("Conclusion brève."))
+        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
+    }
+
+    func testTablesExemptFrom200CharMerge() {
+        let text = """
+        | Ville | Hab |
+        | --- | --- |
+        | Lyon | 519k |
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
+        XCTAssertEqual(chunks.count, 1)
+        XCTAssertLessThan(chunks[0].text.count, 200)
+        XCTAssertTrue(chunks[0].text.contains("| Ville | Hab |"))
     }
 
     func testInseeFixtureTablesPreserved() throws {
@@ -450,6 +520,20 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertTrue(table1.text.contains("2015-T1"))
         let table1Rows = table1.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         XCTAssertEqual(table1Rows.count, 95)
+
+        // No isolated headings in the entire fixture output
+        for chunk in chunks {
+            XCTAssertFalse(RAGChunker.isMarkdownHeading(chunk.text), "Found isolated heading: \(chunk.text)")
+        }
+
+        // All non-table chunks must be >= 200 characters
+        let nonTableChunks = chunks.filter { chunk in
+            let firstLine = chunk.text.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
+            return !(firstLine.hasPrefix("|") && firstLine.hasSuffix("|"))
+        }
+        for chunk in nonTableChunks {
+            XCTAssertGreaterThanOrEqual(chunk.text.count, 200, "Prose chunk < 200 chars: [\(chunk.text)]")
+        }
     }
 
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
