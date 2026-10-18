@@ -357,6 +357,40 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertFalse(reportedResults.isEmpty)
         XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
     }
+
+    @MainActor
+    func testSearchWikipediaAccentedFrenchTitleRetrievesFullContent() async throws {
+        let service = WebSearchService()
+        let results = try await service.searchWikipedia(query: "Présidents IVe République", language: .french, limit: 1)
+        XCTAssertFalse(results.isEmpty, "Wikipedia search for 'Présidents IVe République' should return at least one result")
+        guard let first = results.first else { return }
+        XCTAssertTrue(first.url.contains("wikipedia.org"), "URL should be a Wikipedia URL: \(first.url)")
+        let content = first.retrievedContent ?? ""
+        XCTAssertGreaterThan(content.count, 5000, "Retrieved content must be full article text, not a short excerpt (got \(content.count) chars)")
+        XCTAssertTrue(
+            content.contains("Vincent Auriol") || content.contains("René Coty") || content.contains("Auriol"),
+            "Content should mention IVth Republic presidents: \(content.prefix(300))"
+        )
+        XCTAssertFalse(content.contains("<p>"), "Content must not contain raw HTML <p> tags")
+        XCTAssertFalse(content.contains("</div>"), "Content must not contain raw HTML </div> tags")
+    }
+
+    func testHTMLSanitizerPreservesStructureForParagraphChunking() {
+        let html = """
+        <h1>Titre Principal</h1>
+        <p>Premier paragraphe avec un <a href="https://example.com">lien</a> &amp; du texte.</p>
+        <p>Deuxième paragraphe avec des détails.</p>
+        <ul>
+            <li>Premier point</li>
+            <li>Deuxième point</li>
+        </ul>
+        """
+        let structured = HTMLSanitizer.htmlToPlainTextWithStructure(html)
+        XCTAssertFalse(structured.contains("<"), "Must not contain HTML tags")
+        XCTAssertTrue(structured.contains("Titre Principal\n\n"), "Heading must be followed by double newlines")
+        XCTAssertTrue(structured.contains("lien & du texte.\n\n"), "Paragraph must end with double newlines and entities decoded")
+        XCTAssertTrue(structured.contains("Premier point\n"), "List items must be separated by newlines")
+    }
 }
 
 

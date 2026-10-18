@@ -321,6 +321,27 @@ class WebSearchService: ObservableObject {
 
         let decoded = try Self.jsonDecoder.decode(WikipediaSearchResponse.self, from: data)
         let pages = Array(decoded.pages.prefix(max(limit, 0)))
+
+        // Fallback: if search API returns 0 pages, attempt direct title lookup
+        if pages.isEmpty, !effectiveQuery.isEmpty {
+            let directKey = effectiveQuery.replacingOccurrences(of: " ", with: "_")
+            if let directPage = await fetchWikipediaPageDetails(for: directKey, language: language),
+               !directPage.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let leadSnippet = directPage.markdown
+                    .components(separatedBy: "\n\n")
+                    .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    ?? directPage.title
+                return [
+                    SearchResult(
+                        title: directPage.title,
+                        url: directPage.url,
+                        snippet: leadSnippet,
+                        retrievedContent: directPage.markdown
+                    )
+                ]
+            }
+            return []
+        }
         guard !pages.isEmpty else { return [] }
 
         let detailsByKey = await fetchWikipediaPageDetailsByKey(
@@ -426,7 +447,7 @@ class WebSearchService: ObservableObject {
         } catch {
             debugLog("Markdown extraction via WebScrapingService failed for Wikipedia page: \(error.localizedDescription)")
         }
-        return Self.htmlToPlainText(html)
+        return HTMLSanitizer.htmlToPlainTextWithStructure(html)
     }
 
     /// Interleaves result lists, removing duplicate URLs, up to the provided limit.
@@ -569,7 +590,7 @@ class WebSearchService: ObservableObject {
         var components = URLComponents()
         components.scheme = "https"
         components.host = wikipediaHost(for: language)
-        components.path = "/w/rest.php/v1/page/\(encodedKey)/with_html"
+        components.percentEncodedPath = "/w/rest.php/v1/page/\(encodedKey)/with_html"
         return components.url
     }
 

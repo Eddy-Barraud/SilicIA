@@ -111,7 +111,8 @@ struct WikipediaTool: Tool {
         }
 
         #if DEBUG
-        print("[Tool:wikipediaSearch] returning \(top.count) result(s) to model and cards")
+        let firstContentCount = top.first?.retrievedContent?.count ?? 0
+        print("[Tool:wikipediaSearch] returning \(top.count) result(s) to model and cards (full markdown chars: \(firstContentCount))")
         #endif
         onResults?(top)
         let output = rendered.joined(separator: "\n\n")
