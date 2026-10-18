@@ -83,7 +83,6 @@ final class ChatService: ObservableObject {
     private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
-    private var preAnalyzedUseWebVision: Bool = false
 
     nonisolated static func contextAttachmentKey(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
@@ -104,8 +103,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true,
-        useToolCalling: Bool = false,
-        useWebVision: Bool = false
+        useToolCalling: Bool = false
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -153,7 +151,6 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: effectiveIncludeWebSearch,
-            useWebVision: useWebVision,
             searchQuerySeed: effectiveIncludeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -166,7 +163,6 @@ final class ChatService: ObservableObject {
             && effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
-            && useWebVision == preAnalyzedUseWebVision
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) imageCount=\(imageURLs.count) preChunks=\(preAnalyzedChunks.count)")
         let chunks: [RAGChunk]
@@ -184,8 +180,7 @@ final class ChatService: ObservableObject {
                 maxWikipediaResults: effectiveMaxWikiResults,
                 maxContextTokens: effectiveMaxContextTokens,
                 useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: useWikipedia,
-                useWebVision: useWebVision
+                useWikipedia: useWikipedia
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
@@ -195,7 +190,6 @@ final class ChatService: ObservableObject {
             preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
             preAnalyzedUseDuckDuckGo = useDuckDuckGo
             preAnalyzedUseWikipedia = useWikipedia
-            preAnalyzedUseWebVision = useWebVision
         }
         debugContext("sendMessage chunkCount=\(chunks.count)")
         let historyMessages = messages.dropLast()
@@ -279,7 +273,6 @@ final class ChatService: ObservableObject {
                         webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
-                        useWebVision: useWebVision,
                         maxDuckDuckGoResults: effectiveMaxDDGResults,
                         maxWikipediaResults: effectiveMaxWikiResults,
                         useDuckDuckGo: useDuckDuckGo,
@@ -589,8 +582,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         maxResponseTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async {
         // Compute clamped/effective values ONCE; reused below for both the
         // cache key and the cache-hit comparison.
@@ -607,7 +599,6 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
-            useWebVision: useWebVision,
             searchQuerySeed: "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -630,8 +621,7 @@ final class ChatService: ObservableObject {
            effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults,
            effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults,
            useDuckDuckGo == preAnalyzedUseDuckDuckGo,
-           useWikipedia == preAnalyzedUseWikipedia,
-           useWebVision == preAnalyzedUseWebVision {
+           useWikipedia == preAnalyzedUseWikipedia {
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             pdfAnalysisProgress = [:]
@@ -652,8 +642,7 @@ final class ChatService: ObservableObject {
             maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia,
-            useWebVision: useWebVision
+            useWikipedia: useWikipedia
         )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
@@ -663,7 +652,6 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
         preAnalyzedUseDuckDuckGo = useDuckDuckGo
         preAnalyzedUseWikipedia = useWikipedia
-        preAnalyzedUseWebVision = useWebVision
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -687,8 +675,7 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async {
         guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
             return
@@ -722,8 +709,7 @@ final class ChatService: ObservableObject {
             maxResponseTokens: maxResponseTokens,
             maxContextTokens: maxContextTokens,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia,
-            useWebVision: useWebVision
+            useWikipedia: useWikipedia
         )
     }
 
@@ -762,7 +748,6 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
-        preAnalyzedUseWebVision = false
         currentConversation = nil
         currentConversationPDFFilename = nil
         currentConversationPDFBookmark = nil
@@ -785,8 +770,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         reportProgress: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
         let uniquePDFs = Array(Set(pdfURLs))
@@ -868,8 +852,7 @@ final class ChatService: ObservableObject {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, totalMaxWebResults),
-                maxCharacters: webScrapingCharacters,
-                useVision: useWebVision
+                maxCharacters: webScrapingCharacters
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
@@ -1082,7 +1065,6 @@ final class ChatService: ObservableObject {
         pdfURLs: [URL],
         imageURLs: [URL] = [],
         includeWebSearch: Bool,
-        useWebVision: Bool = false,
         searchQuerySeed: String,
         clampedDuckDuckGoResults: Int,
         clampedWikipediaResults: Int
@@ -1098,7 +1080,7 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedImagePaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||webVision:\(useWebVision)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
     }
 
     private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {

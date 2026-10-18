@@ -39,17 +39,11 @@ final class AppSettingsStore {
     var settings: AppSettings {
         didSet {
             settings.save()
-            if settings.useWebVision && !oldValue.useWebVision {
-                ImageAnalysisService.warmup()
-            }
         }
     }
 
     private init() {
         let loaded = AppSettings.load()
         settings = loaded
-        if loaded.useWebVision {
-            ImageAnalysisService.warmup()
-        }
     }
 }

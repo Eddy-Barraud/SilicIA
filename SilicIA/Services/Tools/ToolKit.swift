@@ -59,7 +59,6 @@ nonisolated enum ToolKit {
         let webSearchAvailable: Bool
         let webSearchService: WebSearchService
         let webScraper: WebScrapingService
-        let useWebVision: Bool
         let maxDuckDuckGoResults: Int
         let maxWikipediaResults: Int
         let useDuckDuckGo: Bool
@@ -121,7 +120,6 @@ nonisolated enum ToolKit {
             var webTool = WebSearchTool(
                 webSearchService: config.webSearchService,
                 webScraper: config.webScraper,
-                useWebVision: config.useWebVision,
                 maxDuckDuckGoResults: config.maxDuckDuckGoResults,
                 maxWikipediaResults: config.maxWikipediaResults,
                 useDuckDuckGo: config.useDuckDuckGo,

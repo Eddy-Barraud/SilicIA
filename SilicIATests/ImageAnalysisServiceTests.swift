@@ -86,27 +86,6 @@ final class ImageAnalysisServiceTests: XCTestCase {
         )
     }
 
-    @MainActor
-    func testRenderedWebPageTextCombinesPagesIntoChunkableDocument() {
-        let analyses: [ImageAnalysisService.PDFPageAnalysisResult] = [
-            .init(
-                recognizedText: "First page paragraph with enough detail to matter.",
-                labels: [("chart", 0.92)]
-            ),
-            .init(
-                recognizedText: "Second page paragraph that should remain separately delimited before chunking.",
-                labels: []
-            )
-        ]
-
-        let text = WebScrapingService.renderedPageText(from: analyses, maxCharacters: 10_000)
-
-        XCTAssertTrue(text.contains("[Rendered webpage page 1]"))
-        XCTAssertTrue(text.contains("Visual content: chart (0.92)"))
-        XCTAssertTrue(text.contains("[Rendered webpage page 2]"))
-        XCTAssertTrue(text.contains("Second page paragraph"))
-    }
-
     func testExtractPDFPageAnalysesPreservesPageAlignment() async {
         let pdfURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

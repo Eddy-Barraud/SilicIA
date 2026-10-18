@@ -76,7 +76,6 @@ class AIService: ObservableObject {
         maxCharacters: Int = 4500,
         temperature: Double = 0.3,
         maxTokens: Int = 320,
-        useWebVision: Bool = false,
         preExtractedContent: String? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async -> (summary: String, markdown: String) {
@@ -87,7 +86,7 @@ class AIService: ObservableObject {
             }
         }
         if pageMarkdown.isEmpty {
-            pageMarkdown = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters, useVision: useWebVision) ?? ""
+            pageMarkdown = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters) ?? ""
         }
         let trimmedContent = pageMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else { return ("", "") }
@@ -158,7 +157,7 @@ class AIService: ObservableObject {
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, useToolCalling: Bool = false, useWebVision: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, useToolCalling: Bool = false, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
@@ -192,8 +191,7 @@ class AIService: ObservableObject {
         let scrapedContent = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: effectiveScrapingResults,
-            maxCharacters: effectiveScrapingChars,
-            useVision: useWebVision
+            maxCharacters: effectiveScrapingChars
         )
         let ragScrapeDuration = Date().timeIntervalSince(scrapeStart)
 
@@ -310,7 +308,6 @@ class AIService: ObservableObject {
                 maxTokens: maxTokens,
                 language: language,
                 useToolCalling: useToolCalling,
-                useWebVision: useWebVision,
                 corpusChunks: selected.selectedChunks.map(\.chunk),
                 maxDuckDuckGoResults: maxDuckDuckGoResults,
                 maxWikipediaResults: maxWikipediaResults,
@@ -715,7 +712,6 @@ class AIService: ObservableObject {
         maxTokens: Int = 1000,
         language: ModelLanguage = .french,
         useToolCalling: Bool = false,
-        useWebVision: Bool = false,
         corpusChunks: [RAGChunk] = [],
         maxDuckDuckGoResults: Int = 6,
         maxWikipediaResults: Int = 2,
@@ -728,7 +724,7 @@ class AIService: ObservableObject {
             return try await runSummaryGeneration(
                 query: query, context: context, results: results,
                 temperature: temperature, maxTokens: maxTokens, language: language,
-                useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                useToolCalling: useToolCalling, corpusChunks: corpusChunks,
                 maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                 onPartialUpdate: onPartialUpdate
@@ -745,7 +741,7 @@ class AIService: ObservableObject {
                     return try await runSummaryGeneration(
                         query: query, context: context, results: results,
                         temperature: temperature, maxTokens: maxTokens, language: language,
-                        useToolCalling: useToolCalling, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                        useToolCalling: useToolCalling, corpusChunks: corpusChunks,
                         maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                         onPartialUpdate: onPartialUpdate
@@ -764,7 +760,7 @@ class AIService: ObservableObject {
                     return try await runSummaryGeneration(
                         query: query, context: context, results: results,
                         temperature: temperature, maxTokens: maxTokens, language: language,
-                        useToolCalling: false, useWebVision: useWebVision, corpusChunks: corpusChunks,
+                        useToolCalling: false, corpusChunks: corpusChunks,
                         maxDuckDuckGoResults: maxDuckDuckGoResults, maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo, useWikipedia: useWikipedia,
                         onPartialUpdate: onPartialUpdate
@@ -820,7 +816,6 @@ class AIService: ObservableObject {
         maxTokens: Int = 1000,
         language: ModelLanguage = .french,
         useToolCalling: Bool = false,
-        useWebVision: Bool = false,
         corpusChunks: [RAGChunk] = [],
         maxDuckDuckGoResults: Int = 6,
         maxWikipediaResults: Int = 2,
@@ -853,7 +848,6 @@ class AIService: ObservableObject {
                         webSearchAvailable: webSearchAvailable,
                         webSearchService: webSearchService,
                         webScraper: webScraper,
-                        useWebVision: useWebVision,
                         maxDuckDuckGoResults: maxDuckDuckGoResults,
                         maxWikipediaResults: maxWikipediaResults,
                         useDuckDuckGo: useDuckDuckGo,

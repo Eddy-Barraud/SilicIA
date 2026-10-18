@@ -828,18 +828,6 @@ struct SearchView: View {
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $settingsStore.settings.useWebVision) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L.t("search.settings.webVisionToggle", language: settings.language))
-                            .font(.subheadline)
-                        Text(L.t("search.settings.webVisionDescription", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-
             // Search Sources
             VStack(alignment: .leading, spacing: 8) {
                 Text(L.t("search.settings.searchSources", language: settings.language))
@@ -1165,7 +1153,6 @@ struct SearchView: View {
                 title: result.title,
                 url: result.url,
                 language: settings.language,
-                useWebVision: settings.useWebVision,
                 preExtractedContent: preExtractedPlainText,
                 onPartialUpdate: { partial in
                     guard activeWebPageSummaryRequestID == requestID else { return }
@@ -1441,7 +1428,6 @@ struct SearchView: View {
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
             useToolCalling: settings.useToolCalling,
-            useWebVision: settings.useWebVision,
             maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,

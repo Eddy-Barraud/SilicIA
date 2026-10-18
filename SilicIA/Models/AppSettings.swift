@@ -63,7 +63,6 @@ struct AppSettings: Codable, Equatable {
         get { isReaderViewAndSummaryEnabled }
         set { isReaderViewAndSummaryEnabled = newValue }
     }
-    var useWebVision: Bool = false
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
     var language: ModelLanguage = .systemPreferred()
@@ -97,7 +96,6 @@ struct AppSettings: Codable, Equatable {
         case maxContextTokens
         case isReaderViewAndSummaryEnabled
         case isWebSummariesEnabled
-        case useWebVision
         case useDuckDuckGo
         case useWikipedia
         case language
@@ -151,8 +149,6 @@ struct AppSettings: Codable, Equatable {
         } else {
             isReaderViewAndSummaryEnabled = Self.defaultSettings.isReaderViewAndSummaryEnabled
         }
-        useWebVision = try container.decodeIfPresent(Bool.self, forKey: .useWebVision)
-            ?? Self.defaultSettings.useWebVision
         useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
             ?? Self.defaultSettings.useDuckDuckGo
         useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
@@ -183,7 +179,6 @@ struct AppSettings: Codable, Equatable {
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isReaderViewAndSummaryEnabled)
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
-        try container.encode(useWebVision, forKey: .useWebVision)
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
         try container.encode(language, forKey: .language)

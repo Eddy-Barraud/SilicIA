@@ -49,7 +49,6 @@ struct WebSearchTool: Tool {
     /// + search machinery (rate limits, locale, custom UA, etc.).
     let webSearchService: WebSearchService
     let webScraper: WebScrapingService
-    let useWebVision: Bool
     let maxDuckDuckGoResults: Int
     let maxWikipediaResults: Int
     let useDuckDuckGo: Bool
@@ -205,8 +204,7 @@ struct WebSearchTool: Tool {
         let scraped = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: limit,
-            maxCharacters: perResultCharBudget,
-            useVision: useWebVision
+            maxCharacters: perResultCharBudget
         )
         let toolScrapeElapsed = Date().timeIntervalSince(scrapeStart)
         onScrapeDuration?(toolScrapeElapsed)

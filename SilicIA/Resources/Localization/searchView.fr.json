@@ -31,8 +31,6 @@
   "search.settings.temperature": "Température de l'IA",
   "search.settings.readerViewAndSummaryToggle": "Vue lecture et résumé",
   "search.settings.webSummariesToggle": "Vue lecture et résumé",
-  "search.settings.webVisionToggle": "Vision web",
-  "search.settings.webVisionDescription": "Utiliser le rendu réel des pages pour le contexte plutôt que seulement le texte",
   "search.settings.searchSources": "Sources de recherche",
   "search.settings.maxDDG": "Résultats max (DDG)",
   "search.settings.maxWiki": "Résultats max (Wikipedia)",
