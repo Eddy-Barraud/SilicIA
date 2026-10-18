@@ -25,6 +25,21 @@ enum HTMLSanitizer: Sendable {
         options: []
     )
 
+    private nonisolated static let htmlBlockTagRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "</?(?:p|div|section|article|header|footer|h[1-6]|table|tr|blockquote)[^>]*>",
+        options: [.caseInsensitive]
+    )
+
+    private nonisolated static let htmlBreakTagRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "<br\\s*/?>|</?li[^>]*>",
+        options: [.caseInsensitive]
+    )
+
+    private nonisolated static let multipleNewlineRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "\n{3,}",
+        options: []
+    )
+
     private nonisolated static let namedEntities: [String: String] = [
         "nbsp": " ",
         "amp": "&",
@@ -131,6 +146,54 @@ enum HTMLSanitizer: Sendable {
             )
         }
         return decodeEntities(text)
+    }
+
+    /// Strips HTML comments and tags while converting block tags into newlines,
+    /// preserving paragraph and list structure suitable for RAG chunking.
+    nonisolated static func htmlToPlainTextWithStructure(_ html: String) -> String {
+        var text = html
+        if let commentRegex = htmlCommentRegex {
+            text = commentRegex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: ""
+            )
+        }
+        if let breakRegex = htmlBreakTagRegex {
+            text = breakRegex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "\n"
+            )
+        }
+        if let blockRegex = htmlBlockTagRegex {
+            text = blockRegex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "\n\n"
+            )
+        }
+        if let tagRegex = htmlTagRegex {
+            text = tagRegex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: " "
+            )
+        }
+        text = decodeEntities(text)
+        let lines = text.components(separatedBy: "\n").map { line in
+            line.replacingOccurrences(of: "[ \t]+", with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespaces)
+        }
+        text = lines.joined(separator: "\n")
+        if let newlineRegex = multipleNewlineRegex {
+            text = newlineRegex.stringByReplacingMatches(
+                in: text,
+                range: NSRange(text.startIndex..., in: text),
+                withTemplate: "\n\n"
+            )
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Strips HTML tags only.

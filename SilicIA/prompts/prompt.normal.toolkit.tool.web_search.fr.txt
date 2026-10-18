@@ -1,2 +1,1 @@
-- `webSearch(query, maxResults?)` : interroge le web (DuckDuckGo + Wikipedia) avec une requête que TU formules toi-même à partir de la question de l'utilisateur. Utilise-le pour les informations récentes, les procédures techniques, les API, la documentation ou tout ce qui dépasse tes données d'entraînement — pas pour les calculs arithmétiques.
-
+- `webSearch(query, maxResults?)` : recherche sur le web via DuckDuckGo avec des mots-clés ciblés. Utilise-le pour obtenir des informations actuelles, des sites web, des chiffres, des distances, des comparaisons ou des faits précis.

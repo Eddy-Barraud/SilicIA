@@ -74,9 +74,6 @@ final class Entitlements: ObservableObject {
     // `hasPremiumAccess`) so the paid line can later be split per-feature
     // without touching call sites, and so each site documents its intent.
 
-    /// (1) "Extensive" deep search in SearchView.
-    var canUseDeepSearch: Bool { hasPremiumAccess }
-
     /// (2) Attaching PDFs and images as chat/search context.
     var canAttachDocuments: Bool { hasPremiumAccess }
 
@@ -84,10 +81,7 @@ final class Entitlements: ObservableObject {
     /// (DuckDuckGo / Wikipedia).
     var canUseMultipleWebSourcesPerProvider: Bool { hasPremiumAccess }
 
-    /// (5) The tool-calling (experimental) toggle in settings.
-    var canUseToolCalling: Bool { hasPremiumAccess }
-
-    /// (6) Raising max output above the free-tier ceiling.
+    /// (5) Raising max output above the free-tier ceiling.
     var canExceedFreeOutputTokens: Bool { hasPremiumAccess }
 
     // MARK: - Clamps

@@ -62,6 +62,7 @@ class WebSearchService: ObservableObject {
     }()
 
     private let session: URLSession
+    private let webScraper: WebScrapingService
 
     private nonisolated func debugLog(_ message: String) {
         #if DEBUG
@@ -69,12 +70,30 @@ class WebSearchService: ObservableObject {
         #endif
     }
 
-    init() {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.waitsForConnectivity = true
-        config.requestCachePolicy = .returnCacheDataElseLoad
-        self.session = URLSession(configuration: config)
+    init(session: URLSession? = nil) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 15
+            config.waitsForConnectivity = true
+            config.requestCachePolicy = .returnCacheDataElseLoad
+            self.session = URLSession(configuration: config)
+        }
+        self.webScraper = WebScrapingService()
+    }
+
+    init(session: URLSession? = nil, webScraper: WebScrapingService) {
+        if let session {
+            self.session = session
+        } else {
+            let config = URLSessionConfiguration.default
+            config.timeoutIntervalForRequest = 15
+            config.waitsForConnectivity = true
+            config.requestCachePolicy = .returnCacheDataElseLoad
+            self.session = URLSession(configuration: config)
+        }
+        self.webScraper = webScraper
     }
 
     /// Search DuckDuckGo and Wikipedia, then merge deduplicated results.
@@ -102,7 +121,7 @@ class WebSearchService: ObservableObject {
             useWikipedia: useWikipedia
         )
 
-        debugLog("single-query search done: count=\(results.count)")
+        debugLog("single-query search done with query: \"\(query)\" and result count=\(results.count)")
 
         return results
     }
@@ -273,6 +292,16 @@ class WebSearchService: ObservableObject {
         return Array(results.prefix(maxResults))
     }
 
+    /// Executes a search on DuckDuckGo and returns results.
+    func searchDuckDuckGo(query: String, limit: Int = defaultDuckDuckGoLimit) async throws -> [SearchResult] {
+        try await executeDuckDuckGoSearch(query: query, maxResults: limit)
+    }
+
+    /// Executes a search on Wikipedia using the REST API and converts article HTML to Markdown.
+    func searchWikipedia(query: String, language: ModelLanguage = .english, limit: Int = defaultWikipediaLimit) async throws -> [SearchResult] {
+        try await executeWikipediaSearch(query: query, language: language, limit: limit)
+    }
+
     /// Executes Wikipedia REST search and enriches each page with full source content.
     private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
         let effectiveQuery = WikipediaQueryCleaner.clean(query)
@@ -292,6 +321,27 @@ class WebSearchService: ObservableObject {
 
         let decoded = try Self.jsonDecoder.decode(WikipediaSearchResponse.self, from: data)
         let pages = Array(decoded.pages.prefix(max(limit, 0)))
+
+        // Fallback: if search API returns 0 pages, attempt direct title lookup
+        if pages.isEmpty, !effectiveQuery.isEmpty {
+            let directKey = effectiveQuery.replacingOccurrences(of: " ", with: "_")
+            if let directPage = await fetchWikipediaPageDetails(for: directKey, language: language),
+               !directPage.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let leadSnippet = directPage.markdown
+                    .components(separatedBy: "\n\n")
+                    .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    ?? directPage.title
+                return [
+                    SearchResult(
+                        title: directPage.title,
+                        url: directPage.url,
+                        snippet: leadSnippet,
+                        retrievedContent: directPage.markdown
+                    )
+                ]
+            }
+            return []
+        }
         guard !pages.isEmpty else { return [] }
 
         let detailsByKey = await fetchWikipediaPageDetailsByKey(
@@ -301,27 +351,26 @@ class WebSearchService: ObservableObject {
 
         return pages.compactMap { page in
             let details = detailsByKey[page.key]
-            let title = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let titleCandidate = details?.title ?? page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = titleCandidate.isEmpty ? page.key.replacingOccurrences(of: "_", with: " ") : titleCandidate
             let snippetCandidate = Self.htmlToPlainText(page.excerpt ?? page.description ?? "")
             let snippet = snippetCandidate.isEmpty ? "Wikipedia page" : snippetCandidate
-            let pageURL = details?.contentUrls?.desktop?.page?.trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? details?.htmlUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
-                ?? wikipediaReadablePageURL(for: page.key, language: language)
-            let retrievedContent = details?.source?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let pageURL = details?.url ?? wikipediaReadablePageURL(for: page.key, language: language)
+            let retrievedContent = details?.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
 
             guard !pageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
 
             return SearchResult(
-                title: title.isEmpty ? page.key.replacingOccurrences(of: "_", with: " ") : title,
+                title: title,
                 url: pageURL,
                 snippet: snippet,
-                retrievedContent: retrievedContent?.isEmpty == true ? nil : retrievedContent
+                retrievedContent: (retrievedContent?.isEmpty == true) ? nil : retrievedContent
             )
         }
     }
 
-    /// Fetches Wikipedia page details (including full source text) for each page key.
-    private func fetchWikipediaPageDetailsByKey(keys: [String], language: ModelLanguage) async -> [String: WikipediaPageResponse] {
+    /// Fetches Wikipedia page details (with HTML converted to Markdown) for each page key.
+    private func fetchWikipediaPageDetailsByKey(keys: [String], language: ModelLanguage) async -> [String: (title: String, markdown: String, url: String)] {
         var uniqueKeys: [String] = []
         var seenKeys = Set<String>()
         for key in keys where !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -332,8 +381,8 @@ class WebSearchService: ObservableObject {
 
         guard !uniqueKeys.isEmpty else { return [:] }
 
-        var detailsByKey: [String: WikipediaPageResponse] = [:]
-        await withTaskGroup(of: (String, WikipediaPageResponse?).self) { group in
+        var detailsByKey: [String: (title: String, markdown: String, url: String)] = [:]
+        await withTaskGroup(of: (String, (title: String, markdown: String, url: String)?).self) { group in
             for key in uniqueKeys {
                 group.addTask {
                     let page = await self.fetchWikipediaPageDetails(for: key, language: language)
@@ -351,25 +400,54 @@ class WebSearchService: ObservableObject {
         return detailsByKey
     }
 
-    /// Calls /w/rest.php/v1/page/[key] and decodes full page source content.
-    private func fetchWikipediaPageDetails(for key: String, language: ModelLanguage) async -> WikipediaPageResponse? {
-        guard let pageURL = wikipediaPageEndpointURL(key: key, language: language) else {
+    /// Calls MediaWiki /w/rest.php/v1/page/{key}/with_html and converts article HTML to Markdown.
+    private func fetchWikipediaPageDetails(for key: String, language: ModelLanguage) async -> (title: String, markdown: String, url: String)? {
+        guard let pageURL = wikipediaWithHTMLURL(key: key, language: language) else {
             return nil
         }
 
         do {
             var request = URLRequest(url: pageURL)
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            request.setValue("MediaWiki REST API docs examples/0.1 (https://www.mediawiki.org/wiki/API_talk:REST_API)", forHTTPHeaderField: "User-Agent")
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
                 return nil
             }
-            return try Self.jsonDecoder.decode(WikipediaPageResponse.self, from: data)
+            let parsed = try Self.jsonDecoder.decode(WikipediaWithHTMLResponse.self, from: data)
+            let pageKey = parsed.key ?? key
+            let title = (parsed.title?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                ? parsed.title!
+                : pageKey.replacingOccurrences(of: "_", with: " ")
+            let readableURL = wikipediaReadablePageURL(for: pageKey, language: language)
+
+            let markdown: String
+            if let html = parsed.html, !html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                markdown = await convertWikipediaHTMLToMarkdown(html, pageURL: URL(string: readableURL))
+            } else {
+                markdown = ""
+            }
+
+            return (title: title, markdown: markdown, url: readableURL)
         } catch {
             debugLog("Wikipedia page fetch failed for key=\(key): \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// Converts raw Wikipedia article HTML into clean Markdown via WebScrapingService,
+    /// with plain-text fallback. Guarantees no raw HTML tags reach RAG chunks or prompts.
+    private func convertWikipediaHTMLToMarkdown(_ html: String, pageURL: URL?) async -> String {
+        do {
+            let (_, extractedMD) = try await webScraper.extractMarkdown(from: html, baseURL: pageURL)
+            let trimmed = extractedMD.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        } catch {
+            debugLog("Markdown extraction via WebScrapingService failed for Wikipedia page: \(error.localizedDescription)")
+        }
+        return HTMLSanitizer.htmlToPlainTextWithStructure(html)
     }
 
     /// Interleaves result lists, removing duplicate URLs, up to the provided limit.
@@ -447,6 +525,10 @@ class WebSearchService: ObservableObject {
             throw SearchError.parsingFailed
         }
 
+        if html.contains("anomaly-modal") || html.contains("anomaly.js") || html.contains("bots use DuckDuckGo too") {
+            throw SearchError.botChallengeDetected
+        }
+
         var results: [SearchResult] = []
         let components = html.components(separatedBy: "class=\"result__a\"")
 
@@ -504,15 +586,15 @@ class WebSearchService: ObservableObject {
         return components.url
     }
 
-    private func wikipediaPageEndpointURL(key: String, language: ModelLanguage) -> URL? {
-        guard let encodedKey = key.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) else {
+    private func wikipediaWithHTMLURL(key: String, language: ModelLanguage) -> URL? {
+        let decodedKey = key.removingPercentEncoding ?? key
+        guard let encodedKey = decodedKey.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) else {
             return nil
         }
-
         var components = URLComponents()
         components.scheme = "https"
         components.host = wikipediaHost(for: language)
-        components.path = "/w/rest.php/v1/page/\(encodedKey)"
+        components.percentEncodedPath = "/w/rest.php/v1/page/\(encodedKey)/with_html"
         return components.url
     }
 
@@ -530,6 +612,13 @@ class WebSearchService: ObservableObject {
     }
 }
 
+private struct WikipediaWithHTMLResponse: Decodable {
+    let id: Int?
+    let key: String?
+    let title: String?
+    let html: String?
+}
+
 private struct WikipediaSearchResponse: Decodable {
     let pages: [WikipediaSearchPage]
 }
@@ -541,28 +630,13 @@ private struct WikipediaSearchPage: Decodable {
     let description: String?
 }
 
-private struct WikipediaPageResponse: Decodable {
-    struct ContentURLs: Decodable {
-        struct Desktop: Decodable {
-            let page: String?
-        }
-
-        let desktop: Desktop?
-    }
-
-    let key: String
-    let title: String?
-    let source: String?
-    let contentUrls: ContentURLs?
-    let htmlUrl: String?
-}
-
 /// Enumerates high-level search failure categories.
 enum SearchError: LocalizedError {
     case invalidURL
     case invalidResponse
     case parsingFailed
     case networkError
+    case botChallengeDetected
 
     /// Provides user-facing descriptions for search errors.
     var errorDescription: String? {
@@ -575,6 +649,8 @@ enum SearchError: LocalizedError {
             return "Failed to parse search results"
         case .networkError:
             return "Network error occurred"
+        case .botChallengeDetected:
+            return "Search provider bot challenge detected"
         }
     }
 }

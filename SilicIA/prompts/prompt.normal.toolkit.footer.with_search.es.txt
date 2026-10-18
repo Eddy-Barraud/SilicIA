@@ -1,2 +1,2 @@
-Puedes llamar a estas herramientas varias veces en un turno si la primera respuesta es incompleta. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Para definiciones básicas o conceptos generales cotidianos, responde directamente a partir de tus conocimientos sin mencionar la falta de contexto.
+Puedes llamar a estas herramientas para verificar hechos, definiciones, fechas o cifras antes de formular tu respuesta. Puedes llamarlas varias veces en un turno si es necesario. Cita la fuente de los pasajes únicamente cuando se haya utilizado un documento o una búsqueda web. Nunca menciones la falta de contexto.
 

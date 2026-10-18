@@ -65,14 +65,10 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
 
         // Multiple field updates persist together
-        AppSettingsStore.shared.settings.useToolCalling = true
-        AppSettingsStore.shared.settings.useWebVision = true
         AppSettingsStore.shared.settings.maxContextTokens = 1234
         AppSettingsStore.shared.settings.useWikipedia = false
 
         let reloaded = AppSettings.load()
-        XCTAssertTrue(reloaded.useToolCalling)
-        XCTAssertTrue(reloaded.useWebVision)
         XCTAssertEqual(reloaded.maxContextTokens, 1234)
         XCTAssertFalse(reloaded.useWikipedia)
     }

@@ -66,9 +66,9 @@ struct ChatView: View {
     var pdfRemovalRequests: AnyPublisher<URL, Never>? = nil
 
     /// In `.pdfTalkme` mode, web search is force-disabled regardless of
-    /// the AppStorage flag — the host app is offline-only.
+    /// settings — the host app is offline-only.
     private var effectiveIsWebSearchEnabled: Bool {
-        mode == .pdfTalkme ? false : isWebSearchEnabled
+        mode == .pdfTalkme ? false : (settings.useDuckDuckGo || settings.useWikipedia)
     }
     private var effectiveUseDuckDuckGo: Bool {
         mode == .pdfTalkme ? false : settings.useDuckDuckGo
@@ -242,31 +242,37 @@ struct ChatView: View {
     /// minimum 44pt tap target, with `.help` (macOS hover) and
     /// `.accessibilityLabel` (VoiceOver) on every entry.
     private var chatHeaderView: some View {
-        HStack(spacing: 4) {
-            headerIconButton(
-                systemImage: "square.and.pencil",
-                label: L.t("common.new", language: settings.language),
-                action: { startOver() }
-            )
+        ZStack {
+            if mode != .pdfTalkme {
+                SourceToggleButtons(settingsStore: settingsStore)
+            }
 
-            Spacer()
+            HStack(spacing: 4) {
+                headerIconButton(
+                    systemImage: "square.and.pencil",
+                    label: L.t("common.new", language: settings.language),
+                    action: { startOver() }
+                )
 
-            headerIconButton(
-                systemImage: "clock.arrow.circlepath",
-                label: L.t("common.history", language: settings.language),
-                action: { showHistory = true }
-            )
+                Spacer()
 
-            headerIconButton(
-                systemImage: "gearshape",
-                label: L.t("common.settings", language: settings.language),
-                action: {
-                    #if canImport(UIKit)
-                    dismissKeyboard()
-                    #endif
-                    showSettings = true
-                }
-            )
+                headerIconButton(
+                    systemImage: "clock.arrow.circlepath",
+                    label: L.t("common.history", language: settings.language),
+                    action: { showHistory = true }
+                )
+
+                headerIconButton(
+                    systemImage: "gearshape",
+                    label: L.t("common.settings", language: settings.language),
+                    action: {
+                        #if canImport(UIKit)
+                        dismissKeyboard()
+                        #endif
+                        showSettings = true
+                    }
+                )
+            }
         }
         .padding(.bottom, 2)
         .textSelection(.enabled)
@@ -440,9 +446,12 @@ struct ChatView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(L.t("chat.settings.selectAtLeastOne", language: settings.language))
+                    HStack(spacing: 4) {
+                        Image(systemName: "wifi.slash")
+                        Text(L.t("chat.settings.offlineMode", language: settings.language))
+                    }
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.secondary)
                 }
             }
             }
@@ -462,43 +471,6 @@ struct ChatView: View {
                     }
                 }
                 .pickerStyle(.segmented)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $settingsStore.settings.useWebVision) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L.t("chat.settings.webVisionToggle", language: settings.language))
-                            .font(.subheadline)
-                        Text(L.t("chat.settings.webVisionDescription", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-
-            // Tool-calling toggle — experimental path where the model
-            // pulls context via `searchContext` and `calculate` instead
-            // of receiving pre-baked RAG chunks in the prompt. Off by
-            // default while behaviour matures.
-            VStack(alignment: .leading, spacing: 8) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.useToolCalling) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Tool calling (experimental)")
-                            .font(.subheadline)
-                        Text("Lets the model search documents and call a calculator on demand instead of receiving a pre-baked context block.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
             }
         }
         .padding()
@@ -987,9 +959,7 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia,
-                useToolCalling: settings.useToolCalling,
-                useWebVision: settings.useWebVision
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }
@@ -1057,8 +1027,7 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia,
-                useWebVision: settings.useWebVision
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }
@@ -1505,8 +1474,7 @@ struct ChatView: View {
                 maxContextTokens: settings.maxContextTokens,
                 maxResponseTokens: settings.maxResponseTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia,
-                useWebVision: settings.useWebVision
+                useWikipedia: effectiveUseWikipedia
             )
         }
     }

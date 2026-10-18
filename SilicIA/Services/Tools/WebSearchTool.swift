@@ -36,24 +36,19 @@ struct WebSearchTool: Tool {
 
     let name = "webSearch"
     let description = """
-    Search the web (DuckDuckGo + Wikipedia) and return the top results' \
-    titles, URLs, and scraped content. Use this whenever the question \
-    requires current information, recent events, or details beyond your \
-    training data — and only when needed; do NOT call this for arithmetic, \
-    definitions, or anything you can answer directly. You may call multiple \
-    times in a single turn with refined queries if the first batch was \
-    incomplete.
+    Search the web via DuckDuckGo and return the top results' \
+    titles, URLs, and scraped content. Use this to verify facts, statistics, \
+    figures, distances, comparisons, recent events, websites, or technical \
+    documentation. You may call multiple times in a single turn with refined \
+    queries if the first batch was incomplete.
     """
 
     /// Injected by ChatService so the tool reuses the existing scraping
     /// + search machinery (rate limits, locale, custom UA, etc.).
     let webSearchService: WebSearchService
     let webScraper: WebScrapingService
-    let useWebVision: Bool
     let maxDuckDuckGoResults: Int
-    let maxWikipediaResults: Int
     let useDuckDuckGo: Bool
-    let useWikipedia: Bool
     let language: ModelLanguage
 
     /// Optional sink that receives the URLs / titles / scraped content the
@@ -63,6 +58,7 @@ struct WebSearchTool: Tool {
     /// once per tool invocation with the slice of `[SearchResult]` that
     /// the model received as the tool reply.
     var onResults: (@Sendable ([SearchResult]) -> Void)? = nil
+    var onScrapeDuration: (@Sendable (Double) -> Void)? = nil
 
     /// Token budget for the entire tool reply (titles + URLs + scraped
     /// content). Caller-supplied so it scales with the conversation's
@@ -129,15 +125,15 @@ struct WebSearchTool: Tool {
         guard !trimmed.isEmpty else {
             return "Error: empty query. Provide focused keywords (3–6 words usually works best)."
         }
-        guard useDuckDuckGo || useWikipedia else {
+        guard useDuckDuckGo else {
             return """
-            Web search is not available in this conversation: both \
-            DuckDuckGo and Wikipedia are disabled in settings. Answer the \
+            Web search is not available in this conversation: \
+            DuckDuckGo is disabled in settings. Answer the \
             user from your own knowledge instead.
             """
         }
 
-        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, Self.maxResultsCap))
+        let limit = max(Self.minResults, min(arguments.maxResults ?? Self.defaultMaxResults, min(maxDuckDuckGoResults, Self.maxResultsCap)))
 
         // Derive per-page char cap from the total token budget. We split
         // the budget evenly across the model-requested result count,
@@ -151,30 +147,11 @@ struct WebSearchTool: Tool {
             (totalChars / max(1, limit)) - Self.overheadCharsPerResult
         )
 
-        // Suppress Wikipedia when the model asked for current/recent
-        // information. Wikipedia's keyword search dutifully returns the
-        // closest encyclopedic article ("Crise des subprimes" for
-        // "actualité des marchés cette semaine"), which is exactly the
-        // wrong content for a time-sensitive query — DDG already covers
-        // current news in the same call. Only kicks in when the model's
-        // query carries temporal cues; definitional queries unaffected.
-        let temporal = RAGContextService.hasTemporalIntent(trimmed)
-        let effectiveUseWikipedia = useWikipedia && !temporal
-        #if DEBUG
-        if useWikipedia && !effectiveUseWikipedia {
-            print("[Tool:webSearch] suppressing Wikipedia for temporal query: \"\(trimmed)\"")
-        }
-        #endif
-
         let results: [SearchResult]
         do {
-            results = try await webSearchService.search(
+            results = try await webSearchService.searchDuckDuckGo(
                 query: trimmed,
-                maxDuckDuckGoResults: maxDuckDuckGoResults,
-                maxWikipediaResults: maxWikipediaResults,
-                language: language,
-                useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                limit: limit
             )
         } catch is CancellationError {
             // User pressed Stop while the tool was running — re-throw so the
@@ -185,56 +162,68 @@ struct WebSearchTool: Tool {
             return "Web search failed: \(error.localizedDescription). Answer from your own knowledge instead of retrying."
         }
 
-        let top = Array(results.prefix(limit))
-        guard !top.isEmpty else {
+        guard !results.isEmpty else {
             return "No web results found for query: '\(trimmed)'. Refine the query (e.g. add a year or proper noun) or answer from your own knowledge."
         }
 
         // Scrape pages that didn't ship full content already (Wikipedia
         // results typically have `retrievedContent`; DuckDuckGo results
-        // are usually snippet-only and need a scrape).
-        let urlsToScrape = top.compactMap { result -> String? in
+        // are usually snippet-only and need a scrape). Pass the full
+        // candidate list so `scrapeMultiplePages` can overfetch and replace
+        // any URLs that fail HTML-to-Markdown conversion.
+        let urlsToScrape = results.compactMap { result -> String? in
             guard (result.retrievedContent ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
                 return nil
             }
             return result.url
         }
+        let scrapeStart = Date()
         let scraped = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: limit,
-            maxCharacters: perResultCharBudget,
-            useVision: useWebVision
+            maxCharacters: perResultCharBudget
         )
+        let toolScrapeElapsed = Date().timeIntervalSince(scrapeStart)
+        onScrapeDuration?(toolScrapeElapsed)
+
+        // Ignore sources that cannot be reduced to Markdown and delete them from results.
+        let enrichedResults = results.compactMap { result -> SearchResult? in
+            if let retrieved = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !retrieved.isEmpty {
+                return result
+            }
+            if let scrapedText = scraped[result.url]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !scrapedText.isEmpty {
+                return SearchResult(
+                    id: result.id,
+                    title: result.title,
+                    url: result.url,
+                    snippet: result.snippet,
+                    retrievedContent: scrapedText
+                )
+            }
+            return nil
+        }
+
+        let top = Array(enrichedResults.prefix(limit))
+        guard !top.isEmpty else {
+            return "No web results found for query: '\(trimmed)'. Refine the query (e.g. add a year or proper noun) or answer from your own knowledge."
+        }
 
         // Each result block carries enough metadata for the model to cite
         // it accurately in its final answer.
         let rendered = top.enumerated().map { idx, result -> String in
             var lines = ["--- Result \(idx + 1): \(result.title)"]
             lines.append("URL: \(result.url)")
-            let body: String
-            if let retrieved = result.retrievedContent,
-               !retrieved.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                body = String(retrieved.prefix(perResultCharBudget))
-            } else if let scrapedBody = scraped[result.url],
-                      !scrapedBody.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                body = scrapedBody
-            } else {
-                body = result.snippet
-            }
+            let body = String((result.retrievedContent ?? "").prefix(perResultCharBudget))
             lines.append("Content: \(body)")
             return lines.joined(separator: "\n")
         }
 
         #if DEBUG
-        print("[Tool:webSearch] returning \(top.count) result(s) to model, \(results.count) to cards")
+        print("[Tool:webSearch] returning \(top.count) result(s) to model, \(enrichedResults.count) to cards")
         #endif
-        // Send EVERY fetched result to the UI sink, not just the slice the
-        // model received. The model's reply (`rendered`) is still bounded
-        // by its requested `maxResults`, so the model's context isn't
-        // affected — but the user gets to see all the sources the tool
-        // actually surfaced, the same way the prompt-stuffing path's
-        // search-result cards do.
-        onResults?(results)
+        onResults?(enrichedResults)
         let output = rendered.joined(separator: "\n\n")
         if let transcriptRecorder {
             await transcriptRecorder.record(tool: name, arguments: trimmed, result: output)

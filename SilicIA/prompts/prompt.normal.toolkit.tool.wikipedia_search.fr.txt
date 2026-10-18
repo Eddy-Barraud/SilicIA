@@ -1,0 +1,1 @@
+- `wikipediaSearch(query, maxResults?)` : recherche un article encyclopédique sur Wikipédia. La requête DOIT être très courte (1 ou 2 mots maximum : concept simple, nom de personne, lieu, machine, technique). Ne pose jamais de question ni de phrase complète.

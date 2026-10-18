@@ -83,7 +83,6 @@ final class ChatService: ObservableObject {
     private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
-    private var preAnalyzedUseWebVision: Bool = false
 
     nonisolated static func contextAttachmentKey(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
@@ -103,9 +102,7 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useToolCalling: Bool = false,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -132,28 +129,21 @@ final class ChatService: ObservableObject {
         // values actually used.
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
-        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(
-            maxResponseTokens,
-            useToolCalling: useToolCalling
-        )
+        let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
             maxOutputTokens: effectiveMaxOutputTokens
         )
 
-        // Tool-calling mode: the model owns the decision to search the web,
+        // In tool-calling mode, the model owns the decision to search the web
         // via the `webSearch` tool. Suppress the auto-prefetch path so we
-        // don't redundantly fetch + chunk pages the model might not even
-        // care about. The user's "Web" chip in the composer is therefore
-        // a no-op when tool calling is on — the prompt-stuffing baseline
-        // still honours it.
-        let effectiveIncludeWebSearch = useToolCalling ? false : includeWebSearch
+        // don't redundantly fetch + chunk pages the model might not even care about.
+        let effectiveIncludeWebSearch = false
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: effectiveIncludeWebSearch,
-            useWebVision: useWebVision,
             searchQuerySeed: effectiveIncludeWebSearch ? message : "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -166,7 +156,6 @@ final class ChatService: ObservableObject {
             && effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults
             && useDuckDuckGo == preAnalyzedUseDuckDuckGo
             && useWikipedia == preAnalyzedUseWikipedia
-            && useWebVision == preAnalyzedUseWebVision
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage cache=\(canUsePreAnalyzed ? "hit" : "miss") keyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) imageCount=\(imageURLs.count) preChunks=\(preAnalyzedChunks.count)")
         let chunks: [RAGChunk]
@@ -184,8 +173,7 @@ final class ChatService: ObservableObject {
                 maxWikipediaResults: effectiveMaxWikiResults,
                 maxContextTokens: effectiveMaxContextTokens,
                 useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: useWikipedia,
-                useWebVision: useWebVision
+                useWikipedia: useWikipedia
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
@@ -195,14 +183,19 @@ final class ChatService: ObservableObject {
             preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
             preAnalyzedUseDuckDuckGo = useDuckDuckGo
             preAnalyzedUseWikipedia = useWikipedia
-            preAnalyzedUseWebVision = useWebVision
         }
         debugContext("sendMessage chunkCount=\(chunks.count)")
+        let historyMessages = messages.dropLast()
+        let historyText = historyMessages.suffix(Self.historyMessageLimit).map { "\($0.role == .assistant ? "Assistant" : "User"): \($0.content)" }.joined(separator: "\n")
+        let historyTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: historyText.count)
+
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
+            historyTokens: historyTokens,
             maxOutputTokens: effectiveMaxOutputTokens,
-            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
+            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor,
+            language: language
         )
         // Cap the selected context with a single primary strategy:
         //   1. Word-aware truncation (semantic boundaries — preferred).
@@ -245,111 +238,75 @@ final class ChatService: ObservableObject {
                 for: language,
                 maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens),
                 hasContext: hasContext,
-                useToolCalling: useToolCalling,
-                webSearchAvailable: useToolCalling && webSearchAvailable,
-                hasCorpus: !chunks.isEmpty
+                webSearchAvailable: webSearchAvailable,
+                hasCorpus: !chunks.isEmpty,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia
             )
-            // Tool-calling branch: hand the model `searchContext` over the
-            // pre-chunked corpus + `calculate` for exact arithmetic. The
-            // prompt is intentionally minimal (just the user message + a
-            // nudge to call the tool first) — the model pulls context on
-            // demand instead of receiving a pre-baked top-K block. The
-            // calculator wipes out an entire class of small-model
-            // arithmetic mistakes.
-            let session: LanguageModelSession
-            var toolBudget = 0
-            if useToolCalling {
-                // Web-search tool joins the kit only when (a) at least one
-                // source is enabled AND (b) the user has the "Web" chip on
-                // in the composer. The chip is the per-conversation switch;
-                // the source flags are the global "what to query" config.
-                // Both must be true for the tool to be attached. PDFtalkme
-                // forces the chip off so the tool stays off in that host.
-                let webSearchAvailable = (useDuckDuckGo || useWikipedia) && includeWebSearch
-                let assembled = ToolKit.assemble(
-                    config: ToolKit.Configuration(
-                        language: language,
-                        corpusChunks: chunks,
-                        webSearchAvailable: webSearchAvailable,
-                        webSearchService: webSearchService,
-                        webScraper: webScraper,
-                        useWebVision: useWebVision,
-                        maxDuckDuckGoResults: effectiveMaxDDGResults,
-                        maxWikipediaResults: effectiveMaxWikiResults,
-                        useDuckDuckGo: useDuckDuckGo,
-                        useWikipedia: useWikipedia
-                        // Chat path doesn't subscribe to webSearch results
-                        // — there are no search cards in ChatView.
-                    ),
-                    responseTokens: effectiveMaxOutputTokens
-                )
-                let tools = assembled.tools
-                toolBudget = assembled.tokenBudget
-                toolTranscriptRecorder = assembled.transcriptRecorder
-                let toolNames = tools.map(\.name).joined(separator: ", ")
-                debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
-                session = LanguageModelSession(
-                    tools: tools,
-                    instructions: instructions
-                )
+            let assembled = ToolKit.assemble(
+                config: ToolKit.Configuration(
+                    language: language,
+                    corpusChunks: chunks,
+                    webSearchAvailable: webSearchAvailable,
+                    webSearchService: webSearchService,
+                    webScraper: webScraper,
+                    maxDuckDuckGoResults: effectiveMaxDDGResults,
+                    maxWikipediaResults: effectiveMaxWikiResults,
+                    useDuckDuckGo: useDuckDuckGo,
+                    useWikipedia: useWikipedia
+                ),
+                responseTokens: effectiveMaxOutputTokens
+            )
+            let tools = assembled.tools
+            let toolBudget = assembled.tokenBudget
+            toolTranscriptRecorder = assembled.transcriptRecorder
+            let toolNames = tools.map(\.name).joined(separator: ", ")
+            debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
+            let session = LanguageModelSession(
+                tools: tools,
+                instructions: instructions
+            )
+            let toolGroundingContext: String
+            if finalSelectedContext.isEmpty {
+                toolGroundingContext = ""
             } else {
-                debugContext("sendMessage path=prompt-stuffing (tool-calling disabled)")
-                session = LanguageModelSession(instructions: instructions)
-            }
-            let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
-            let prompt: String
-            if useToolCalling {
-                // Hybrid grounding: pre-bake the RAG-selected passages into
-                // the prompt (like the classical path) so broad questions on
-                // attached PDFs/images get reliable context up-front, while
-                // `searchContext` stays available for follow-up drill-downs.
-                // The grounding text is re-capped to a tool-aware budget that
-                // reserves room for the tool schemas + appendix the framework
-                // injects, so prompt + tools + response still fit the window.
-                let toolGroundingContext: String
-                if finalSelectedContext.isEmpty {
-                    toolGroundingContext = ""
-                } else {
-                    let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
-                        maxOutputTokens: effectiveMaxOutputTokens,
-                        reservedToolReplyTokens: toolBudget + 120
-                    )
-                    let toolGroundingTokenCap = min(
-                        effectiveMaxContextTokens,
-                        TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
-                    )
-                    let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
-                    var grounded = TokenBudgeting.truncateToApproxWordCount(
-                        finalSelectedContext,
-                        maxWords: toolGroundingWords
-                    )
-                    if grounded.count > toolGroundingCharCap {
-                        grounded = String(grounded.prefix(toolGroundingCharCap))
-                    }
-                    toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
+                let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
+                    maxOutputTokens: effectiveMaxOutputTokens,
+                    reservedToolReplyTokens: toolBudget + 120
+                )
+                let toolGroundingTokenCap = min(
+                    effectiveMaxContextTokens,
+                    TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
+                )
+                let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
+                var grounded = TokenBudgeting.truncateToApproxWordCount(
+                    finalSelectedContext,
+                    maxWords: toolGroundingWords
+                )
+                if grounded.count > toolGroundingCharCap {
+                    grounded = String(grounded.prefix(toolGroundingCharCap))
                 }
-                debugContext("sendMessage tool-calling groundingChars=\(toolGroundingContext.count)")
-                prompt = buildToolCallingPrompt(
-                    for: message,
-                    language: language,
-                    groundingContext: toolGroundingContext,
-                    webSearchAvailable: webSearchAvailable
-                )
-            } else {
-                prompt = buildPrompt(
-                    for: message,
-                    selectedContext: finalSelectedContext,
-                    language: language,
-                    maxOutputCharacters: maxOutputCharacters,
-                    maxOutputTokens: effectiveMaxOutputTokens
-                )
+                toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            debugContext("sendMessage tool-calling groundingChars=\(toolGroundingContext.count)")
+            let prompt = buildToolCallingPrompt(
+                for: message,
+                language: language,
+                groundingContext: toolGroundingContext,
+                webSearchAvailable: webSearchAvailable,
+                useDuckDuckGo: useDuckDuckGo,
+                useWikipedia: useWikipedia
+            )
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
 
             let assistantID = UUID()
             streamingAssistantID = assistantID
             messages.append(ChatMessage(id: assistantID, role: .assistant, content: "", citations: citations))
+
+            #if DEBUG
+            DebugRAGStorage.shared.logFinalPrompt(prompt, label: "Chat")
+            #endif
 
             var latestPartial = ""
             let responseStream = session.streamResponse(to: prompt, options: options)
@@ -394,9 +351,13 @@ final class ChatService: ObservableObject {
             // the tool transcript). Recover by retrying the SAME question
             // WITHOUT tools: the classical grounded path builds no tool
             // transcript, so it sidesteps the failure (mirrors AIService's
-            // search-path fallback). Only attempt when tools were in play and
-            // we have a streaming message to write into.
-            if useToolCalling, let assistantID = streamingAssistantID {
+            // A tool-calling turn can transiently fail — most notably the
+            // intermittent `GenerationError -1` (context-window overflow from
+            // the tool transcript). Recover by retrying the SAME question
+            // WITHOUT tools: the classical grounded path builds no tool
+            // transcript, so it sidesteps the failure (mirrors AIService's
+            // search-path fallback).
+            if let assistantID = streamingAssistantID {
                 let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
                 let isContextOverflow = Self.isContextWindowOverflow(error)
                 let isToolLoopAbort = Self.isToolLoopAbort(error)
@@ -489,16 +450,14 @@ final class ChatService: ObservableObject {
             for: language,
             maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
             hasContext: hasContext,
-            useToolCalling: false
+            appendToolsAppendix: false
         )
         let session = LanguageModelSession(instructions: instructions)
-        let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens)
-        let prompt = buildPrompt(
+        let prompt = buildToolCallingPrompt(
             for: message,
-            selectedContext: selectedContext,
             language: language,
-            maxOutputCharacters: maxOutputCharacters,
-            maxOutputTokens: maxOutputTokens
+            groundingContext: selectedContext,
+            webSearchAvailable: false
         )
         let options = GenerationOptions(temperature: temperature, maximumResponseTokens: maxOutputTokens)
 
@@ -539,7 +498,7 @@ final class ChatService: ObservableObject {
             for: language,
             maxOutputCharacters: TokenBudgeting.estimatedOutputCharacters(forTokens: maxOutputTokens),
             hasContext: true,
-            useToolCalling: false
+            appendToolsAppendix: false
         )
         let session = LanguageModelSession(instructions: instructions)
         let prompt = buildToolTranscriptRecoveryPrompt(
@@ -579,8 +538,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         maxResponseTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async {
         // Compute clamped/effective values ONCE; reused below for both the
         // cache key and the cache-hit comparison.
@@ -597,7 +555,6 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: includeWebSearch,
-            useWebVision: useWebVision,
             searchQuerySeed: "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
@@ -620,8 +577,7 @@ final class ChatService: ObservableObject {
            effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults,
            effectiveMaxWikiResults == preAnalyzedMaxWikipediaResults,
            useDuckDuckGo == preAnalyzedUseDuckDuckGo,
-           useWikipedia == preAnalyzedUseWikipedia,
-           useWebVision == preAnalyzedUseWebVision {
+           useWikipedia == preAnalyzedUseWikipedia {
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             pdfAnalysisProgress = [:]
@@ -642,8 +598,7 @@ final class ChatService: ObservableObject {
             maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia,
-            useWebVision: useWebVision
+            useWikipedia: useWikipedia
         )
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
@@ -653,7 +608,6 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = effectiveMaxWikiResults
         preAnalyzedUseDuckDuckGo = useDuckDuckGo
         preAnalyzedUseWikipedia = useWikipedia
-        preAnalyzedUseWebVision = useWebVision
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -677,8 +631,7 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async {
         guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
             return
@@ -712,8 +665,7 @@ final class ChatService: ObservableObject {
             maxResponseTokens: maxResponseTokens,
             maxContextTokens: maxContextTokens,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia,
-            useWebVision: useWebVision
+            useWikipedia: useWikipedia
         )
     }
 
@@ -752,7 +704,6 @@ final class ChatService: ObservableObject {
         preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
-        preAnalyzedUseWebVision = false
         currentConversation = nil
         currentConversationPDFFilename = nil
         currentConversationPDFBookmark = nil
@@ -775,8 +726,7 @@ final class ChatService: ObservableObject {
         maxContextTokens: Int,
         reportProgress: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true,
-        useWebVision: Bool = false
+        useWikipedia: Bool = true
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
         let uniquePDFs = Array(Set(pdfURLs))
@@ -842,11 +792,9 @@ final class ChatService: ObservableObject {
                   !retrievedContent.isEmpty else {
                 continue
             }
-            let chunked = await ragChunker.chunk(
+            let chunked = RAGChunker.chunkParagraphs(
                 text: retrievedContent,
                 source: result.title,
-                maxChunkTokens: Self.webChunkMaxTokens,
-                overlapTokens: Self.webChunkOverlapTokens,
                 url: result.url
             )
             chunks.append(contentsOf: chunked)
@@ -860,16 +808,13 @@ final class ChatService: ObservableObject {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, totalMaxWebResults),
-                maxCharacters: webScrapingCharacters,
-                useVision: useWebVision
+                maxCharacters: webScrapingCharacters
             )
             for url in urls {
                 guard let text = scraped[url] else { continue }
-                let chunked = await ragChunker.chunk(
+                let chunked = RAGChunker.chunkParagraphs(
                     text: text,
                     source: "Web: \(url)",
-                    maxChunkTokens: Self.webChunkMaxTokens,
-                    overlapTokens: Self.webChunkOverlapTokens,
                     url: url
                 )
                 chunks.append(contentsOf: chunked)
@@ -1076,7 +1021,6 @@ final class ChatService: ObservableObject {
         pdfURLs: [URL],
         imageURLs: [URL] = [],
         includeWebSearch: Bool,
-        useWebVision: Bool = false,
         searchQuerySeed: String,
         clampedDuckDuckGoResults: Int,
         clampedWikipediaResults: Int
@@ -1092,7 +1036,7 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedImagePaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||webVision:\(useWebVision)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||img:\(normalizedImagePaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||ddg:\(clampedDuckDuckGoResults)||wiki:\(clampedWikipediaResults)"
     }
 
     private func clampedMaxDuckDuckGoResults(_ value: Int) -> Int {
@@ -1146,19 +1090,8 @@ final class ChatService: ObservableObject {
     }
 
     /// Clamps requested output tokens to fit the shared 4096-token context window budget.
-    private func calculateEffectiveMaxOutputTokens(
-        _ requestedMaxTokens: Int,
-        useToolCalling: Bool = false
-    ) -> Int {
-        if useToolCalling {
-            return TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: requestedMaxTokens)
-        }
-        return TokenBudgeting.clampedOutputTokens(
-            requestedMaxTokens: requestedMaxTokens,
-            instructionTokens: TokenBudgeting.instructionTokens,
-            promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-            minContextTokens: TokenBudgeting.minContextTokens
-        )
+    private func calculateEffectiveMaxOutputTokens(_ requestedMaxTokens: Int) -> Int {
+        TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: requestedMaxTokens)
     }
 
     private func calculateEffectiveContextTokens(
@@ -1186,65 +1119,6 @@ final class ChatService: ObservableObject {
         return min(max(scrapeBudget, Self.minWebScrapingCharacters), Self.maxWebScrapingCharacters)
     }
 
-    /// Builds the model prompt from recent history and retrieved context.
-    private func buildPrompt(
-        for userMessage: String,
-        selectedContext: String,
-        language: ModelLanguage,
-        maxOutputCharacters: Int,
-        maxOutputTokens: Int
-    ) -> String {
-        let historyMessages: [ChatMessage]
-        if let last = messages.last, last.role == .user, last.content == userMessage {
-            historyMessages = Array(messages.dropLast())
-        } else {
-            historyMessages = messages
-        }
-
-        let history = historyMessages
-            .suffix(Self.historyMessageLimit)
-            .map { item in
-                if item.role == .assistant {
-                    return "Assistant: \(item.content)"
-                }
-                return "User: \(item.content)"
-            }
-            .joined(separator: "\n")
-
-        // Communicate a CONSERVATIVE character target — well under what the
-        // hard token cap actually fits for math-dense output (LaTeX commands
-        // tokenise densely, so the naive chars≈tokens×3 estimate overshoots).
-        // This leaves headroom for the model to wrap up and, crucially, to
-        // close any equation it opened instead of being cut mid-formula.
-        let conservativeOutputCharacters = max(150, Int(Double(maxOutputCharacters) * 0.65))
-        let contextBlock = localizedChatContextBlock(
-            from: selectedContext,
-            language: language
-        )
-
-        return PromptLoader.loadPrompt(
-            mode: "normal",
-            feature: "chat",
-            language: language,
-            replacements: [
-                "history": history,
-                "context": selectedContext,
-                "contextBlock": contextBlock,
-                "question": userMessage,
-                "maxOutputCharacters": "\(conservativeOutputCharacters)",
-                "maxOutputTokens": "\(maxOutputTokens)"
-            ]
-        ) ?? fallbackChatPrompt(
-            history: history,
-            selectedContext: selectedContext,
-            userMessage: userMessage,
-            language: language,
-            maxOutputCharacters: maxOutputCharacters,
-            maxOutputTokens: maxOutputTokens
-        )
-    }
-
-
     private func updateAssistantMessage(id: UUID, content: String, citations: String?) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
         messages[index].content = content
@@ -1254,15 +1128,17 @@ final class ChatService: ObservableObject {
     /// Builds dynamic chat instructions matching the user's query language.
     /// When `hasContext` is false, loads context-free instructions that omit
     /// any mention of documents or context to prevent false refusals.
-    /// When `useToolCalling` is true, appends an extra paragraph describing
+    /// When `appendToolsAppendix` is true, appends an extra paragraph describing
     /// available tools and when to use them.
     private func buildInstructions(
         for language: ModelLanguage,
         maxOutputCharacters: Int,
         hasContext: Bool = true,
-        useToolCalling: Bool = false,
+        appendToolsAppendix: Bool = true,
         webSearchAvailable: Bool = false,
-        hasCorpus: Bool = true
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         let variant = hasContext ? "instructions" : "instructions.no_context"
         let base = PromptLoader.loadPrompt(
@@ -1275,11 +1151,13 @@ final class ChatService: ObservableObject {
             ]
         )
             ?? fallbackChatInstructions(for: language, hasContext: hasContext)
-        guard useToolCalling else { return base }
+        guard appendToolsAppendix else { return base }
         return base + "\n\n" + toolCallingInstructionsAppendix(
             for: language,
             webSearchAvailable: webSearchAvailable,
-            hasCorpus: hasCorpus
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -1289,13 +1167,17 @@ final class ChatService: ObservableObject {
     private func toolCallingInstructionsAppendix(
         for language: ModelLanguage,
         webSearchAvailable: Bool,
-        hasCorpus: Bool = true
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         ToolKit.instructionsAppendix(
             for: language,
             tone: .chat,
             webSearchAvailable: webSearchAvailable,
-            hasCorpus: hasCorpus
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -1335,7 +1217,9 @@ final class ChatService: ObservableObject {
         for userMessage: String,
         language: ModelLanguage,
         groundingContext: String = "",
-        webSearchAvailable: Bool = false
+        webSearchAvailable: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         // Prior user turns only (exclude the just-appended current message
         // and every assistant answer).
@@ -1348,7 +1232,9 @@ final class ChatService: ObservableObject {
             priorUserQuestions: Array(priorQuestions),
             language: language,
             groundingContext: groundingContext,
-            webSearchAvailable: webSearchAvailable
+            webSearchAvailable: webSearchAvailable,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
         )
     }
 
@@ -1397,7 +1283,9 @@ final class ChatService: ObservableObject {
         priorUserQuestions: [String],
         language: ModelLanguage,
         groundingContext: String = "",
-        webSearchAvailable: Bool = false
+        webSearchAvailable: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
     ) -> String {
         let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasGrounding = !trimmedGrounding.isEmpty
@@ -1407,31 +1295,51 @@ final class ChatService: ObservableObject {
         let groundingHeader: String
         switch language {
         case .french:
-            // Grounding-aware imperative steers the model to answer from the
-            // provided passages first and only reach for the tool to fill
-            // gaps — cutting redundant tool round-trips when the context
-            // already covers the question.
-            answerImperative = hasGrounding
-                ? "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
-                : (webSearchAvailable
-                    ? "Réponds clairement à la question suivante. Si des détails techniques, de la documentation ou des faits récents sont nécessaires, utilise d'abord webSearch. Sinon, réponds directement à partir de tes connaissances (ou utilise calculate/currentDateTime si besoin) :"
-                    : "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :")
+            if hasGrounding {
+                answerImperative = "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "Pour des définitions, concepts, faits vérifiés, chiffres ou actualités, effectue une recherche avec les outils disponibles (utilise wikipediaSearch pour un concept ou une définition, webSearch pour des faits ou l'actualité) avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                } else if useWikipedia {
+                    answerImperative = "Pour des définitions, concepts, faits encyclopédiques ou entités, utilise wikipediaSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                } else {
+                    answerImperative = "Pour des faits précis, chiffres, documentation ou informations récentes, utilise webSearch avant de répondre. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
+                }
+            } else {
+                answerImperative = "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
+            }
             earlierLabel = "Questions précédentes de l'utilisateur :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
-            answerImperative = hasGrounding
-                ? "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
-                : (webSearchAvailable
-                    ? "Responde claramente a la siguiente pregunta. Si se requieren detalles técnicos, documentación o datos actualizados, utiliza primero webSearch. De lo contrario, responde directamente a partir de tus conocimientos (o utiliza calculate/currentDateTime si es necesario):"
-                    : "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:")
+            if hasGrounding {
+                answerImperative = "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "Para definiciones, conceptos, hechos verificados, cifras o noticias recientes, realiza una búsqueda con las herramientas disponibles (utiliza wikipediaSearch para un concepto o definición, webSearch para hechos o actualidad) antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                } else if useWikipedia {
+                    answerImperative = "Para definiciones, conceptos, hechos enciclopédicos o entidades, utiliza wikipediaSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                } else {
+                    answerImperative = "Para hechos específicos, cifras, documentación o información reciente, utiliza webSearch antes de responder. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
+                }
+            } else {
+                answerImperative = "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
+            }
             earlierLabel = "Preguntas anteriores del usuario:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
-            answerImperative = hasGrounding
-                ? "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
-                : (webSearchAvailable
-                    ? "Answer the following question clearly. If technical details, documentation, or up-to-date facts are needed, use webSearch first. Otherwise, answer directly from your knowledge (or use calculate/currentDateTime if needed):"
-                    : "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:")
+            if hasGrounding {
+                answerImperative = "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
+            } else if webSearchAvailable {
+                if useDuckDuckGo && useWikipedia {
+                    answerImperative = "For definitions, concepts, verified facts, figures, or recent news, search with available tools (use wikipediaSearch for a concept or definition, webSearch for facts or current events) before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                } else if useWikipedia {
+                    answerImperative = "For definitions, concepts, encyclopedic facts, or entities, use wikipediaSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                } else {
+                    answerImperative = "For specific facts, figures, documentation, or recent information, use webSearch before answering. Only call calculate for math and currentDateTime if real-time date/time is required:"
+                }
+            } else {
+                answerImperative = "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
+            }
             earlierLabel = "Earlier user questions:"
             groundingHeader = "Context from the attached documents:"
         }
@@ -1525,20 +1433,23 @@ final class ChatService: ObservableObject {
             switch language {
             case .french:
                 return """
-                Vous êtes un assistant de chat utile. Répondez clairement, précisément et directement à partir de vos connaissances générales.
-                Vous avez toute autorité pour définir et expliquer les concepts généraux, mathématiques, scientifiques et techniques. Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
+                Vous êtes un assistant de chat utile. Répondez aux questions de l'utilisateur avec clarté et précision.
+                Lorsque des outils de recherche sont disponibles, utilisez-les pour vérifier les faits, définitions, statistiques et chiffres avant de répondre.
+                Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
                 Répondez dans la même langue que la question de l'utilisateur.
                 """
             case .spanish:
                 return """
-                Usted es un asistente de chat útil. Responda con claridad, precisión y directamente a partir de sus conocimientos generales.
-                Tiene plena autoridad para definir y explicar conceptos generales, matemáticos, científicos y técnicos. Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
+                Usted es un asistente de chat útil. Responda a las preguntas del usuario con claridad y precisión.
+                Cuando haya herramientas de búsqueda disponibles, utilícelas para verificar hechos, definiciones, estadísticas y cifras antes de responder.
+                Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
                 Responda en el mismo idioma que la pregunta del usuario.
                 """
             case .english:
                 return """
-                You are a helpful chat assistant. Answer clearly, accurately, and directly from your general knowledge.
-                You have full authority to define and explain general knowledge, mathematical, scientific, and technical concepts. Never state "based on the provided context" and never apologize for lacking context or documents.
+                You are a helpful chat assistant. Answer the user's questions clearly and accurately.
+                When search tools are available, use them to verify facts, definitions, statistics, and figures before answering.
+                Never state "based on the provided context" and never apologize for lacking context or documents.
                 Respond in the same language as the user's latest question.
                 """
             }
@@ -1565,85 +1476,6 @@ final class ChatService: ObservableObject {
         }
     }
 
-    private func fallbackChatPrompt(
-        history: String,
-        selectedContext: String,
-        userMessage: String,
-        language: ModelLanguage,
-        maxOutputCharacters: Int,
-        maxOutputTokens: Int
-    ) -> String {
-        let contextBlock = localizedChatContextBlock(from: selectedContext, language: language)
-        switch language {
-        case .french:
-            return """
-            Conversation :
-            \(history)
-
-            \(contextBlock)Question de l'utilisateur :
-            \(userMessage)
-
-            Réponds de façon concise et pratique.
-            Limite de sortie : \(maxOutputTokens) tokens maximum (environ \(maxOutputCharacters) caractères).
-            Quand c'est pertinent, inclus des expressions ou formules mathématiques.
-            Format de sortie attendu : LaTeX pour les expressions mathématiques.
-            Règles de format math :
-            - Utilise $...$ pour l'inline.
-            - Utilise \\[...\\] pour les blocs.
-            - Utilise un LaTeX simple compatible avec le rendu de l'application.
-            - N'utilise jamais d'environnements \\begin{.
-            """
-        case .spanish:
-            return """
-            Conversación:
-            \(history)
-
-            \(contextBlock)Pregunta del usuario:
-            \(userMessage)
-
-            Responde de forma concisa y práctica.
-            Límite de salida: \(maxOutputTokens) tokens como máximo (aproximadamente \(maxOutputCharacters) caracteres).
-            Cuando sea pertinente, incluye expresiones o fórmulas matemáticas.
-            Formato de salida requerido: LaTeX para expresiones matemáticas.
-            Reglas de formato matemático:
-            - Usa $...$ para matemáticas inline.
-            - Usa \\[...\\] para bloques matemáticos.
-            - Usa LaTeX simple compatible con el renderizador de la aplicación.
-            - Nunca uses entornos con \\begin{.
-            """
-        case .english:
-            return """
-            Conversation:
-            \(history)
-
-            \(contextBlock)User question:
-            \(userMessage)
-
-            Answer in a concise and practical way.
-            Output limit: \(maxOutputTokens) tokens maximum (about \(maxOutputCharacters) characters).
-            When relevant, include mathematical expressions or formulas.
-            Required output format: LaTeX for mathematical expressions.
-            Math format requirements:
-            - Use $...$ for inline math.
-            - Use \\[...\\] for block math.
-            - Use simple LaTeX compatible with the app renderer.
-            - Never use environments with \\begin{.
-            """
-        }
-    }
-
-    private func localizedChatContextBlock(from selectedContext: String, language: ModelLanguage) -> String {
-        let trimmedContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedContext.isEmpty else { return "" }
-        switch language {
-        case .french:
-            return "Contexte récupéré :\n\(trimmedContext)\n\n"
-        case .spanish:
-            return "Contexto recuperado:\n\(trimmedContext)\n\n"
-        case .english:
-            return "Retrieved Context:\n\(trimmedContext)\n\n"
-        }
-    }
     private func debugLog(_ message: String) {
         #if DEBUG
         print("[ChatView] \(message)")

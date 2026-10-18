@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import NaturalLanguage
 
 /// Supported output languages for generated model responses.
 nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
@@ -18,6 +19,14 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
         case .english: return "en"
         case .french: return "fr"
         case .spanish: return "es"
+        }
+    }
+
+    var nlLanguage: NLLanguage {
+        switch self {
+        case .english: return .english
+        case .french: return .french
+        case .spanish: return .spanish
         }
     }
 
@@ -36,47 +45,27 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 6
     var maxWikipediaResults: Int = 2
-    var maxResponseTokens: Int = 500
-    var temperature: Double = 0.4
-    var maxContextTokens: Int = 3400
-    private var _isFirstGuessEnabled: Bool = true
-    var isFirstGuessEnabled: Bool {
+    var maxResponseTokens: Int = 1000
+    var temperature: Double = 0.7
+    var maxContextTokens: Int = 2916
+    private var _isReaderViewAndSummaryEnabled: Bool = false
+    var isReaderViewAndSummaryEnabled: Bool {
         get {
             guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _isFirstGuessEnabled
+            return _isReaderViewAndSummaryEnabled
         }
         set {
-            _isFirstGuessEnabled = newValue
+            _isReaderViewAndSummaryEnabled = newValue
         }
     }
-    private var _isWebSummariesEnabled: Bool = false
+    /// Compatibility alias for isReaderViewAndSummaryEnabled
     var isWebSummariesEnabled: Bool {
-        get {
-            guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _isWebSummariesEnabled
-        }
-        set {
-            _isWebSummariesEnabled = newValue
-        }
+        get { isReaderViewAndSummaryEnabled }
+        set { isReaderViewAndSummaryEnabled = newValue }
     }
-    var useWebVision: Bool = false
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
     var language: ModelLanguage = .systemPreferred()
-    private var _useToolCalling: Bool = false
-    /// Experimental: when true, ChatService runs the model with on-demand
-    /// `searchContext` + `calculate` tools instead of stuffing pre-selected
-    /// RAG chunks into the prompt. Off by default — gives the user a
-    /// reversible escape hatch while the tool path matures.
-    var useToolCalling: Bool {
-        get {
-            guard FoundationModelAvailability.check().isAvailable else { return false }
-            return _useToolCalling
-        }
-        set {
-            _useToolCalling = newValue
-        }
-    }
 
     /// Combined per-search result cap exposed for callers that still need a single number
     /// (e.g. results display limit, scraping cap).
@@ -91,13 +80,11 @@ struct AppSettings: Codable, Equatable {
         case maxResponseTokens
         case temperature
         case maxContextTokens
-        case isFirstGuessEnabled
+        case isReaderViewAndSummaryEnabled
         case isWebSummariesEnabled
-        case useWebVision
         case useDuckDuckGo
         case useWikipedia
         case language
-        case useToolCalling
     }
 
     private enum LegacyCodingKeys: String, CodingKey {
@@ -140,20 +127,19 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.maxResponseTokens
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
             ?? Self.defaultSettings.temperature
-        isFirstGuessEnabled = try container.decodeIfPresent(Bool.self, forKey: .isFirstGuessEnabled)
-            ?? Self.defaultSettings.isFirstGuessEnabled
-        isWebSummariesEnabled = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled)
-            ?? Self.defaultSettings.isWebSummariesEnabled
-        useWebVision = try container.decodeIfPresent(Bool.self, forKey: .useWebVision)
-            ?? Self.defaultSettings.useWebVision
+        if let readerAndSummary = try container.decodeIfPresent(Bool.self, forKey: .isReaderViewAndSummaryEnabled) {
+            isReaderViewAndSummaryEnabled = readerAndSummary
+        } else if let legacyWebSummaries = try container.decodeIfPresent(Bool.self, forKey: .isWebSummariesEnabled) {
+            isReaderViewAndSummaryEnabled = legacyWebSummaries
+        } else {
+            isReaderViewAndSummaryEnabled = Self.defaultSettings.isReaderViewAndSummaryEnabled
+        }
         useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
             ?? Self.defaultSettings.useDuckDuckGo
         useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
             ?? Self.defaultSettings.useWikipedia
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
-        useToolCalling = try container.decodeIfPresent(Bool.self, forKey: .useToolCalling)
-            ?? Self.defaultSettings.useToolCalling
 
         if let storedContextTokens = try container.decodeIfPresent(Int.self, forKey: .maxContextTokens) {
             maxContextTokens = storedContextTokens
@@ -174,13 +160,11 @@ struct AppSettings: Codable, Equatable {
         try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
-        try container.encode(isFirstGuessEnabled, forKey: .isFirstGuessEnabled)
-        try container.encode(isWebSummariesEnabled, forKey: .isWebSummariesEnabled)
-        try container.encode(useWebVision, forKey: .useWebVision)
+        try container.encode(isReaderViewAndSummaryEnabled, forKey: .isReaderViewAndSummaryEnabled)
+        try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
         try container.encode(language, forKey: .language)
-        try container.encode(useToolCalling, forKey: .useToolCalling)
     }
 
     /// Persists settings in UserDefaults for future launches.
@@ -231,9 +215,7 @@ struct AppSettings: Codable, Equatable {
         )
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         if !FoundationModelAvailability.check().isAvailable {
-            copy.useToolCalling = false
-            copy.isFirstGuessEnabled = false
-            copy.isWebSummariesEnabled = false
+            copy.isReaderViewAndSummaryEnabled = false
         }
         return copy
     }

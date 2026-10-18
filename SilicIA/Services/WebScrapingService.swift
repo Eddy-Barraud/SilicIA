@@ -11,9 +11,23 @@ import CoreGraphics
 #if os(iOS)
 import UIKit
 #endif
-#if canImport(WebKit)
-import WebKit
-#endif
+import Reeeed
+import HTMLToMarkdown
+
+private struct SilicIAReeeedLogger: Logger {
+    func info(_ string: String) {
+        #if DEBUG
+        if !string.hasPrefix("Successfully extracted:") {
+            print("[Reeeed] \(string)")
+        }
+        #endif
+    }
+    func error(_ string: String) {
+        #if DEBUG
+        print("[Reeeed] 🚨 \(string)")
+        #endif
+    }
+}
 
 @MainActor
 /// Fetches and extracts readable text content from web pages.
@@ -22,7 +36,37 @@ class WebScrapingService: ObservableObject {
         NetworkConstants.defaultUserAgent
     }
 
+    enum HTMLConversionError: Error, LocalizedError {
+        case inputTooLarge(Int)
+        case excessiveDOMDepth(Int)
+        case excessiveElementCount(Int)
+        case emptyContent
+        case conversionFailed
+
+        var errorDescription: String? {
+            switch self {
+            case .inputTooLarge(let bytes):
+                return "HTML input exceeds memory limit (\(bytes) bytes)"
+            case .excessiveDOMDepth(let depth):
+                return "HTML DOM nesting depth exceeds safe recursion limit (\(depth))"
+            case .excessiveElementCount(let count):
+                return "HTML element count exceeds memory budget (\(count))"
+            case .emptyContent:
+                return "Converted Markdown content is empty"
+            case .conversionFailed:
+                return "Failed to reduce HTML content to Markdown"
+            }
+        }
+    }
+
+    nonisolated static let maxRawHTMLBytes = 4 * 1024 * 1024
+    nonisolated static let maxMarkdownInputBytes = 2 * 1024 * 1024
+    nonisolated static let maxDOMNestingDepth = 64
+    nonisolated static let maxDOMElementCount = 10_000
+    nonisolated static let markdownThreadStackSize = 4 * 1024 * 1024
+
     @Published var isScrapingContent = false
+    @Published private(set) var lastFailedURLs: Set<String> = []
 
     #if DEBUG
     struct ScrapeDebugStats {
@@ -43,20 +87,25 @@ class WebScrapingService: ObservableObject {
 
     private let session: URLSession
     private static let scrapeConcurrency = 8
-    private static let renderedScrapeConcurrency = 2
     private static let overfetchCount = 3
-    private static let webVisionViewport = CGSize(width: 1280, height: 1600)
-    private static let webVisionMaxRenderedPages: CGFloat = 3
-    private static let webVisionLoadTimeoutNanoseconds: UInt64 = 15_000_000_000
-    private static let webVisionSettleNanoseconds: UInt64 = 800_000_000
 
     // MARK: - Cached HTML regexes (compiled once, reused per scrape)
 
     /// Strips `<script>`, `<style>`, `<nav>`, `<header>`, and `<footer>` blocks (and content) in one pass.
     nonisolated private static let nonContentBlockRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: "<(script|style|nav|header|footer)[^>]*>[\\s\\S]*?</\\1>",
+        pattern: "<(script|style|nav|header|footer|svg|noscript|template|iframe)[^>]*>[\\s\\S]*?</\\1>",
         options: [.caseInsensitive]
     )
+    /// Strips semantic-free inline wrapper tags (`<span>`, `<font>`) to flatten DOM depth before Markdown conversion.
+    nonisolated private static let inlineWrapperTagRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: "</?(span|font)(\\s[^>]*)?>",
+        options: [.caseInsensitive]
+    )
+    /// Void HTML tags that do not push onto the DOM nesting stack.
+    nonisolated private static let voidHTMLTags: Set<String> = [
+        "area", "base", "br", "col", "embed", "hr", "img", "input",
+        "link", "meta", "param", "source", "track", "wbr"
+    ]
     /// Matches a whole `<table>...</table>` block. Used to extract tables
     /// *before* the generic tag stripper destroys their structure, so we can
     /// emit a Markdown pipe table the model can actually read.
@@ -116,62 +165,503 @@ class WebScrapingService: ObservableObject {
         config.waitsForConnectivity = false
         config.requestCachePolicy = .returnCacheDataElseLoad
         self.session = URLSession(configuration: config)
+
+        Reeeed.logger = SilicIAReeeedLogger()
+        Reeeed.warmup(extractor: .readability)
+        Reeeed.warmup(extractor: .mercury)
     }
 
-    /// Scrape content from a single URL
-    func scrapeContent(from urlString: String, maxCharacters: Int = 5000, useVision: Bool = false) async -> String? {
-        guard let url = URL(string: urlString) else { return nil }
-
-        if useVision, let rendered = await scrapeRenderedContent(from: url, maxCharacters: maxCharacters) {
-            return rendered
+    /// Validates HTML byte size, strips non-content blocks and inline wrapper tags,
+    /// and verifies in a single non-recursive O(N) pass that DOM nesting depth and element count
+    /// stay within safe bounds before SwiftSoup / HTMLToMarkdown recursive traversal.
+    nonisolated static func validateAndPrepareHTMLForMarkdown(
+        _ html: String,
+        maxInputBytes: Int = maxMarkdownInputBytes,
+        maxElements: Int = maxDOMElementCount
+    ) throws -> String {
+        let rawBytes = html.utf8.count
+        guard rawBytes <= maxRawHTMLBytes else {
+            throw HTMLConversionError.inputTooLarge(rawBytes)
         }
 
-        do {
-            var request = URLRequest(url: url)
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        var cleaned = html
+        if let commentRegex = htmlCommentRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = commentRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
+        if let blockRegex = nonContentBlockRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = blockRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
+        if let wrapperRegex = inlineWrapperTagRegex {
+            let range = NSRange(cleaned.startIndex..., in: cleaned)
+            cleaned = wrapperRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
+        }
 
-            let (data, response) = try await session.data(for: request)
+        let cleanedBytes = cleaned.utf8.count
+        guard cleanedBytes <= maxInputBytes else {
+            throw HTMLConversionError.inputTooLarge(cleanedBytes)
+        }
 
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else {
-                return nil
+        let bytes = Array(cleaned.utf8)
+        let count = bytes.count
+        var i = 0
+        var openStack: [String] = []
+        openStack.reserveCapacity(maxDOMNestingDepth + 1)
+        var elementCount = 0
+
+        while i < count {
+            if bytes[i] == 0x3C { // '<'
+                let nextIdx = i + 1
+                guard nextIdx < count else { break }
+                let firstChar = bytes[nextIdx]
+
+                // Skip '<!' or '<?' declarations
+                if firstChar == 0x21 || firstChar == 0x3F {
+                    i = nextIdx + 1
+                    while i < count && bytes[i] != 0x3E { i += 1 }
+                    i += 1
+                    continue
+                }
+
+                let isClosing = (firstChar == 0x2F) // '/'
+                var nameStart = isClosing ? nextIdx + 1 : nextIdx
+                while nameStart < count && (bytes[nameStart] == 0x20 || bytes[nameStart] == 0x09 || bytes[nameStart] == 0x0A || bytes[nameStart] == 0x0D) {
+                    nameStart += 1
+                }
+
+                var nameEnd = nameStart
+                while nameEnd < count {
+                    let b = bytes[nameEnd]
+                    let isAlphaNum = (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A) || (b >= 0x30 && b <= 0x39)
+                    if !isAlphaNum { break }
+                    nameEnd += 1
+                }
+
+                guard nameEnd > nameStart else {
+                    i += 1
+                    continue
+                }
+
+                var tagChars = [UInt8]()
+                tagChars.reserveCapacity(nameEnd - nameStart)
+                for idx in nameStart..<nameEnd {
+                    let b = bytes[idx]
+                    tagChars.append((b >= 0x41 && b <= 0x5A) ? (b + 32) : b)
+                }
+                let tagName = String(decoding: tagChars, as: UTF8.self)
+
+                // Advance to '>'
+                var tagClose = nameEnd
+                var isSelfClosing = false
+                while tagClose < count && bytes[tagClose] != 0x3E {
+                    if bytes[tagClose] == 0x2F {
+                        isSelfClosing = true
+                    } else if bytes[tagClose] != 0x20 && bytes[tagClose] != 0x09 && bytes[tagClose] != 0x0A && bytes[tagClose] != 0x0D {
+                        isSelfClosing = false
+                    }
+                    tagClose += 1
+                }
+                i = min(count, tagClose + 1)
+
+                if isClosing {
+                    if let matchIdx = openStack.lastIndex(of: tagName) {
+                        openStack.removeSubrange(matchIdx..<openStack.count)
+                    }
+                } else {
+                    elementCount += 1
+                    if elementCount > maxElements {
+                        throw HTMLConversionError.excessiveElementCount(elementCount)
+                    }
+                    if !isSelfClosing && !voidHTMLTags.contains(tagName) {
+                        // Apply HTML5 implicit sibling close rules so valid unclosed <p>/<li>/<td>/<tr> don't inflate depth
+                        if (tagName == "p" && openStack.last == "p")
+                            || (tagName == "li" && openStack.last == "li")
+                            || ((tagName == "td" || tagName == "th") && (openStack.last == "td" || openStack.last == "th"))
+                            || (tagName == "tr" && openStack.last == "tr")
+                            || ((tagName == "dd" || tagName == "dt") && (openStack.last == "dd" || openStack.last == "dt")) {
+                            openStack.removeLast()
+                        }
+                        openStack.append(tagName)
+                        if openStack.count > maxDOMNestingDepth {
+                            throw HTMLConversionError.excessiveDOMDepth(openStack.count)
+                        }
+                    }
+                }
+            } else {
+                i += 1
+            }
+        }
+
+        return cleaned
+    }
+
+    /// Executes HTML-to-Markdown conversion on a dedicated Thread with an explicit 4 MB stack
+    /// after validating memory and DOM nesting limits.
+    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String) async throws -> String {
+        let prepared = try validateAndPrepareHTMLForMarkdown(html)
+        return try await withCheckedThrowingContinuation { continuation in
+            let thread = Thread {
+                autoreleasepool {
+                    do {
+                        let markdown = try HTMLToMarkdown.convert(prepared, plugins: [
+                            BasePlugin(),
+                            CommonmarkPlugin(),
+                            GFMPlugin()
+                        ]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        if markdown.isEmpty {
+                            continuation.resume(throwing: HTMLConversionError.emptyContent)
+                        } else {
+                            continuation.resume(returning: markdown)
+                        }
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+            thread.stackSize = Self.markdownThreadStackSize
+            thread.qualityOfService = .userInitiated
+            thread.name = "fr.trevalim.silicia.html2md"
+            thread.start()
+        }
+    }
+
+    /// Synchronous helper with memory/depth validation (returns empty string if HTML cannot be safely reduced to Markdown).
+    nonisolated static func convertHTMLToMarkdown(_ html: String) -> String {
+        guard let prepared = try? validateAndPrepareHTMLForMarkdown(html),
+              let markdown = try? HTMLToMarkdown.convert(prepared, plugins: [
+                  BasePlugin(),
+                  CommonmarkPlugin(),
+                  GFMPlugin()
+              ]) else {
+            return ""
+        }
+        return markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
+    private func parseWikipediaURL(_ url: URL) -> (host: String, title: String)? {
+        guard let host = url.host?.lowercased(),
+              host.contains("wikipedia.org"),
+              url.path.hasPrefix("/wiki/") else {
+            return nil
+        }
+        let rawSlug = String(url.path.dropFirst("/wiki/".count))
+        guard !rawSlug.isEmpty, !rawSlug.contains(":") else {
+            // Skip special Wikipedia pages (Special:, File:, Talk:, etc.)
+            return nil
+        }
+        let decodedTitle = rawSlug.removingPercentEncoding ?? rawSlug
+        return (host, decodedTitle)
+    }
+
+    /// Fetches Wikipedia article HTML directly via MediaWiki action=parse API and converts it to Markdown.
+    private func fetchWikipediaMarkdownViaAPI(host: String, title: String, originalURL: URL) async throws -> (title: String, markdown: String) {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.path = "/w/api.php"
+        components.queryItems = [
+            URLQueryItem(name: "action", value: "parse"),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "page", value: title),
+            URLQueryItem(name: "prop", value: "text"),
+            URLQueryItem(name: "redirects", value: "1")
+        ]
+
+        guard let apiURL = components.url else {
+            throw URLError(.badURL)
+        }
+
+        var request = URLRequest(url: apiURL)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await self.session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+
+        struct MediaWikiParseResponse: Decodable {
+            struct ParseContent: Decodable {
+                let title: String?
+                let text: [String: String]?
+            }
+            let parse: ParseContent?
+        }
+
+        let decoded = try JSONDecoder().decode(MediaWikiParseResponse.self, from: data)
+        guard let parse = decoded.parse,
+              let htmlText = parse.text?["*"],
+              !htmlText.isEmpty else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        let parsedTitle = parse.title ?? title.replacingOccurrences(of: "_", with: " ")
+        let (_, markdown) = try await self.extractMarkdown(from: htmlText, baseURL: originalURL)
+        return (parsedTitle, markdown)
+    }
+
+    /// Extracts clean article Markdown from a URL using Reeeed and html-to-markdown-swift,
+    /// with resilient URLSession fetching, Wikipedia API acceleration, and a strict timeout.
+    func extractMarkdown(from url: URL, timeoutSeconds: Double = 4.0) async throws -> (title: String, markdown: String) {
+        // Fast path: if the URL is a Wikipedia article, use MediaWiki's action=parse API
+        if let wiki = parseWikipediaURL(url) {
+            do {
+                let result = try await fetchWikipediaMarkdownViaAPI(host: wiki.host, title: wiki.title, originalURL: url)
+                if !result.markdown.isEmpty {
+                    return result
+                }
+            } catch {
+                // If the Wikipedia API request fails, fall through to regular webpage scraping
+            }
+        }
+
+        return try await withThrowingTaskGroup(of: (title: String, markdown: String).self) { group in
+            group.addTask {
+                var request = URLRequest(url: url)
+                request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await self.session.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode) else {
+                    throw URLError(.badServerResponse)
+                }
+                guard data.count <= Self.maxRawHTMLBytes else {
+                    throw HTMLConversionError.inputTooLarge(data.count)
+                }
+                guard let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw URLError(.cannotDecodeContentData)
+                }
+                return try await self.extractMarkdown(from: html, baseURL: url)
             }
 
-            // Extract text content from HTML
-            return Self.extractTextFromHTML(html, maxCharacters: maxCharacters)
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+
+            guard let firstResult = try await group.next() else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            group.cancelAll()
+            return firstResult
+        }
+    }
+
+    /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback)
+    /// and bounded-stack html-to-markdown-swift conversion with DOM depth/memory limits.
+    func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
+        // Pre-validate raw HTML size and DOM nesting depth before running Readability/Mercury or SwiftSoup.
+        _ = try Self.validateAndPrepareHTMLForMarkdown(
+            html,
+            maxInputBytes: Self.maxRawHTMLBytes,
+            maxElements: Self.maxDOMElementCount * 3
+        )
+
+        let dummyURL = baseURL ?? URL(string: "https://localhost")!
+
+        var extracted: ExtractedContent?
+        do {
+            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .readability)
         } catch {
+            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .mercury)
+        }
+
+        if let extracted = extracted {
+            let title = extracted.title ?? ""
+            let rawContent = extracted.content ?? ""
+
+            if !rawContent.isEmpty {
+                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent)
+                return (title, markdown)
+            }
+        }
+
+        // Only attempt direct conversion if the HTML itself passes strict size, element count, and DOM depth checks.
+        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(html)
+        return ("", directMarkdown)
+    }
+
+    struct ReaderWebPageContent: Sendable {
+        let title: String
+        let styledHTML: String
+        let plainText: String
+        let baseURL: URL
+    }
+
+    private static let readerAdditionalCSS = """
+    body {
+        background-color: transparent !important;
+    }
+    #__content {
+        padding: 0.25em 0.1em !important;
+        max-width: 100% !important;
+        opacity: 1 !important;
+    }
+    #__footer {
+        display: none !important;
+    }
+    mjx-container[jax="CHTML"][display="true"] {
+        overflow-x: auto;
+        overflow-y: hidden;
+        max-width: 100%;
+    }
+    """
+
+    private static let readerMathJaxSnippet = """
+    <script>
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$', '$'], ['\\\\(', '\\\\)']],
+        displayMath: [['$$', '$$'], ['\\\\[', '\\\\]']],
+        processEscapes: true,
+        processEnvironments: true
+      },
+      options: {
+        skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+        ignoreHtmlClass: 'tex2jax_ignore'
+      },
+      startup: {
+        pageReady: function() {
+          return MathJax.startup.defaultPageReady().then(function() {
+            if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+              var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+              window.webkit.messageHandlers.heightChange.postMessage(h);
+            }
+          });
+        }
+      }
+    };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    """
+
+    /// Injects the MathJax configuration and script into a Reader HTML document so inline and display LaTeX formulas render properly.
+    nonisolated static func injectMathJax(into html: String) -> String {
+        guard !html.contains("MathJax-script") else { return html }
+        if let headCloseRange = html.range(of: "</head>", options: .caseInsensitive) {
+            var modified = html
+            modified.insert(contentsOf: "\n" + readerMathJaxSnippet + "\n", at: headCloseRange.lowerBound)
+            return modified
+        } else if let bodyCloseRange = html.range(of: "</body>", options: .caseInsensitive) {
+            var modified = html
+            modified.insert(contentsOf: "\n" + readerMathJaxSnippet + "\n", at: bodyCloseRange.lowerBound)
+            return modified
+        } else {
+            return readerMathJaxSnippet + "\n" + html
+        }
+    }
+
+    /// Extracts styled Reader HTML (preserving images and layout via Reeeed's ReadableDoc)
+    /// along with plain text for AI summarization in a single pass.
+    func extractReaderHTML(from url: URL, timeoutSeconds: Double = 6.0) async throws -> ReaderWebPageContent {
+        return try await withThrowingTaskGroup(of: ReaderWebPageContent.self) { group in
+            group.addTask {
+                var request = URLRequest(url: url)
+                request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                let (data, response) = try await self.session.data(for: request)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      (200...299).contains(httpResponse.statusCode),
+                      let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
+                    throw URLError(.badServerResponse)
+                }
+                let baseURL = response.url ?? url
+                return try await self.extractReaderHTML(from: html, baseURL: baseURL)
+            }
+
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
+                throw URLError(.timedOut)
+            }
+
+            guard let firstResult = try await group.next() else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            group.cancelAll()
+            return firstResult
+        }
+    }
+
+    /// Extracts styled Reader HTML and plain text from raw HTML using Reeeed's ReadableDoc.
+    func extractReaderHTML(from html: String, baseURL: URL) async throws -> ReaderWebPageContent {
+        var extracted: ExtractedContent?
+        do {
+            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .readability)
+        } catch {
+            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .mercury)
+        }
+
+        if let extracted, let rawContent = extracted.content, !rawContent.isEmpty {
+            let metadata = (try? await SiteMetadata.extractMetadata(fromHTML: html, baseURL: baseURL)) ?? SiteMetadata(url: baseURL)
+            let theme = ReaderTheme(additionalCSS: Self.readerAdditionalCSS)
+            let rawStyledHTML: String
+            if let doc = ReadableDoc(
+                extracted: extracted,
+                insertHeroImage: nil,
+                metadata: metadata,
+                date: extracted.datePublished
+            ) {
+                rawStyledHTML = doc.html(includeExitReaderButton: false, theme: theme)
+            } else {
+                rawStyledHTML = rawContent
+            }
+            let styledHTML = Self.injectMathJax(into: rawStyledHTML)
+            let title = extracted.title ?? metadata.title ?? ""
+            let plainText = extracted.extractPlainText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fallbackText = plainText.isEmpty ? HTMLSanitizer.htmlToPlainText(rawContent) : plainText
+            return ReaderWebPageContent(
+                title: title,
+                styledHTML: styledHTML,
+                plainText: fallbackText,
+                baseURL: baseURL
+            )
+        }
+
+        throw URLError(.cannotDecodeContentData)
+    }
+
+    /// Scrape content from a single URL into clean Markdown.
+    /// Returns `nil` if the page cannot be fetched or safely reduced to Markdown within memory/depth limits.
+    func scrapeContent(from urlString: String, maxCharacters: Int = 5000) async -> String? {
+        guard let url = URL(string: urlString) else { return nil }
+
+        #if DEBUG
+        let pageStart = Date()
+        #endif
+
+        do {
+            let (title, markdown) = try await extractMarkdown(from: url)
+            let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                #if DEBUG
+                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown after conversion")
+                #endif
+                return nil
+            }
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] Downloaded & converted %@ to markdown in %.3f s (%d chars)", urlString, elapsed, trimmed.count))
+            DebugRAGStorage.shared.saveDownloadedWebpage(markdown: trimmed, title: title, url: url)
+            #endif
+            if trimmed.count > maxCharacters {
+                return String(trimmed.prefix(maxCharacters))
+            }
+            return trimmed
+        } catch {
+            #if DEBUG
+            let elapsed = Date().timeIntervalSince(pageStart)
+            print(String(format: "[Timing][Webpage] Ignoring source %@ (failed in %.3f s: %@)", urlString, elapsed, error.localizedDescription))
+            #endif
             return nil
         }
     }
 
-    nonisolated private static func scrapeContentOffMainActor(
-        from urlString: String,
-        maxCharacters: Int = 5000
-    ) async -> String? {
-        guard let url = URL(string: urlString) else { return nil }
-
-        do {
-            var request = URLRequest(url: url)
-            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-
-            let (data, response) = try await URLSession.shared.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  httpResponse.statusCode == 200,
-                  let html = String(data: data, encoding: .utf8) else {
-                return nil
-            }
-
-            return await extractTextFromHTML(html, maxCharacters: maxCharacters)
-        } catch {
-            return nil
-        }
-    }
-
-    /// Scrape content from multiple URLs concurrently
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000, useVision: Bool = false) async -> [String: String] {
+    /// Scrape content from multiple URLs concurrently into clean Markdown.
+    /// Sources that fail or exceed memory/DOM depth limits are omitted from the returned dictionary
+    /// and recorded in `lastFailedURLs`.
+    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000) async -> [String: String] {
         isScrapingContent = true
+        lastFailedURLs = []
         defer { isScrapingContent = false }
 
         let targetSuccessCount = max(0, limit)
@@ -180,8 +670,9 @@ class WebScrapingService: ObservableObject {
         let fetchCount = targetSuccessCount + Self.overfetchCount
         let limitedURLs = Array(urls.prefix(fetchCount))
         var results: [String: String] = [:]
+        var failedURLs: Set<String> = []
         var urlIterator = limitedURLs.makeIterator()
-        let concurrency = useVision ? Self.renderedScrapeConcurrency : Self.scrapeConcurrency
+        let concurrency = Self.scrapeConcurrency
         let initialWorkers = min(concurrency, limitedURLs.count)
 
         #if DEBUG
@@ -198,12 +689,7 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content: String?
-                    if useVision {
-                        content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
-                    } else {
-                        content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
-                    }
+                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
                     return (nextURL, content)
                 }
             }
@@ -213,7 +699,7 @@ class WebScrapingService: ObservableObject {
                 completedTasks += 1
                 #endif
 
-                if let content = content {
+                if let content = content, !content.isEmpty {
                     results[url] = content
                     // Keep the fastest successful pages only.
                     if results.count >= targetSuccessCount {
@@ -223,6 +709,8 @@ class WebScrapingService: ObservableObject {
                         group.cancelAll()
                         break
                     }
+                } else {
+                    failedURLs.insert(url)
                 }
 
                 if let nextURL = urlIterator.next() {
@@ -230,17 +718,14 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content: String?
-                        if useVision {
-                            content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters, useVision: true)
-                        } else {
-                            content = await Self.scrapeContentOffMainActor(from: nextURL, maxCharacters: maxCharacters)
-                        }
+                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
                         return (nextURL, content)
                     }
                 }
             }
         }
+
+        lastFailedURLs = failedURLs
 
         #if DEBUG
         let canceledTasks = max(launchedTasks - completedTasks, 0)
@@ -259,69 +744,6 @@ class WebScrapingService: ObservableObject {
         #endif
 
         return results
-    }
-
-    static func renderedPageText(
-        from analyses: [ImageAnalysisService.PDFPageAnalysisResult],
-        maxCharacters: Int
-    ) -> String {
-        var sections: [String] = []
-        for (pageIndex, analysis) in analyses.enumerated() {
-            var pageSections: [String] = []
-            let recognizedText = analysis.recognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !recognizedText.isEmpty {
-                pageSections.append(recognizedText)
-            }
-            if !analysis.labels.isEmpty {
-                let labelText = analysis.labels
-                    .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
-                    .joined(separator: ", ")
-                pageSections.append("Visual content: \(labelText)")
-            }
-            guard !pageSections.isEmpty else { continue }
-            sections.append("[Rendered webpage page \(pageIndex + 1)]\n" + pageSections.joined(separator: "\n\n"))
-        }
-
-        var text = RAGChunker.convertWhitespaceAlignedTables(sections.joined(separator: "\n\n"))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if text.count > maxCharacters {
-            text = String(text.prefix(maxCharacters))
-        }
-        return text
-    }
-
-    /// Extract readable text content from HTML using cached regexes.
-    private static func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
-        var text = html
-
-        // 0. Convert `<table>` blocks to Markdown pipe tables *before* the
-        //    generic tag stripper flattens them. Numeric stats pages rely
-        //    almost entirely on tables, and the model handles `| col |`
-        //    layouts far better than space-separated rubble.
-        text = Self.extractAndReplaceTables(text)
-        // 1. Strip script/style/nav/header/footer blocks (and their content) in one alternation pass.
-        text = Self.applyRegex(Self.nonContentBlockRegex, to: text, replacement: "")
-        // 2. Strip HTML comments.
-        text = Self.applyRegex(Self.htmlCommentRegex, to: text, replacement: "")
-        // 3. Strip any remaining tags, replacing them with a space so adjacent words don't merge.
-        text = Self.applyRegex(Self.htmlTagRegex, to: text, replacement: " ")
-        // 4. Decode common HTML entities (named + numeric + hex) in a single pass.
-        text = Self.decodeHTMLEntities(text)
-        // 5. Collapse whitespace runs. Use the chunker's whitespace normaliser
-        //    so newlines (paragraph + table-row boundaries) survive the
-        //    pipeline — the chunker uses those as preferred split points.
-        text = RAGChunker.normalizeWhitespace(text)
-        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // 6. Cap length. `String.prefix(_:)` operates on extended grapheme
-        // clusters in Swift's `String`, so this slice is grapheme-safe and
-        // never splits a Unicode cluster — do not downgrade this to UTF-16
-        // or UnicodeScalar slicing.
-        if text.count > maxCharacters {
-            text = String(text.prefix(maxCharacters))
-        }
-
-        return text
     }
 
     /// Finds every `<table>` in `html`, converts it to a Markdown pipe table,
@@ -358,180 +780,6 @@ class WebScrapingService: ObservableObject {
         }
         return result
     }
-
-    #if canImport(WebKit)
-    private enum RenderedScrapeError: Error {
-        case loadTimedOut
-        case invalidDocumentMetrics
-    }
-
-    private final class NavigationDelegate: NSObject, WKNavigationDelegate {
-        var continuation: CheckedContinuation<Void, Error>?
-
-        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            resume(.success(()))
-        }
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            guard !Self.isBenignNavigationCancellation(error) else { return }
-            resume(.failure(error))
-        }
-
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            guard !Self.isBenignNavigationCancellation(error) else { return }
-            resume(.failure(error))
-        }
-
-        private func resume(_ result: Result<Void, Error>) {
-            guard let continuation else { return }
-            self.continuation = nil
-            switch result {
-            case .success:
-                continuation.resume()
-            case .failure(let error):
-                continuation.resume(throwing: error)
-            }
-        }
-
-        private static func isBenignNavigationCancellation(_ error: Error) -> Bool {
-            let nsError = error as NSError
-            return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled
-        }
-    }
-
-    private func scrapeRenderedContent(from url: URL, maxCharacters: Int) async -> String? {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .nonPersistent()
-        let webView = WKWebView(frame: CGRect(origin: .zero, size: Self.webVisionViewport), configuration: configuration)
-        webView.customUserAgent = Self.userAgent
-
-        do {
-            try await load(webView: webView, url: url)
-            try await Task.sleep(nanoseconds: Self.webVisionSettleNanoseconds)
-            let contentRect = try await renderedContentRect(for: webView)
-            let pdfData = try await createPDF(from: webView, rect: contentRect)
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent(UUID().uuidString)
-                .appendingPathExtension("pdf")
-            defer {
-                try? FileManager.default.removeItem(at: tempURL)
-            }
-            try pdfData.write(to: tempURL, options: .atomic)
-
-            let analyses = await ImageAnalysisService.extractPDFPageAnalyses(from: tempURL)
-            let rendered = Self.renderedPageText(from: analyses, maxCharacters: maxCharacters)
-            return rendered.isEmpty ? nil : rendered
-        } catch {
-            guard !Self.isBenignRenderedScrapeError(error) else {
-                return nil
-            }
-            #if DEBUG
-            print("[WebScrapingService] Rendered scrape failed for \(url.absoluteString): \(error.localizedDescription)")
-            #endif
-            return nil
-        }
-    }
-
-    private func load(webView: WKWebView, url: URL) async throws {
-        let delegate = NavigationDelegate()
-        webView.navigationDelegate = delegate
-
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { @MainActor in
-                try await withCheckedThrowingContinuation { continuation in
-                    delegate.continuation = continuation
-                    var request = URLRequest(url: url)
-                    request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-                    webView.load(request)
-                }
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: Self.webVisionLoadTimeoutNanoseconds)
-                throw RenderedScrapeError.loadTimedOut
-            }
-
-            do {
-                _ = try await group.next()
-                group.cancelAll()
-            } catch {
-                await MainActor.run {
-                    webView.stopLoading()
-                    delegate.continuation?.resume(throwing: error)
-                    delegate.continuation = nil
-                }
-                group.cancelAll()
-                throw error
-            }
-        }
-    }
-    #endif
-
-    #if canImport(WebKit)
-    private func renderedContentRect(for webView: WKWebView) async throws -> CGRect {
-        let raw = try await evaluateJavaScript(
-            on: webView,
-            script: """
-            [
-              Math.max(document.documentElement.scrollWidth, document.body ? document.body.scrollWidth : 0, window.innerWidth),
-              Math.max(document.documentElement.scrollHeight, document.body ? document.body.scrollHeight : 0, window.innerHeight)
-            ]
-            """
-        )
-        guard let metrics = raw as? [NSNumber], metrics.count == 2 else {
-            throw RenderedScrapeError.invalidDocumentMetrics
-        }
-        return CGRect(
-            origin: .zero,
-            size: CGSize(
-                width: max(CGFloat(truncating: metrics[0]), Self.webVisionViewport.width),
-                height: min(
-                    max(CGFloat(truncating: metrics[1]), Self.webVisionViewport.height),
-                    Self.webVisionViewport.height * Self.webVisionMaxRenderedPages
-                )
-            )
-        )
-    }
-
-    private func evaluateJavaScript(on webView: WKWebView, script: String) async throws -> Any? {
-        try await withCheckedThrowingContinuation { continuation in
-            webView.evaluateJavaScript(script) { result, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
-    }
-
-    private func createPDF(from webView: WKWebView, rect: CGRect) async throws -> Data {
-        try await withCheckedThrowingContinuation { continuation in
-            let configuration = WKPDFConfiguration()
-            configuration.rect = rect
-            webView.createPDF(configuration: configuration) { result in
-                switch result {
-                case .success(let data):
-                    continuation.resume(returning: data)
-                case .failure(let error):
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
-    }
-
-    private static func isBenignRenderedScrapeError(_ error: Error) -> Bool {
-        if error is CancellationError {
-            return true
-        }
-
-        let nsError = error as NSError
-        if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
-            return true
-        }
-
-        return false
-    }
-    #endif
 
     /// Converts the inner HTML of a `<table>` element to a Markdown pipe
     /// table. Empty input → empty output. Uneven row lengths are padded.

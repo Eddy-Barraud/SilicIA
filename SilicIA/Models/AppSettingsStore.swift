@@ -37,10 +37,13 @@ final class AppSettingsStore {
     /// The live settings. Any mutation is observed by readers and writes
     /// through to UserDefaults via `AppSettings.save()`.
     var settings: AppSettings {
-        didSet { settings.save() }
+        didSet {
+            settings.save()
+        }
     }
 
     private init() {
-        settings = AppSettings.load()
+        let loaded = AppSettings.load()
+        settings = loaded
     }
 }

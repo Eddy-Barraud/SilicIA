@@ -23,7 +23,9 @@ final class PromptLoaderTests: XCTestCase {
                     "query": "Test query",
                     "corpusHint": "Sample hint",
                     "keyPoints": "1 to 3",
-                    "maxOutputTokens": "200"
+                    "maxOutputTokens": "200",
+                    "maxOutputSentences": "10",
+                    "groundingContext": "Grounding snippet\n\n"
                 ]
             )
 
@@ -31,9 +33,12 @@ final class PromptLoaderTests: XCTestCase {
             guard let prompt = prompt else { continue }
             XCTAssertTrue(prompt.contains("Test query"))
             XCTAssertTrue(prompt.contains("Sample hint"))
-            XCTAssertTrue(prompt.contains("200"))
+            XCTAssertTrue(prompt.contains("Grounding snippet"))
+            XCTAssertTrue(prompt.contains("10"))
             XCTAssertFalse(prompt.contains("{{query}}"))
             XCTAssertFalse(prompt.contains("{{corpusHint}}"))
+            XCTAssertFalse(prompt.contains("{{groundingContext}}"))
+            XCTAssertFalse(prompt.contains("{{maxOutputSentences}}"))
             XCTAssertFalse(prompt.contains("Format de sortie requis : LaTeX"))
             XCTAssertFalse(prompt.contains("Required output format: LaTeX"))
         }
@@ -96,6 +101,9 @@ final class PromptLoaderTests: XCTestCase {
 
             let footerSearch = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.with_search", language: language)
             XCTAssertNotNil(footerSearch, "Missing footer with_search for \(language.code)")
+
+            let footerSearchMode = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.search", language: language)
+            XCTAssertNotNil(footerSearchMode, "Missing footer search for \(language.code)")
 
             let footerDirect = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.direct", language: language)
             XCTAssertNotNil(footerDirect, "Missing footer direct for \(language.code)")

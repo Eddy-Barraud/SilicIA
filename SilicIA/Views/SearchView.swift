@@ -16,12 +16,13 @@ import AppKit
 import UIKit
 import SafariServices
 #endif
+#if canImport(WebKit)
+import WebKit
+#endif
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
-    private static let firstGuessTokenCap = 220
-    private static let deepSearchDerivedQueryCount = 3
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
@@ -61,7 +62,6 @@ struct SearchView: View {
     /// visible (and therefore the summary card) even though
     /// `searchResults` is intentionally empty in this mode.
     private var hasToolDrivenSummary: Bool {
-        guard settings.useToolCalling else { return false }
         guard hasAttemptedSearch else { return false }
         return aiService.isSummarizing
             || !aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -148,21 +148,21 @@ struct SearchView: View {
         nonmutating set { settingsStore.settings = newValue }
     }
     @State private var showSettings = false
-    @State private var activeGenerationProfile: AIService.GenerationProfile = .fast
 
     // Generation timer
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
-    @State private var firstGuessElapsedSeconds: Double? = nil
-    @State private var firstGuessText = ""
-    @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
 
-    // Per-result web page summaries
+    // Per-result web page reader view and summaries
     @State private var isShowingWebPageSummaryOverlay = false
     @State private var selectedWebPageSummaryResult: SearchResult?
     @State private var webPageSummaryText: String = ""
+    @State private var webPageReaderHTML: String = ""
+    @State private var webPageReaderBaseURL: URL? = nil
+    @State private var webPageContentHeight: CGFloat = 800
+    @State private var webPageMarkdownText: String = ""
     @State private var webPageSummaryError: String?
     @State private var isGeneratingWebPageSummary = false
     @State private var activeWebPageSummaryRequestID = UUID()
@@ -291,7 +291,7 @@ struct SearchView: View {
         // checking hasAttemptedSearch so a stale post-cancel notification
         // doesn't repopulate the cards on the welcome screen.
         .onChange(of: aiService.toolFetchedResults) { _, newResults in
-            guard settings.useToolCalling, hasAttemptedSearch else { return }
+            guard hasAttemptedSearch else { return }
             searchResults = newResults
         }
         .onAppear {
@@ -308,15 +308,6 @@ struct SearchView: View {
                 DispatchQueue.main.async {
                     isSearchFieldFocused = true
                 }
-            }
-        }
-        .onChange(of: settings) {
-            // Persistence is automatic via AppSettingsStore; this handler
-            // only reacts to the first-guess toggle being switched off.
-            if !settings.isFirstGuessEnabled {
-                firstGuessText = ""
-                firstGuessElapsedSeconds = nil
-                isGeneratingFirstGuess = false
             }
         }
         .onChange(of: initialQuery) {
@@ -354,21 +345,25 @@ struct SearchView: View {
 
                 Spacer(minLength: 0)
             } else {
-                // Reset action sits on the leading edge so it mirrors the
-                // chat tab's "new conversation" button position.
-                headerIconButton(
-                    systemImage: "arrow.counterclockwise",
-                    label: L.t("common.startOver", language: settings.language),
-                    action: { goHome() }
-                )
+                ZStack {
+                    SourceToggleButtons(settingsStore: settingsStore)
 
-                Spacer()
+                    HStack(spacing: 4) {
+                        headerIconButton(
+                            systemImage: "arrow.counterclockwise",
+                            label: L.t("common.startOver", language: settings.language),
+                            action: { goHome() }
+                        )
 
-                headerIconButton(
-                    systemImage: "gearshape",
-                    label: L.t("common.settings", language: settings.language),
-                    action: { showSettings = true }
-                )
+                        Spacer()
+
+                        headerIconButton(
+                            systemImage: "gearshape",
+                            label: L.t("common.settings", language: settings.language),
+                            action: { showSettings = true }
+                        )
+                    }
+                }
             }
         }
         .padding()
@@ -454,7 +449,7 @@ struct SearchView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            // Action row: Chat + Extensive left-aligned, send arrow right.
+            // Action row: Chat left-aligned, send arrow right.
             HStack(spacing: 8) {
                 Button(action: handleChatButtonTap) {
                     Label(chatButtonTitle, systemImage: "bubble.left.and.bubble.right")
@@ -465,25 +460,13 @@ struct SearchView: View {
                 .disabled(isChatButtonDisabled)
                 .accessibilityLabel(chatButtonTitle)
 
-                Button(action: { performSearch(maxScrapingChars: 7000, generationProfile: .deep) }) {
-                    Label(
-                        L.t("search.button.deep", language: settings.language),
-                        systemImage: "sparkle.magnifyingglass"
-                    )
-                    .font(.subheadline)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(isPrimaryDisabled)
-                .accessibilityLabel(L.t("search.button.deep", language: settings.language))
-
                 Spacer()
 
                 // Swap send → stop while any phase is running (web search,
-                // RAG scoring, first-guess, AI summary). Tapping rotates
+                // RAG scoring, AI summary). Tapping rotates
                 // `activeSearchRequestID`, which every in-flight task
                 // checks before publishing — same mechanism as `goHome()`.
-                let isBusy = searchService.isSearching || aiService.isSummarizing || isGeneratingFirstGuess
+                let isBusy = searchService.isSearching || aiService.isSummarizing
                 if isBusy {
                     Button(action: cancelCurrentSearch) {
                         Image(systemName: "stop.circle.fill")
@@ -498,7 +481,7 @@ struct SearchView: View {
                     .help(L.t("search.button.stop", language: settings.language))
                     .accessibilityLabel(L.t("search.button.stop", language: settings.language))
                 } else {
-                    Button(action: { performSearch(generationProfile: .fast) }) {
+                    Button(action: { performSearch() }) {
                         Image(systemName: "arrow.up.circle.fill")
                             .resizable()
                             .frame(width: 28, height: 28)
@@ -567,7 +550,7 @@ struct SearchView: View {
                             result: result,
                             matchingScore: matchingScoresByURL[result.url] ?? 0,
                             accessibilityLanguage: settings.language,
-                            isWebSummariesEnabled: settings.isWebSummariesEnabled,
+                            isReaderViewAndSummaryEnabled: settings.isReaderViewAndSummaryEnabled,
                             onRequestSummary: { tapped in
                                 presentWebPageSummary(for: tapped)
                             }
@@ -605,7 +588,7 @@ struct SearchView: View {
 
                 if FoundationModelAvailability.check().isAvailable {
                     Button {
-                        let textToCopy = aiService.summary.isEmpty ? firstGuessText : aiService.summary
+                        let textToCopy = aiService.summary
                         guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
                         PlatformClipboard.copyPlainText(textToCopy)
                         didCopySummary = true
@@ -619,10 +602,10 @@ struct SearchView: View {
                     }
                     .buttonStyle(.plain)
                     .help(L.t("common.copy", language: settings.language))
-                    .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                if aiService.isSummarizing || (settings.isFirstGuessEnabled && isGeneratingFirstGuess) {
+                if aiService.isSummarizing {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
@@ -631,28 +614,6 @@ struct SearchView: View {
             if case .unavailable(let reason) = FoundationModelAvailability.check() {
                 ModelAvailabilityNotice(reason: reason, language: settings.language, drawBackground: false)
             } else {
-                if settings.isFirstGuessEnabled {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L.t("search.summary.firstGuess", language: settings.language))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-
-                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        } else if !firstGuessText.isEmpty {
-                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
-                        } else {
-                            Text(L.t("search.loading.firstGuessPlaceholder", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        }
-                    }
-
-                    Divider()
-                }
-
                 VStack(alignment: .leading, spacing: 8) {
                     Text(L.t("search.summary.webContextAnswer", language: settings.language))
                         .font(.subheadline)
@@ -708,12 +669,6 @@ struct SearchView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 3) {
-                            if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
-                                Text(L.t("search.summary.timeToFirst", language: settings.language, elapsed))
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-
                             if let elapsed = summaryElapsedSeconds {
                                 Text(L.t("search.summary.generatedIn", language: settings.language, elapsed))
                                     .font(.caption2)
@@ -737,25 +692,6 @@ struct SearchView: View {
                     .scaleEffect(1.5)
                 Text(L.t("search.loading.searching", language: settings.language))
                     .foregroundColor(.secondary)
-
-                if settings.isFirstGuessEnabled && !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(L.t("search.summary.firstGuess", language: settings.language))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-
-                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                            Text(L.t("search.loading.firstGuessGenerating", language: settings.language))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        } else if !firstGuessText.isEmpty {
-                            StreamingLaTeXText(text: firstGuessText, isStreaming: isGeneratingFirstGuess)
-                        }
-                    }
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .subtleAccentCard(cornerRadius: 12)
-                }
             }
             .padding()
         }
@@ -878,11 +814,11 @@ struct SearchView: View {
             .disabled(!FoundationModelAvailability.check().isAvailable)
             .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
 
-            // First Guess Toggle
+            // Reader View and Summary Toggle
             VStack(alignment: .leading, spacing: 4) {
                 let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isFirstGuessEnabled) {
-                    Text(L.t("search.settings.firstGuessToggle", language: settings.language))
+                Toggle(isOn: $settingsStore.settings.isReaderViewAndSummaryEnabled) {
+                    Text(L.t("search.settings.readerViewAndSummaryToggle", language: settings.language))
                         .font(.subheadline)
                 }
                 .disabled(!isModelAvailable)
@@ -892,35 +828,6 @@ struct SearchView: View {
                     Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
                         .font(.caption2)
                         .foregroundColor(.red)
-                }
-            }
-
-            // Web Summaries Toggle
-            VStack(alignment: .leading, spacing: 4) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isWebSummariesEnabled) {
-                    Text(L.t("search.settings.webSummariesToggle", language: settings.language))
-                        .font(.subheadline)
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Toggle(isOn: $settingsStore.settings.useWebVision) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(L.t("search.settings.webVisionToggle", language: settings.language))
-                            .font(.subheadline)
-                        Text(L.t("search.settings.webVisionDescription", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
                 }
             }
 
@@ -971,9 +878,12 @@ struct SearchView: View {
                 }
 
                 if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    Text(L.t("search.settings.selectAtLeastOne", language: settings.language))
+                    HStack(spacing: 4) {
+                        Image(systemName: "wifi.slash")
+                        Text(L.t("search.settings.offlineMode", language: settings.language))
+                    }
                     .font(.caption)
-                    .foregroundColor(.red)
+                    .foregroundStyle(.secondary)
                 }
             }
 
@@ -1051,47 +961,37 @@ struct SearchView: View {
                 .pickerStyle(.segmented)
             }
 
-            // Tool-calling toggle — mirrors the ChatView setting on the
-            // same `settings.useToolCalling` field, so the two views stay
-            // in sync. Enables the model to call searchContext / calculate
-            // / currentDateTime / webSearch on demand instead of receiving
-            // a pre-baked context block in the summary prompt.
-            VStack(alignment: .leading, spacing: 8) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.useToolCalling) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Tool calling (experimental)")
-                            .font(.subheadline)
-                        Text("Lets the model query the web, search the corpus, calculate, and get the current date on demand instead of relying on the pre-baked search summary.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.toolCallingNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
         }
         .padding()
         .glassCard(cornerRadius: 16)
     }
 
-    // MARK: - Web Page Summary Overlay
+    // MARK: - Web Page Reader View and Summary Overlay
     private var webPageSummaryOverlay: some View {
         ZStack {
-            Color.black.opacity(0.25)
+            Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture {
                     dismissWebPageSummaryOverlay()
                 }
 
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 14) {
+                // Header bar
+                HStack(spacing: 12) {
+                    if let result = selectedWebPageSummaryResult {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(result.title)
+                                .font(.headline)
+                                .lineLimit(1)
+                            Text(result.url)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    Spacer()
+
                     Button {
                         guard let urlString = selectedWebPageSummaryResult?.url else { return }
                         openWebPage(urlString)
@@ -1105,61 +1005,113 @@ struct SearchView: View {
                     }
                     .buttonStyle(.borderedProminent)
 
-                    Spacer()
-
                     Button {
                         dismissWebPageSummaryOverlay()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.title3)
+                            .font(.system(size: 26, weight: .semibold))
+                            .symbolRenderingMode(.hierarchical)
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                }
-
-                if let result = selectedWebPageSummaryResult {
-                    Text(result.title)
-                        .font(.headline)
-                        .lineLimit(2)
+                    .contentShape(Circle())
+                    .keyboardShortcut(.escape, modifiers: [])
+                    .help(L.t("common.close", language: settings.language))
                 }
 
                 Divider()
 
-                if isGeneratingWebPageSummary {
-                    HStack(spacing: 10) {
-                        ProgressView()
-                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
-                            .foregroundColor(.secondary)
-                        Spacer()
+                // Unified vertical scroll field containing both the native AI Summary and the HTML WebKit view
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        // Native AI Summary on top of HTML webkit with fixed height (~10 lines) and internal scroll field
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Label(L.t("search.webPage.readerSummary", language: settings.language), systemImage: "sparkles")
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.accentColor)
+
+                                if isGeneratingWebPageSummary {
+                                    ProgressView()
+                                        .scaleEffect(0.7)
+                                }
+                                Spacer()
+                            }
+
+                            ScrollView {
+                                Group {
+                                    if isGeneratingWebPageSummary && webPageSummaryText.isEmpty {
+                                        Text(L.t("search.webPage.generatingSummary", language: settings.language))
+                                            .font(.subheadline)
+                                            .foregroundColor(.secondary)
+                                            .italic()
+                                    } else if let webPageSummaryError, webPageSummaryText.isEmpty {
+                                        Text(webPageSummaryError)
+                                            .font(.subheadline)
+                                            .foregroundColor(.red)
+                                    } else if !webPageSummaryText.isEmpty {
+                                        StreamingLaTeXText(text: webPageSummaryText, isStreaming: isGeneratingWebPageSummary)
+                                            .font(.body)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .frame(height: 185)
+                        }
+                        .padding(14)
+                        .subtleAccentCard(cornerRadius: 12)
+
+                        // Reader view: Rendered Reeeed HTML content (scrolls together with summary above it)
+                        if !webPageReaderHTML.isEmpty {
+                            ReaderHTMLWebView(
+                                html: webPageReaderHTML,
+                                baseURL: webPageReaderBaseURL,
+                                contentHeight: $webPageContentHeight,
+                                onLinkClicked: { clickedURL in
+                                    openWebPage(clickedURL.absoluteString)
+                                }
+                            )
+                            .frame(height: max(400, webPageContentHeight))
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        } else if webPageMarkdownText.isEmpty && isGeneratingWebPageSummary {
+                            ProgressView()
+                                .padding(.vertical, 30)
+                                .frame(maxWidth: .infinity)
+                        } else if !webPageMarkdownText.isEmpty {
+                            MarkdownContentView(markdown: webPageMarkdownText)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if let snippet = selectedWebPageSummaryResult?.snippet, !snippet.isEmpty {
+                            Text(snippet)
+                                .font(.body)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                } else if let webPageSummaryError,
-                          !webPageSummaryError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(webPageSummaryError)
-                        .font(.body)
-                        .foregroundColor(.red)
-                } else {
-                    ScrollView {
-                        Text(webPageSummaryText)
-                            .font(.body)
-                            .foregroundColor(.primary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .textSelection(.enabled)
-                    }
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 2)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding()
-            .frame(maxWidth: 650, maxHeight: 460)
+            .padding(18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .glassCard(cornerRadius: 16)
-            .shadow(radius: 12)
-            .padding()
+            .shadow(color: Color.black.opacity(0.3), radius: 24, x: 0, y: 8)
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 16)
         }
     }
 
     private func presentWebPageSummary(for result: SearchResult) {
-        guard settings.isWebSummariesEnabled else { return }
+        guard settings.isReaderViewAndSummaryEnabled else { return }
 
         selectedWebPageSummaryResult = result
         webPageSummaryText = ""
+        webPageReaderHTML = ""
+        webPageReaderBaseURL = URL(string: result.url)
+        webPageContentHeight = 800
+        webPageMarkdownText = ""
         webPageSummaryError = nil
         isGeneratingWebPageSummary = true
         isShowingWebPageSummaryOverlay = true
@@ -1168,19 +1120,36 @@ struct SearchView: View {
         activeWebPageSummaryRequestID = requestID
 
         Task {
-            let summary = await aiService.summarizeWebPage(
+            var preExtractedPlainText: String? = nil
+            if let targetURL = URL(string: result.url) {
+                if let readerContent = try? await WebScrapingService().extractReaderHTML(from: targetURL) {
+                    guard activeWebPageSummaryRequestID == requestID else { return }
+                    webPageReaderHTML = readerContent.styledHTML
+                    webPageReaderBaseURL = readerContent.baseURL
+                    preExtractedPlainText = readerContent.plainText
+                }
+            }
+
+            let (summary, markdown) = await aiService.summarizeWebPage(
                 title: result.title,
                 url: result.url,
                 language: settings.language,
-                useWebVision: settings.useWebVision
+                preExtractedContent: preExtractedPlainText,
+                onPartialUpdate: { partial in
+                    guard activeWebPageSummaryRequestID == requestID else { return }
+                    webPageSummaryText = partial
+                }
             )
             guard activeWebPageSummaryRequestID == requestID else { return }
             isGeneratingWebPageSummary = false
 
+            if webPageReaderHTML.isEmpty && !markdown.isEmpty {
+                webPageMarkdownText = markdown
+            }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
+            if trimmed.isEmpty && webPageSummaryText.isEmpty {
                 webPageSummaryError = L.t("search.webPage.unavailable", language: settings.language)
-            } else {
+            } else if !trimmed.isEmpty {
                 webPageSummaryText = trimmed
             }
         }
@@ -1191,6 +1160,10 @@ struct SearchView: View {
         isGeneratingWebPageSummary = false
         selectedWebPageSummaryResult = nil
         webPageSummaryText = ""
+        webPageReaderHTML = ""
+        webPageReaderBaseURL = nil
+        webPageContentHeight = 800
+        webPageMarkdownText = ""
         webPageSummaryError = nil
         activeWebPageSummaryRequestID = UUID()
     }
@@ -1344,7 +1317,7 @@ struct SearchView: View {
 
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
-    private func performSearch(maxScrapingChars: Int? = nil, noAIOnly: Bool = false, generationProfile: AIService.GenerationProfile = .fast) {
+    private func performSearch(maxScrapingChars: Int? = nil, noAIOnly: Bool = false) {
         #if canImport(UIKit)
         dismissKeyboard()
         #endif
@@ -1366,12 +1339,8 @@ struct SearchView: View {
         errorMessage = nil
         aiService.summary = ""
         aiService.citations = ""
-        firstGuessText = ""
-        firstGuessElapsedSeconds = nil
-        isGeneratingFirstGuess = false
         showingSummary = !noAIOnly
         isNoAIMode = noAIOnly
-        activeGenerationProfile = generationProfile
         summaryStartTime = nil
         summaryElapsedSeconds = nil
         #if DEBUG
@@ -1380,127 +1349,45 @@ struct SearchView: View {
         #endif
 
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
-        if !noAIOnly && settings.isFirstGuessEnabled && isModelAvailable {
-            isGeneratingFirstGuess = true
+
+        if !noAIOnly && isModelAvailable {
+            // AI Search Mode: Let the model decide whether to call webSearch / wikipediaSearch.
+            // Start generation immediately (< 50ms) without pre-fetching or pre-scraping.
+            showingSummary = true
             Task {
-                let firstGuessStart = Date()
-                let firstGuess = await aiService.generateFirstGuess(
-                    query: trimmedQuery,
-                    language: settings.language,
-                    maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap),
-                    onPartialUpdate: { partial in
-                        guard activeSearchRequestID == requestID else { return }
-                        firstGuessText = partial
-                    }
-                )
                 guard activeSearchRequestID == requestID else { return }
-                guard settings.isFirstGuessEnabled else {
-                    firstGuessText = ""
-                    firstGuessElapsedSeconds = nil
-                    isGeneratingFirstGuess = false
-                    return
-                }
-                firstGuessText = firstGuess
-                #if DEBUG
-                debugLog(firstGuessText)
-                #endif
-                firstGuessElapsedSeconds = Date().timeIntervalSince(firstGuessStart)
-                isGeneratingFirstGuess = false
+                await generateSummary(
+                    maxScrapingResults: resultsCount,
+                    maxScrapingChars: scrapingChars,
+                    summaryResults: []
+                )
             }
-        }
-        
-        Task {
-            do {
-                // Tool-calling mode: skip the auto web search entirely.
-                // The model owns the decision to query the web via its
-                // `webSearch` tool. Otherwise we end up handing it both a
-                // pre-fetched corpus AND the tools, and it just calls
-                // `searchContext` over the corpus — `webSearch` never
-                // fires. Result cards stay empty in this mode; the
-                // summary card carries the model's tool-driven answer.
-                if settings.useToolCalling && !noAIOnly {
-                    guard activeSearchRequestID == requestID else { return }
-                    searchResults = []
-                    errorMessage = nil
-                    showingSummary = true
-                    await generateSummary(
-                        maxScrapingResults: resultsCount,
-                        maxScrapingChars: scrapingChars,
-                        summaryResults: [],
-                        generationProfile: generationProfile,
-                        queries: nil
-                    )
-                    if activeSearchRequestID == requestID {
-                        isGeneratingFirstGuess = false
-                    }
-                    return
-                }
-
-                let fetchedResults: [SearchResult]
-                var allQueries: [String] = [trimmedQuery]
-
-                if generationProfile == .deep && !noAIOnly {
-                    let derivedQueries = await aiService.expandSearchQueries(
+        } else {
+            // Non-AI Search Mode or Foundation Models unavailable:
+            // Fetch search cards directly from DuckDuckGo / Wikipedia.
+            Task {
+                do {
+                    let fetchedResults = try await searchService.search(
                         query: trimmedQuery,
-                        language: settings.language,
-                        maxDerivedQueries: Self.deepSearchDerivedQueryCount
-                    )
-                    allQueries = [trimmedQuery] + derivedQueries
-
-                    #if DEBUG
-                    debugLog(
-                        "deep query expansion count: expectedDerived=\(Self.deepSearchDerivedQueryCount), obtainedDerived=\(derivedQueries.count), inputTotal=\(1 + derivedQueries.count)"
-                    )
-                    debugLog("deep query expansion: \(allQueries.joined(separator: " | "))")
-                    #endif
-
-                    fetchedResults = try await searchService.search(
-                        queries: allQueries,
-                        maxDuckDuckGoResultsPerQuery: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
-                        maxWikipediaResultsPerQuery: settings.maxWikipediaResults,
-                        mergedLimit: (settings.maxDuckDuckGoResults + settings.maxWikipediaResults + Self.aiSummaryOverfetchResults) * Self.deepSearchDerivedQueryCount,
-                        language: settings.language,
-                        useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
-                    )
-                } else {
-                    fetchedResults = try await searchService.search(
-                        query: trimmedQuery,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                         maxWikipediaResults: settings.maxWikipediaResults,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia
                     )
+
+                    guard activeSearchRequestID == requestID else { return }
+                    searchResults = Array(fetchedResults.prefix(resultsCount))
+                    errorMessage = nil
+                } catch {
+                    guard activeSearchRequestID == requestID else { return }
+                    errorMessage = error.localizedDescription
+                    searchResults = []
+
+                    #if DEBUG
+                    debugLog("performSearch failed: \(error.localizedDescription)")
+                    #endif
                 }
-
-                guard activeSearchRequestID == requestID else { return }
-                searchResults = Array(fetchedResults.prefix(resultsCount))
-                errorMessage = nil
-
-                // Auto-generate summary only when AI mode is enabled
-                if !noAIOnly && !searchResults.isEmpty {
-                    showingSummary = true
-                    await generateSummary(
-                        maxScrapingResults: resultsCount,
-                        maxScrapingChars: scrapingChars,
-                        summaryResults: fetchedResults,
-                        generationProfile: generationProfile,
-                        queries: generationProfile == .deep ? allQueries : nil
-                    )
-                }
-            } catch {
-                guard activeSearchRequestID == requestID else { return }
-                errorMessage = error.localizedDescription
-                searchResults = []
-
-                #if DEBUG
-                debugLog("performSearch failed: \(error.localizedDescription)")
-                #endif
-            }
-
-            if activeSearchRequestID == requestID {
-                isGeneratingFirstGuess = false
             }
         }
     }
@@ -1511,13 +1398,13 @@ struct SearchView: View {
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
             Task {
-                await generateSummary(generationProfile: activeGenerationProfile)
+                await generateSummary(summaryResults: [])
             }
         }
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, generationProfile: AIService.GenerationProfile? = nil, queries: [String]? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
@@ -1529,15 +1416,16 @@ struct SearchView: View {
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
-            profile: generationProfile ?? activeGenerationProfile,
-            queries: queries,
-            useToolCalling: settings.useToolCalling,
-            useWebVision: settings.useWebVision,
             maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
             generateAnswer: isModelAvailable,
+            onSummaryPartialUpdate: { _ in
+                if summaryElapsedSeconds == nil, let start = summaryStartTime {
+                    summaryElapsedSeconds = Date().timeIntervalSince(start)
+                }
+            },
             onMatchingScores: { scores in
                 Task { @MainActor in
                     // AIService chunks the full overfetched `fetchedResults`
@@ -1552,6 +1440,11 @@ struct SearchView: View {
                         scores,
                         displayedURLs: Set(searchResults.map(\.url))
                     )
+                }
+            },
+            onValidSourcesUpdated: { validSources in
+                Task { @MainActor in
+                    searchResults = Array(validSources.prefix(settings.maxSearchResults))
                 }
             }
         )
@@ -1568,14 +1461,16 @@ struct SearchView: View {
         }
         #endif
 
-        if let start = summaryStartTime {
+        if let answerElapsed = aiService.lastAnswerElapsedSeconds {
+            summaryElapsedSeconds = answerElapsed
+        } else if let start = summaryStartTime, summaryElapsedSeconds == nil {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
         }
     }
 
     /// Resets all search and summary state to the initial home screen.
     /// Cancels every in-flight search phase: rotates the request ID so
-    /// pending RAG / first-guess / summary tasks stop publishing, clears
+    /// pending RAG / summary tasks stop publishing, clears
     /// the busy flags, and tears down the AIService streaming state so a
     /// fresh search starts cleanly.
     private func cancelCurrentSearch() {
@@ -1583,7 +1478,6 @@ struct SearchView: View {
         // Flip the published flags so the UI swaps the stop button back to
         // send immediately. The discarded tasks will see the request-ID
         // mismatch and exit without touching state.
-        isGeneratingFirstGuess = false
         aiService.isSummarizing = false
         searchService.isSearching = false
         summaryStartTime = nil
@@ -1597,9 +1491,6 @@ struct SearchView: View {
         matchingScoresByURL = [:]
         showingSummary = false
         isNoAIMode = false
-        firstGuessText = ""
-        firstGuessElapsedSeconds = nil
-        isGeneratingFirstGuess = false
         aiService.summary = ""
         aiService.citations = ""
         errorMessage = nil
@@ -1720,7 +1611,11 @@ struct SearchResultCard: View {
     var matchingScore: Double = 0
     /// UI language for accessibility-label localisation. Defaults to English.
     var accessibilityLanguage: ModelLanguage = .english
-    var isWebSummariesEnabled: Bool = false
+    var isReaderViewAndSummaryEnabled: Bool = false
+    var isWebSummariesEnabled: Bool {
+        get { isReaderViewAndSummaryEnabled }
+        set { isReaderViewAndSummaryEnabled = newValue }
+    }
     var onRequestSummary: ((SearchResult) -> Void)? = nil
 
     #if canImport(UIKit)
@@ -1743,7 +1638,7 @@ struct SearchResultCard: View {
     #endif
 
     private func handleTitleTap() {
-        if isWebSummariesEnabled, let onRequestSummary {
+        if isReaderViewAndSummaryEnabled, let onRequestSummary {
             onRequestSummary(result)
             return
         }
@@ -1835,6 +1730,239 @@ struct FeatureRow: View {
         }
     }
 }
+
+// MARK: - Reader HTML WebView
+/// Renders Reeeed's styled Reader HTML inside a WKWebView, dynamically sizing to document height
+/// and forwarding scroll events to the enclosing unified SwiftUI ScrollView.
+struct ReaderHTMLWebView: View {
+    let html: String
+    let baseURL: URL?
+    @Binding var contentHeight: CGFloat
+    var onLinkClicked: ((URL) -> Void)? = nil
+
+    var body: some View {
+        ReaderHTMLWebViewRepresentable(
+            html: html,
+            baseURL: baseURL,
+            contentHeight: $contentHeight,
+            onLinkClicked: onLinkClicked
+        )
+    }
+}
+
+#if os(macOS)
+private final class NonScrollingWKWebView: WKWebView {
+    override func scrollWheel(with event: NSEvent) {
+        // Forward trackpad and mouse scroll wheel events directly to the enclosing SwiftUI ScrollView
+        nextResponder?.scrollWheel(with: event)
+    }
+}
+
+private struct ReaderHTMLWebViewRepresentable: NSViewRepresentable {
+    let html: String
+    let baseURL: URL?
+    @Binding var contentHeight: CGFloat
+    let onLinkClicked: ((URL) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(contentHeight: $contentHeight, onLinkClicked: onLinkClicked)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "heightChange")
+        config.userContentController = userContentController
+
+        let webView = NonScrollingWKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.setValue(false, forKey: "drawsBackground")
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+        return webView
+    }
+
+    func updateNSView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onLinkClicked = onLinkClicked
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+    }
+
+    static func dismantleNSView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "heightChange")
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        @Binding var contentHeight: CGFloat
+        var onLinkClicked: ((URL) -> Void)?
+        private var lastLoadedHTML: String = ""
+        private var lastLoadedBaseURL: URL? = nil
+
+        init(contentHeight: Binding<CGFloat>, onLinkClicked: ((URL) -> Void)?) {
+            self._contentHeight = contentHeight
+            self.onLinkClicked = onLinkClicked
+        }
+
+        func loadIfNeeded(html: String, baseURL: URL?, into webView: WKWebView) {
+            guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
+            lastLoadedHTML = html
+            lastLoadedBaseURL = baseURL
+            let htmlWithMathJax = WebScrapingService.injectMathJax(into: html)
+            webView.loadHTMLString(htmlWithMathJax, baseURL: baseURL)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "heightChange", let height = message.body as? CGFloat, height > 100 {
+                DispatchQueue.main.async {
+                    if abs(self.contentHeight - height) > 5 {
+                        self.contentHeight = height
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let script = """
+            (function() {
+                function report() {
+                    var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+                        window.webkit.messageHandlers.heightChange.postMessage(h);
+                    }
+                }
+                report();
+                if (window.ResizeObserver) {
+                    new ResizeObserver(report).observe(document.body);
+                }
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise().then(report);
+                }
+                window.addEventListener('load', report);
+                setTimeout(report, 300);
+                setTimeout(report, 1000);
+            })();
+            """
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url {
+                onLinkClicked?(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+#elseif canImport(UIKit)
+private struct ReaderHTMLWebViewRepresentable: UIViewRepresentable {
+    let html: String
+    let baseURL: URL?
+    @Binding var contentHeight: CGFloat
+    let onLinkClicked: ((URL) -> Void)?
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(contentHeight: $contentHeight, onLinkClicked: onLinkClicked)
+    }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let config = WKWebViewConfiguration()
+        let userContentController = WKUserContentController()
+        userContentController.add(context.coordinator, name: "heightChange")
+        config.userContentController = userContentController
+
+        let webView = WKWebView(frame: .zero, configuration: config)
+        webView.navigationDelegate = context.coordinator
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
+        webView.scrollView.isScrollEnabled = false
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+        return webView
+    }
+
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onLinkClicked = onLinkClicked
+        context.coordinator.loadIfNeeded(html: html, baseURL: baseURL, into: webView)
+    }
+
+    static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "heightChange")
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        @Binding var contentHeight: CGFloat
+        var onLinkClicked: ((URL) -> Void)?
+        private var lastLoadedHTML: String = ""
+        private var lastLoadedBaseURL: URL? = nil
+
+        init(contentHeight: Binding<CGFloat>, onLinkClicked: ((URL) -> Void)?) {
+            self._contentHeight = contentHeight
+            self.onLinkClicked = onLinkClicked
+        }
+
+        func loadIfNeeded(html: String, baseURL: URL?, into webView: WKWebView) {
+            guard html != lastLoadedHTML || baseURL != lastLoadedBaseURL else { return }
+            lastLoadedHTML = html
+            lastLoadedBaseURL = baseURL
+            let htmlWithMathJax = WebScrapingService.injectMathJax(into: html)
+            webView.loadHTMLString(htmlWithMathJax, baseURL: baseURL)
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "heightChange", let height = message.body as? CGFloat, height > 100 {
+                DispatchQueue.main.async {
+                    if abs(self.contentHeight - height) > 5 {
+                        self.contentHeight = height
+                    }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            let script = """
+            (function() {
+                function report() {
+                    var h = Math.max(document.body.scrollHeight, document.documentElement.scrollHeight);
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.heightChange) {
+                        window.webkit.messageHandlers.heightChange.postMessage(h);
+                    }
+                }
+                report();
+                if (window.ResizeObserver) {
+                    new ResizeObserver(report).observe(document.body);
+                }
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise().then(report);
+                }
+                window.addEventListener('load', report);
+                setTimeout(report, 300);
+                setTimeout(report, 1000);
+            })();
+            """
+            webView.evaluateJavaScript(script, completionHandler: nil)
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url {
+                onLinkClicked?(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+    }
+}
+#endif
 
 #Preview {
     SearchView(chatService: ChatService())
