@@ -1,1 +1,1 @@
-- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia (hasta 2 temas muy breves de 1 o 2 palabras cada uno) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder.
+- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia y devuelve pasajes relevantes. Reserva estrictamente para datos precisos, cifras, definiciones o hechos. Prioriza 1 solo tema breve (1 o 2 palabras). Solo usa un 2.º tema si el tema es complejo o difícil.

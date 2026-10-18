@@ -1,7 +1,7 @@
 {{groundingContext}}Tema o pregunta: {{query}}
 
 {{corpusHint}}
-Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
+Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder. Prioriza una sola consulta; reserva Wikipedia para datos y hechos precisos, y solo amplía las consultas si el tema es difícil.
 Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
 Si la pregunta requiere un cálculo, usa `calculate`.
 

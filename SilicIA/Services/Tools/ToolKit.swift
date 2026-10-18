@@ -288,29 +288,29 @@ nonisolated enum ToolKit {
         if useDuckDuckGo && useWikipedia {
             switch language {
             case .french:
-                return "- `searchSources(webQueries, wikiQueries)` : recherche simultanément sur le web (jusqu'à 2 requêtes) et sur Wikipédia (jusqu'à 2 sujets courts de 1 à 2 mots) et renvoie les passages pertinents. Appelle cet outil une seule fois avec toutes tes requêtes avant de répondre."
+                return "- `searchSources(webQueries, wikiQueries)` : recherche simultanément sur le web et Wikipédia et renvoie les passages pertinents. Privilégie 1 seule requête ciblée. Réserve Wikipédia (`wikiQueries`) strictement aux données précises, chiffres, définitions ou faits (laisse `[]` si non nécessaire). N'augmente jusqu'à 2 requêtes par source que si le sujet est complexe ou difficile."
             case .spanish:
-                return "- `searchSources(webQueries, wikiQueries)`: busca simultáneamente en la web (hasta 2 consultas) y en Wikipedia (hasta 2 temas breves de 1 o 2 palabras) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez con todas tus consultas antes de responder."
+                return "- `searchSources(webQueries, wikiQueries)`: busca simultáneamente en la web y Wikipedia y devuelve pasajes relevantes. Prioriza 1 sola consulta específica. Reserva Wikipedia (`wikiQueries`) estrictamente para datos precisos, cifras, definiciones o hechos (deja `[]` si no es necesario). Solo amplía hasta 2 consultas por fuente si el tema es complejo o difícil."
             case .english:
-                return "- `searchSources(webQueries, wikiQueries)`: search both the web (up to 2 queries) and Wikipedia (up to 2 short 1–2 word topics) simultaneously and return relevant passages. Call this tool once with all your queries before answering."
+                return "- `searchSources(webQueries, wikiQueries)`: search both the web and Wikipedia simultaneously and return relevant passages. Favor 1 single focused query. Reserve Wikipedia (`wikiQueries`) strictly for precise data, figures, definitions, or facts (pass `[]` if not needed). Only provide up to 2 queries per source if the topic is difficult or multi-faceted."
             }
         } else if useDuckDuckGo {
             switch language {
             case .french:
-                return "- `searchSources(webQueries)` : recherche sur le web via DuckDuckGo (jusqu'à 2 requêtes ciblées) et renvoie les passages pertinents. Appelle cet outil une seule fois avant de répondre."
+                return "- `searchSources(webQueries)` : recherche sur le web via DuckDuckGo et renvoie les passages pertinents. Privilégie 1 seule requête ciblée. N'utilise une 2e requête que si le sujet est complexe ou difficile."
             case .spanish:
-                return "- `searchSources(webQueries)`: busca en la web mediante DuckDuckGo (hasta 2 consultas específicas) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder."
+                return "- `searchSources(webQueries)`: busca en la web mediante DuckDuckGo y devuelve pasajes relevantes. Prioriza 1 sola consulta específica. Solo usa una 2.ª consulta si el tema es complejo o difícil."
             case .english:
-                return "- `searchSources(webQueries)`: search the web via DuckDuckGo (up to 2 targeted queries) and return relevant passages. Call this tool once before answering."
+                return "- `searchSources(webQueries)`: search the web via DuckDuckGo and return relevant passages. Favor 1 single focused query. Only provide a 2nd query if the topic is difficult or multi-faceted."
             }
         } else {
             switch language {
             case .french:
-                return "- `searchSources(wikiQueries)` : recherche des articles encyclopédiques sur Wikipédia (jusqu'à 2 sujets très courts de 1 à 2 mots chacun) et renvoie les passages pertinents. Appelle cet outil une seule fois avant de répondre."
+                return "- `searchSources(wikiQueries)` : recherche des articles encyclopédiques sur Wikipédia et renvoie les passages pertinents. À réserver strictement aux données précises, chiffres, définitions ou faits. Privilégie 1 seul sujet court (1 à 2 mots). N'utilise un 2e sujet que si le sujet est complexe ou difficile."
             case .spanish:
-                return "- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia (hasta 2 temas muy breves de 1 o 2 palabras cada uno) y devuelve pasajes relevantes. Llama a esta herramienta una sola vez antes de responder."
+                return "- `searchSources(wikiQueries)`: busca artículos enciclopédicos en Wikipedia y devuelve pasajes relevantes. Reserva estrictamente para datos precisos, cifras, definiciones o hechos. Prioriza 1 solo tema breve (1 o 2 palabras). Solo usa un 2.º tema si el tema es complejo o difícil."
             case .english:
-                return "- `searchSources(wikiQueries)`: search encyclopedic articles on Wikipedia (up to 2 very concise 1–2 word topics each) and return relevant passages. Call this tool once before answering."
+                return "- `searchSources(wikiQueries)`: search encyclopedic articles on Wikipedia and return relevant passages. Reserve strictly for precise data, figures, definitions, or facts. Favor 1 single concise topic (1–2 words). Only provide a 2nd topic if the topic is difficult."
             }
         }
     }

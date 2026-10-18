@@ -112,7 +112,7 @@ final class ToolCallingPromptTests: XCTestCase {
             useDuckDuckGo: true,
             useWikipedia: true
         )
-        XCTAssertTrue(promptEN.contains("search with searchSources (providing up to 2 web queries and up to 2 Wikipedia topics)"))
+        XCTAssertTrue(promptEN.contains("search with searchSources before answering. Favor a single query, reserve Wikipedia for precise data and facts"))
 
         let promptFR = ChatService.assembleToolCallingPrompt(
             currentQuestion: "Q?",
@@ -122,7 +122,7 @@ final class ToolCallingPromptTests: XCTestCase {
             useDuckDuckGo: true,
             useWikipedia: true
         )
-        XCTAssertTrue(promptFR.contains("effectue une recherche avec l'outil searchSources (en fournissant jusqu'à 2 requêtes web et jusqu'à 2 sujets Wikipédia)"))
+        XCTAssertTrue(promptFR.contains("effectue une recherche avec l'outil searchSources avant de répondre. Privilégie une seule requête, réserve Wikipédia aux données et faits précis"))
 
         let promptES = ChatService.assembleToolCallingPrompt(
             currentQuestion: "Q?",
@@ -132,7 +132,7 @@ final class ToolCallingPromptTests: XCTestCase {
             useDuckDuckGo: true,
             useWikipedia: true
         )
-        XCTAssertTrue(promptES.contains("realiza una búsqueda con searchSources (proporcionando hasta 2 consultas web y hasta 2 temas de Wikipedia)"))
+        XCTAssertTrue(promptES.contains("realiza una búsqueda con searchSources antes de responder. Prioriza una sola consulta, reserva Wikipedia para datos y hechos precisos"))
     }
 
     func testChatPromptWithWikipediaOnly() {
@@ -144,7 +144,7 @@ final class ToolCallingPromptTests: XCTestCase {
             useDuckDuckGo: false,
             useWikipedia: true
         )
-        XCTAssertTrue(promptFR.contains("utilise searchSources (avec jusqu'à 2 sujets Wikipédia) avant de répondre"))
+        XCTAssertTrue(promptFR.contains("utilise searchSources (privilégie 1 sujet, jusqu'à 2 si difficile) avant de répondre"))
     }
 
     func testChatPromptWithDuckDuckGoOnly() {
@@ -156,7 +156,7 @@ final class ToolCallingPromptTests: XCTestCase {
             useDuckDuckGo: true,
             useWikipedia: false
         )
-        XCTAssertTrue(promptFR.contains("utilise searchSources (avec jusqu'à 2 requêtes web) avant de répondre"))
+        XCTAssertTrue(promptFR.contains("utilise searchSources (privilégie 1 requête, jusqu'à 2 si difficile) avant de répondre"))
     }
 
     func testChatPromptOffline() {

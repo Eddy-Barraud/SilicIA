@@ -1,1 +1,1 @@
-- `searchSources(wikiQueries)`: search encyclopedic articles on Wikipedia (up to 2 very concise 1–2 word topics each) and return relevant passages. Call this tool once before answering.
+- `searchSources(wikiQueries)`: search encyclopedic articles on Wikipedia and return relevant passages. Reserve strictly for precise data, figures, definitions, or facts. Favor 1 single concise topic (1–2 words). Only provide a 2nd topic if the topic is difficult.

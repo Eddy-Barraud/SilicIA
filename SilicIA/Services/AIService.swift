@@ -660,7 +660,7 @@ class AIService: ObservableObject {
             \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
-            Effectue une recherche (`searchSources`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre.
+            Effectue une recherche (`searchSources`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre. Privilégie une seule requête ; réserve Wikipédia aux données et faits précis, et n'augmente les requêtes que si le sujet est difficile.
             N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
             Si la question nécessite un calcul, utilise `calculate`.
 
@@ -677,7 +677,7 @@ class AIService: ObservableObject {
             \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
-            Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder.
+            Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder. Prioriza una sola consulta; reserva Wikipedia para datos y hechos precisos, y solo amplía las consultas si el tema es difícil.
             Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
@@ -694,7 +694,7 @@ class AIService: ObservableObject {
             \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
-            Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering.
+            Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering. Favor a single query; reserve Wikipedia for precise data and facts, and only increase queries if the topic is difficult.
             Only call `currentDateTime` if the question explicitly depends on the current date or time.
             If the question requires a calculation, use `calculate`.
 

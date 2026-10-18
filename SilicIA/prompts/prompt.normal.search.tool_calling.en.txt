@@ -1,7 +1,7 @@
 {{groundingContext}}Topic or question: {{query}}
 
 {{corpusHint}}
-Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering.
+Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering. Favor a single query; reserve Wikipedia for precise data and facts, and only increase queries if the topic is difficult.
 Only call `currentDateTime` if the question explicitly depends on the current date or time.
 If the question requires a calculation, use `calculate`.
 

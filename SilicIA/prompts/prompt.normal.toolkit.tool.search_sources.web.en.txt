@@ -1,1 +1,1 @@
-- `searchSources(webQueries)`: search the web via DuckDuckGo (up to 2 targeted queries) and return relevant passages. Call this tool once before answering.
+- `searchSources(webQueries)`: search the web via DuckDuckGo and return relevant passages. Favor 1 single focused query. Only provide a 2nd query if the topic is difficult or multi-faceted.
