@@ -1306,7 +1306,7 @@ actor RAGContextService {
         }
 
         #if DEBUG
-        print("[RAGContextService] Two-stage ranking: \(chunks.count) chunks -> \(topCosineCandidates.count) kept after DCT/cosine ranking (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 2x token budget)")
+        print("[RAGContextService] Stage 1 (DCT/Cosine): \(chunks.count) chunks -> \(topCosineCandidates.count) candidates kept (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 2x token budget)")
         #endif
 
         var ranked: [RankedRAGChunk] = []
@@ -1377,15 +1377,6 @@ actor RAGContextService {
             return lhs.relevanceScore > rhs.relevanceScore
         }
 
-        #if DEBUG
-        let rankingElapsed = Date().timeIntervalSince(rankingStart)
-        print(String(format: "[Timing][RAGContextService] Ranked %d chunks in %.3f s (%.2f ms)", chunks.count, rankingElapsed, rankingElapsed * 1000.0))
-        let debugRanked = ranked.enumerated().map { index, r in
-            (rank: index + 1, score: r.relevanceScore, source: r.chunk.source, text: r.chunk.text)
-        }
-        DebugRAGStorage.shared.saveRankedChunks(query: query, chunks: debugRanked)
-        #endif
-
         var selected: [String] = []
         var selectedChunks: [RankedRAGChunk] = []
         var currentChars = 0
@@ -1400,6 +1391,18 @@ actor RAGContextService {
             selectedChunks.append(rankedChunk)
             currentChars += separatorChars + chunkEntry.count
         }
+
+        let finalSelectedChunks = selectedChunks.isEmpty && !ranked.isEmpty ? [ranked[0]] : selectedChunks
+
+        #if DEBUG
+        let rankingElapsed = Date().timeIntervalSince(rankingStart)
+        print(String(format: "[Timing][RAGContextService] Ranked %d chunks in %.3f s (%.2f ms)", chunks.count, rankingElapsed, rankingElapsed * 1000.0))
+        print("[RAGContextService] Stage 2 (NLEmbedding): \(ranked.count) candidates -> \(finalSelectedChunks.count) chunks kept after semantic ranking (\(currentChars)/\(maxContextChars) chars, <= 1x token budget)")
+        let debugRanked = finalSelectedChunks.enumerated().map { index, r in
+            (rank: index + 1, score: r.relevanceScore, source: r.chunk.source, text: r.chunk.text)
+        }
+        DebugRAGStorage.shared.saveRankedChunks(query: query, chunks: debugRanked)
+        #endif
 
         if selected.isEmpty, let first = ranked.first {
             let fallback = "Source: \(first.chunk.source)\n\(first.chunk.text)"
