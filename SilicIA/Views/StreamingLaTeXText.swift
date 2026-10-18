@@ -44,7 +44,9 @@ struct StreamingLaTeXText: View {
         let pending = isStreaming ? (blocks.last ?? "") : ""
 
         #if DEBUG
-        let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) blocks=\(blocks.count) committed=\(committed.count)")
+        if pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty{
+            let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) blocks=\(blocks.count) committed=\(committed.count)")
+        }
         #endif
 
         return VStack(alignment: .leading, spacing: 8) {

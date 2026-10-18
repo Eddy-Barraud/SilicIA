@@ -102,7 +102,7 @@ class WebSearchService: ObservableObject {
             useWikipedia: useWikipedia
         )
 
-        debugLog("single-query search done: count=\(results.count)")
+        debugLog("single-query search done with query: \"\(query)\" and result count=\(results.count)")
 
         return results
     }
