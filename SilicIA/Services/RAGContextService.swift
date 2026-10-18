@@ -76,26 +76,152 @@ struct RAGChunker {
         options: []
     )
 
-    /// Splits text into paragraph chunks using Swift NaturalLanguage NLTokenizer(unit: .paragraph).
+    private enum MarkdownSegment {
+        case table(String)
+        case prose(String)
+    }
+
+    /// Splits markdown text by extracting tables intact (Pass 1) and applying a
+    /// hybrid 3-sentence sliding window on narrative prose (Pass 2).
+    static func chunkMarkdown(
+        text: String,
+        source: String,
+        url: String? = nil,
+        pdfPage: Int? = nil,
+        windowSize: Int = 3,
+        stride: Int = 1
+    ) -> [RAGChunk] {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else { return [] }
+
+        let segments = segmentMarkdownTablesAndProse(cleanText)
+        var chunks: [RAGChunk] = []
+
+        for segment in segments {
+            switch segment {
+            case .table(let tableText):
+                let trimmedTable = tableText.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedTable.isEmpty {
+                    chunks.append(RAGChunk(source: source, text: trimmedTable, url: url, pdfPage: pdfPage))
+                }
+            case .prose(let proseText):
+                let proseChunks = slidingWindowProseChunks(
+                    prose: proseText,
+                    source: source,
+                    url: url,
+                    pdfPage: pdfPage,
+                    windowSize: windowSize,
+                    stride: stride
+                )
+                chunks.append(contentsOf: proseChunks)
+            }
+        }
+
+        return chunks
+    }
+
+    /// Backward-compatible entry point for web/Wikipedia markdown chunking.
+    /// Preserves Markdown tables intact and applies a 3-sentence sliding window.
     static func chunkParagraphs(
         text: String,
         source: String,
         url: String? = nil,
         pdfPage: Int? = nil
     ) -> [RAGChunk] {
-        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleanText.isEmpty else { return [] }
+        chunkMarkdown(text: text, source: source, url: url, pdfPage: pdfPage, windowSize: 3, stride: 1)
+    }
 
-        let tokenizer = NLTokenizer(unit: .paragraph)
-        tokenizer.string = cleanText
+    private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
+        let lines = markdown.components(separatedBy: "\n")
+        var segments: [MarkdownSegment] = []
+        var currentProse: [String] = []
+        var currentTable: [String] = []
 
-        var chunks: [RAGChunk] = []
-        tokenizer.enumerateTokens(in: cleanText.startIndex..<cleanText.endIndex) { range, _ in
-            let paragraph = cleanText[range].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !paragraph.isEmpty {
-                chunks.append(RAGChunk(source: source, text: paragraph, url: url, pdfPage: pdfPage))
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if isMarkdownTableRow(trimmed) {
+                if !currentProse.isEmpty {
+                    segments.append(.prose(currentProse.joined(separator: "\n")))
+                    currentProse.removeAll(keepingCapacity: true)
+                }
+                currentTable.append(line)
+            } else {
+                if !currentTable.isEmpty {
+                    let hasSep = currentTable.contains(where: { isMarkdownTableSeparator($0) })
+                    if hasSep && currentTable.count >= 2 {
+                        segments.append(.table(currentTable.joined(separator: "\n")))
+                    } else {
+                        currentProse.append(contentsOf: currentTable)
+                    }
+                    currentTable.removeAll(keepingCapacity: true)
+                }
+                currentProse.append(line)
             }
-            return true
+        }
+
+        if !currentTable.isEmpty {
+            let hasSep = currentTable.contains(where: { isMarkdownTableSeparator($0) })
+            if hasSep && currentTable.count >= 2 {
+                segments.append(.table(currentTable.joined(separator: "\n")))
+            } else {
+                currentProse.append(contentsOf: currentTable)
+            }
+        }
+
+        if !currentProse.isEmpty {
+            segments.append(.prose(currentProse.joined(separator: "\n")))
+        }
+
+        return segments
+    }
+
+    private static func slidingWindowProseChunks(
+        prose: String,
+        source: String,
+        url: String?,
+        pdfPage: Int?,
+        windowSize: Int,
+        stride: Int
+    ) -> [RAGChunk] {
+        let clean = prose.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return [] }
+
+        let paragraphs = clean.components(separatedBy: "\n\n")
+        var chunks: [RAGChunk] = []
+
+        for para in paragraphs {
+            let trimmedPara = para.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPara.isEmpty else { continue }
+
+            let tokenizer = NLTokenizer(unit: .sentence)
+            tokenizer.string = trimmedPara
+            var sentences: [String] = []
+            tokenizer.enumerateTokens(in: trimmedPara.startIndex..<trimmedPara.endIndex) { range, _ in
+                let s = trimmedPara[range].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !s.isEmpty {
+                    sentences.append(String(s))
+                }
+                return true
+            }
+
+            if sentences.isEmpty {
+                chunks.append(RAGChunk(source: source, text: trimmedPara, url: url, pdfPage: pdfPage))
+            } else if sentences.count <= windowSize {
+                let sep = sentences.contains(where: { $0.hasPrefix("#") || $0.hasPrefix("- ") || $0.hasPrefix("* ") }) ? "\n" : " "
+                chunks.append(RAGChunk(source: source, text: sentences.joined(separator: sep), url: url, pdfPage: pdfPage))
+            } else {
+                var i = 0
+                while i < sentences.count {
+                    let end = min(i + windowSize, sentences.count)
+                    let window = Array(sentences[i..<end])
+                    let sep = window.contains(where: { $0.hasPrefix("#") || $0.hasPrefix("- ") || $0.hasPrefix("* ") }) ? "\n" : " "
+                    chunks.append(RAGChunk(source: source, text: window.joined(separator: sep), url: url, pdfPage: pdfPage))
+                    if end == sentences.count {
+                        break
+                    }
+                    i += max(1, stride)
+                }
+            }
         }
 
         return chunks
@@ -448,17 +574,19 @@ struct RAGChunker {
     }
 
     private nonisolated static func isMarkdownTableRow(_ line: String) -> Bool {
-        line.hasPrefix("|") && line.hasSuffix("|") && line.count >= 3
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        return trimmed.hasPrefix("|") && trimmed.hasSuffix("|") && trimmed.count >= 3
     }
 
     private nonisolated static func isMarkdownTableSeparator(_ line: String) -> Bool {
-        guard isMarkdownTableRow(line) else { return false }
-        let cells = line.split(separator: "|", omittingEmptySubsequences: true)
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard isMarkdownTableRow(trimmed) else { return false }
+        let cells = trimmed.split(separator: "|", omittingEmptySubsequences: true)
         guard !cells.isEmpty else { return false }
         return cells.allSatisfy { cell in
-            let trimmed = cell.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else { return false }
-            return trimmed.allSatisfy { $0 == "-" || $0 == ":" }
+            let trimmedCell = cell.trimmingCharacters(in: .whitespaces)
+            guard !trimmedCell.isEmpty else { return false }
+            return trimmedCell.allSatisfy { $0 == "-" || $0 == ":" }
         }
     }
 

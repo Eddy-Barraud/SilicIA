@@ -359,6 +359,99 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertEqual(result.rankedChunks.last?.chunk.url, "https://fr.wikipedia.org/wiki/Star_Academy_(France)")
     }
 
+    func testMarkdownTablePreservedAsSingleChunk() {
+        let markdown = """
+        # Chronologie des dirigeants
+
+        Voici la liste des présidents de la IVe République française :
+
+        | Président | Début de mandat | Fin de mandat | Parti politique |
+        | --- | --- | --- | --- |
+        | Vincent Auriol | 16 janvier 1947 | 16 janvier 1954 | SFIO |
+        | René Coty | 16 janvier 1954 | 8 janvier 1959 | CNIP |
+
+        Cette période s'est achevée avec l'adoption de la Constitution de la Ve République.
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: markdown, source: "Wikipedia: IVe", url: "https://wikipedia.org")
+
+        // Must produce 4 chunks: heading, intro prose, the complete intact table, and concluding prose
+        XCTAssertEqual(chunks.count, 4)
+
+        // Heading
+        XCTAssertTrue(chunks[0].text.contains("# Chronologie des dirigeants"))
+
+        // Intro prose
+        XCTAssertTrue(chunks[1].text.contains("Voici la liste des présidents"))
+
+        // Table chunk: entire table with all 4 rows intact
+        let tableChunk = chunks[2]
+        XCTAssertTrue(tableChunk.text.contains("| Président | Début de mandat | Fin de mandat | Parti politique |"))
+        XCTAssertTrue(tableChunk.text.contains("| --- | --- | --- | --- |"))
+        XCTAssertTrue(tableChunk.text.contains("| Vincent Auriol | 16 janvier 1947 | 16 janvier 1954 | SFIO |"))
+        XCTAssertTrue(tableChunk.text.contains("| René Coty | 16 janvier 1954 | 8 janvier 1959 | CNIP |"))
+        let tableLines = tableChunk.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        XCTAssertEqual(tableLines.count, 4)
+
+        // Concluding prose
+        XCTAssertTrue(chunks[3].text.contains("Cette période s'est achevée"))
+    }
+
+    func testThreeSentenceSlidingWindow() {
+        let text = """
+        Première phrase sur les statistiques de l'emploi en France. Deuxième phrase détaillant le taux de chômage au premier trimestre. Troisième phrase comparant avec l'année précédente. Quatrième phrase analysant la hausse pour les jeunes. Cinquième phrase concluant sur les perspectives économiques.
+        """
+
+        let chunks = RAGChunker.chunkMarkdown(text: text, source: "INSEE", windowSize: 3, stride: 1)
+        // 5 sentences with windowSize 3 and stride 1 produces:
+        // Chunk 0: [S1, S2, S3]
+        // Chunk 1: [S2, S3, S4]
+        // Chunk 2: [S3, S4, S5]
+        XCTAssertEqual(chunks.count, 3)
+
+        XCTAssertTrue(chunks[0].text.contains("Première phrase"))
+        XCTAssertTrue(chunks[0].text.contains("Troisième phrase"))
+        XCTAssertFalse(chunks[0].text.contains("Quatrième phrase"))
+
+        XCTAssertTrue(chunks[1].text.contains("Deuxième phrase"))
+        XCTAssertTrue(chunks[1].text.contains("Quatrième phrase"))
+        XCTAssertFalse(chunks[1].text.contains("Première phrase"))
+
+        XCTAssertTrue(chunks[2].text.contains("Troisième phrase"))
+        XCTAssertTrue(chunks[2].text.contains("Cinquième phrase"))
+        XCTAssertFalse(chunks[2].text.contains("Deuxième phrase"))
+    }
+
+    func testInseeFixtureTablesPreserved() throws {
+        let fixturePath = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Tools")
+            .appendingPathComponent("2026-10-18T13-37-18Z_www_insee_fr.md")
+
+        guard FileManager.default.fileExists(atPath: fixturePath.path) else {
+            return
+        }
+
+        let content = try String(contentsOf: fixturePath, encoding: .utf8)
+        let chunks = RAGChunker.chunkMarkdown(text: content, source: "INSEE Fixture")
+
+        // In this document, there are 10 tables
+        let tableChunks = chunks.filter { chunk in
+            let firstLine = chunk.text.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
+            return firstLine.hasPrefix("|") && firstLine.hasSuffix("|")
+        }
+        XCTAssertEqual(tableChunks.count, 10)
+
+        // Ensure Table 1 contains full 95 rows intact
+        let table1 = tableChunks[0]
+        XCTAssertTrue(table1.text.contains("France (hors Mayotte)"))
+        XCTAssertTrue(table1.text.contains("2026-T1"))
+        XCTAssertTrue(table1.text.contains("2015-T1"))
+        let table1Rows = table1.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        XCTAssertEqual(table1Rows.count, 95)
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size
