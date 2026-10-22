@@ -69,7 +69,8 @@ struct RAGChunker {
     }
 
     /// Strips Markdown headings (#...), converts Markdown links [name](url) into "name",
-    /// and flattens image tags ![alt](url) into "alt" using fast linear-time scanners.
+    /// flattens image tags ![alt](url) into "alt", removes HTML tags (<sup>, <sub>, etc.),
+    /// and decodes HTML entities using fast linear-time scanners.
     static func removeMarkdownFormatting(from text: String) -> String {
         // 1. Remove lines of titles and subtitles (starting with #)
         let lines = text.components(separatedBy: "\n")
@@ -83,7 +84,79 @@ struct RAGChunker {
         let withoutImages = stripMarkdownImages(from: withoutTitles)
 
         // 3. Strip links [name](url) -> name
-        return stripMarkdownLinks(from: withoutImages)
+        let withoutLinks = stripMarkdownLinks(from: withoutImages)
+
+        // 4. Strip HTML tags (<sup>, <sub>, <span>, <br>, etc.)
+        let withoutTags = stripHTMLTags(from: withoutLinks)
+
+        // 5. Decode HTML entities (e.g. &nbsp; -> space)
+        return HTMLSanitizer.decodeEntities(withoutTags)
+    }
+
+    /// Single-pass linear scanner removing HTML tags (such as <sup>, <sub>, <span>, etc.)
+    /// while converting line-break and block elements (<br>, <p>, <div>, etc.) into spaces.
+    /// Preserves mathematical inequalities (e.g. `x < y`, `3 < 5`).
+    static func stripHTMLTags(from text: String) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "<" {
+                let nextIndex = text.index(after: i)
+                if nextIndex < text.endIndex {
+                    let firstChar = text[nextIndex]
+                    let isClosingTag = firstChar == "/"
+                    let isComment = firstChar == "!"
+                    let isAlpha = (firstChar >= "a" && firstChar <= "z") || (firstChar >= "A" && firstChar <= "Z")
+
+                    if isClosingTag || isComment || isAlpha {
+                        var scan = nextIndex
+                        var inQuote: Character? = nil
+                        var foundTagEnd: String.Index? = nil
+                        var count = 0
+
+                        while scan < text.endIndex && count < 300 {
+                            let c = text[scan]
+                            if c == "\n" { break }
+
+                            if let q = inQuote {
+                                if c == q { inQuote = nil }
+                            } else if c == "\"" || c == "'" {
+                                inQuote = c
+                            } else if c == ">" {
+                                foundTagEnd = scan
+                                break
+                            }
+                            scan = text.index(after: scan)
+                            count += 1
+                        }
+
+                        if let tagEnd = foundTagEnd {
+                            let tagContent = text[nextIndex..<tagEnd].trimmingCharacters(in: .whitespaces)
+                            let isClosing = tagContent.hasPrefix("/")
+                            let rawName = isClosing ? String(tagContent.dropFirst()) : tagContent
+                            let tagName = rawName.prefix(while: { ($0 >= "a" && $0 <= "z") || ($0 >= "A" && $0 <= "Z") }).lowercased()
+
+                            let needsSpace = ["br", "p", "div", "li", "tr", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6"].contains(tagName)
+                            if needsSpace && !isClosing {
+                                if !result.isEmpty && !result.hasSuffix(" ") && !result.hasSuffix("\n") {
+                                    result.append(" ")
+                                }
+                            }
+
+                            i = text.index(after: tagEnd)
+                            continue
+                        }
+                    }
+                }
+            }
+
+            result.append(text[i])
+            i = text.index(after: i)
+        }
+
+        return result
     }
 
     /// Single-pass linear scanner replacing markdown images ![alt](url) -> alt.
@@ -151,7 +224,8 @@ struct RAGChunker {
     }
 
     /// Single-pass linear scanner replacing markdown links [name](url) -> name.
-    /// Handles balanced parentheses in URLs (e.g. Wikipedia article titles) without catastrophic regex backtracking.
+    /// Handles balanced and escaped brackets in labels, balanced parentheses in URLs,
+    /// and prunes citation footnote links (e.g. `#cite_note` references).
     static func stripMarkdownLinks(from text: String) -> String {
         var result = ""
         result.reserveCapacity(text.count)
@@ -163,12 +237,24 @@ struct RAGChunker {
 
                 var bracketEnd: String.Index? = nil
                 var scan = contentStart
+                var bracketDepth = 1
+
                 while scan < text.endIndex {
                     let c = text[scan]
                     if c == "\n" { break }
-                    if c == "]" {
-                        bracketEnd = scan
-                        break
+                    if c == "\\" {
+                        let next = text.index(after: scan)
+                        if next < text.endIndex {
+                            scan = next
+                        }
+                    } else if c == "[" {
+                        bracketDepth += 1
+                    } else if c == "]" {
+                        bracketDepth -= 1
+                        if bracketDepth == 0 {
+                            bracketEnd = scan
+                            break
+                        }
                     }
                     scan = text.index(after: scan)
                 }
@@ -198,8 +284,18 @@ struct RAGChunker {
                     }
 
                     if let pEnd = parenEnd {
-                        let label = text[contentStart..<bEnd]
-                        result.append(contentsOf: label)
+                        let rawLabel = text[contentStart..<bEnd]
+                        let unescapedLabel = rawLabel
+                            .replacingOccurrences(of: "\\[", with: "[")
+                            .replacingOccurrences(of: "\\]", with: "]")
+
+                        let urlStr = String(text[urlStart..<pEnd])
+                        let isFootnote = urlStr.contains("#cite_note")
+                            || (Int(unescapedLabel.trimmingCharacters(in: CharacterSet(charactersIn: "[] "))) != nil && urlStr.contains("wiki/"))
+
+                        if !isFootnote {
+                            result.append(contentsOf: unescapedLabel)
+                        }
                         i = text.index(after: pEnd)
                         continue
                     }
@@ -245,7 +341,9 @@ struct RAGChunker {
         for segment in segments {
             switch segment {
             case .table(let tableText):
-                let trimmedTable = tableText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let cleanedTable = stripHTMLTags(from: stripMarkdownLinks(from: stripMarkdownImages(from: tableText)))
+                let decodedTable = HTMLSanitizer.decodeEntities(cleanedTable)
+                let trimmedTable = decodedTable.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmedTable.isEmpty {
                     chunks.append(RAGChunk(source: source, text: trimmedTable, url: url, pdfPage: pdfPage))
                 }

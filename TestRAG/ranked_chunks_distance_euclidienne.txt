@@ -2,9 +2,9 @@
 TestRAG Ranking Report
 Query: distance euclidienne
 Source: Distance euclidienne (https://fr.wikipedia.org/wiki/Distance_euclidienne)
-Total Chunks: 36
-Ranked Candidates (Stage 2): 36
-Selected Chunks (Final Window): 18
+Total Chunks: 35
+Ranked Candidates (Stage 2): 35
+Selected Chunks (Final Window): 27
 ================================================================================
 
 --- SELECTED CHUNKS IN CONTEXT WINDOW (TOP RANKED) ---
@@ -30,109 +30,172 @@ Content:
 Utilisation du théorème de Pythagore pour calculer la distance euclidienne bidimensionnelle
 --------------------------------------------------------------------------------
 
-[Rank #4] Score: 1.6757 | Length: 357 chars
+[Rank #4] Score: 1.6781 | Length: 60 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-La distance entre deux points quelconques sur la ligne des nombres réel est la valeur absolue de la différence numérique de leurs coordonnées. Ainsi si {\displaystyle p} et {\displaystyle q} sont deux points sur la droite, alors la distance qui les sépare est donnée par <sup>[\[1\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:0-1)</sup>:
+- La distance d'un point à une ligne, dans le plan euclidien
 --------------------------------------------------------------------------------
 
-[Rank #5] Score: 1.6675 | Length: 498 chars
+[Rank #5] Score: 1.6587 | Length: 416 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-Pour les paires d'objets qui ne sont pas les deux points, la distance peut être définie le plus simplement comme la plus petite distance entre deux points quelconques des deux objets, bien que des généralisations plus compliquées des points aux ensembles telles que la distance de Hausdorff soient également couramment utilisées<sup>[\[5\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-5)</sup>. Les formules pour calculer les distances entre différents types d'objets comprennent :
+Pour les paires d'objets qui ne sont pas les deux points, la distance peut être définie le plus simplement comme la plus petite distance entre deux points quelconques des deux objets, bien que des généralisations plus compliquées des points aux ensembles telles que la distance de Hausdorff soient également couramment utilisées. Les formules pour calculer les distances entre différents types d'objets comprennent :
 --------------------------------------------------------------------------------
 
-[Rank #6] Score: 1.6455 | Length: 837 chars
+[Rank #6] Score: 1.6514 | Length: 826 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-Les noms « distance euclidienne » et « distance de Pythagore » proviennent des mathématiciens grecs anciens Euclide et Pythagore. Dans la géométrie déductive grecque illustrée par *les Éléments* d'Euclide, les distances n'étaient pas représentées par des nombres mais par des segments de ligne de même longueur, considérés comme « égaux ». La notion de distance est inhérente à l'outil boussole utilisé pour tracer un cercle, dont les points ont tous la même distance d'un point central commun. Le lien entre le théorème de Pythagore et le calcul de distance n’a été fait qu’au XVIII<sup>e</sup> (18ᵉ siècle) siècle ; dans son traité intitulé *Recherches sur les courbes à double courbure* de 1731, Alexis Clairaut utilise la formule {\displaystyle MD={\sqrt {{\overline {x\mp a}}^{2}+{\overline {y\mp b}}^{2}}}} pour un calcul de rayon.
+Les noms « distance euclidienne » et « distance de Pythagore » proviennent des mathématiciens grecs anciens Euclide et Pythagore. Dans la géométrie déductive grecque illustrée par *les Éléments* d'Euclide, les distances n'étaient pas représentées par des nombres mais par des segments de ligne de même longueur, considérés comme « égaux ». La notion de distance est inhérente à l'outil boussole utilisé pour tracer un cercle, dont les points ont tous la même distance d'un point central commun. Le lien entre le théorème de Pythagore et le calcul de distance n’a été fait qu’au XVIIIe (18ᵉ siècle) siècle ; dans son traité intitulé *Recherches sur les courbes à double courbure* de 1731, Alexis Clairaut utilise la formule {\displaystyle MD={\sqrt {{\overline {x\mp a}}^{2}+{\overline {y\mp b}}^{2}}}} pour un calcul de rayon.
 --------------------------------------------------------------------------------
 
-[Rank #7] Score: 1.6423 | Length: 409 chars
+[Rank #7] Score: 1.6417 | Length: 71 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-Il est également possible de calculer la distance pour des points donnés par leurs coordonnées polaires . Si les coordonnées polaires de {\displaystyle p} sont {\displaystyle (r,\theta )} et les coordonnées polaires de {\displaystyle q} sont {\displaystyle (s,\psi )}, alors leur distance est<sup>[\[2\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:1-2)</sup> donnée par la loi des cosinus :
+- La distance entre deux lignes dans l'espace euclidien tridimensionnel
 --------------------------------------------------------------------------------
 
-[Rank #8] Score: 1.6203 | Length: 95 chars
+[Rank #8] Score: 1.6383 | Length: 74 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+- La distance d'un point à un plan dans l'espace euclidien tridimensionnel
+--------------------------------------------------------------------------------
+
+[Rank #9] Score: 1.6277 | Length: 324 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+Il est également possible de calculer la distance pour des points donnés par leurs coordonnées polaires . Si les coordonnées polaires de {\displaystyle p} sont {\displaystyle (r,\theta )} et les coordonnées polaires de {\displaystyle q} sont {\displaystyle (s,\psi )}, alors leur distance est donnée par la loi des cosinus :
+--------------------------------------------------------------------------------
+
+[Rank #10] Score: 1.6203 | Length: 95 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
 En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, la distance est
 --------------------------------------------------------------------------------
 
-[Rank #9] Score: 1.6176 | Length: 370 chars
-Source: Distance euclidienne
-URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content:
-Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées cartésiennes {\displaystyle (p_{1},p_{2})} et le point {\displaystyle q} ayant pour coordonnées {\displaystyle (q_{1},q_{2})} . Alors la distance entre {\displaystyle p} et {\displaystyle q} est donné par <sup>[\[2\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:1-2)</sup>:
---------------------------------------------------------------------------------
-
-[Rank #10] Score: 1.6020 | Length: 139 chars
+[Rank #11] Score: 1.6020 | Length: 139 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
 Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension en appliquant à plusieurs reprises le théorème de Pythagore
 --------------------------------------------------------------------------------
 
-[Rank #11] Score: 1.5930 | Length: 371 chars
+[Rank #12] Score: 1.5547 | Length: 179 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres complexes dans le plan complexe, la même formule pour les points unidimensionnels exprimés sous forme de nombres réels peut être utilisée, bien qu'ici le signe de la valeur absolue indique la norme complexe<sup>[\[3\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-3)</sup> :
+La distance d'un point à une courbe peut être utilisée pour définir sa courbe parallèle, une autre courbe dont tous les points ont la même distance par rapport à la courbe donnée.
 --------------------------------------------------------------------------------
 
-[Rank #12] Score: 1.5352 | Length: 14 chars
+[Rank #13] Score: 1.5540 | Length: 140 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
-<!--THE END-->
+En général, pour les points donnés par des coordonnées cartésiennes dans {\displaystyle n} -espace euclidien dimensionnel, la distance est :
 --------------------------------------------------------------------------------
 
-[Rank #13] Score: 1.5318 | Length: 299 chars
+[Rank #14] Score: 1.5318 | Length: 299 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
 En mathématiques, la **distance euclidienne** entre deux points de l'espace euclidien est la longueur du segment qui sépare ces points. Elle est parfois appelée la **distance de Pythagore** car elle peut être calculée par le théorème de Pythagore à partir des coordonnées cartésiennes de ces points.
 --------------------------------------------------------------------------------
 
-[Rank #14] Score: 1.5245 | Length: 145 chars
-Source: Distance euclidienne
-URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content:
-- La distance d'un point à une ligne, dans le plan euclidien<sup>[\[6\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:2-6)</sup>
---------------------------------------------------------------------------------
-
-[Rank #15] Score: 1.5182 | Length: 159 chars
-Source: Distance euclidienne
-URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content:
-- La distance d'un point à un plan dans l'espace euclidien tridimensionnel<sup>[\[6\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:2-6)</sup>
---------------------------------------------------------------------------------
-
-[Rank #16] Score: 1.5115 | Length: 153 chars
-Source: Distance euclidienne
-URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content:
-- La distance entre deux lignes dans l'espace euclidien tridimensionnel<sup>[\[7\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-7)</sup>
---------------------------------------------------------------------------------
-
-[Rank #17] Score: 1.5073 | Length: 261 chars
-Source: Distance euclidienne
-URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content:
-La distance d'un point à une courbe peut être utilisée pour définir sa courbe parallèle, une autre courbe dont tous les points ont la même distance par rapport à la courbe donnée<sup>[\[8\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-8)</sup>.
---------------------------------------------------------------------------------
-
-[Rank #18] Score: 1.4824 | Length: 29 chars
+[Rank #15] Score: 1.4824 | Length: 29 chars
 Source: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
 Content:
 {\displaystyle d(p,q)=|p-q|.}
+--------------------------------------------------------------------------------
+
+[Rank #16] Score: 1.4824 | Length: 29 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)=|p-q|.}
+--------------------------------------------------------------------------------
+
+[Rank #17] Score: 1.4784 | Length: 31 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)=\|p-q\|.}
+--------------------------------------------------------------------------------
+
+[Rank #18] Score: 1.4768 | Length: 44 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+- icône décorative Portail des mathématiques
+--------------------------------------------------------------------------------
+
+[Rank #19] Score: 1.4568 | Length: 272 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+La distance entre deux points quelconques sur la ligne des nombres réel est la valeur absolue de la différence numérique de leurs coordonnées. Ainsi si {\displaystyle p} et {\displaystyle q} sont deux points sur la droite, alors la distance qui les sépare est donnée par :
+--------------------------------------------------------------------------------
+
+[Rank #20] Score: 1.4488 | Length: 93 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+En utilisant la formule généralisable aux dimensions supérieures, on obtient la même valeur :
+--------------------------------------------------------------------------------
+
+[Rank #21] Score: 1.4317 | Length: 43 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)={\sqrt {(p-q)^{2}}}.}
+--------------------------------------------------------------------------------
+
+[Rank #22] Score: 1.4129 | Length: 69 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}}}.}
+--------------------------------------------------------------------------------
+
+[Rank #23] Score: 1.4125 | Length: 68 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)={\sqrt {r^{2}+s^{2}-2rs\cos(\theta -\psi )}}.}
+--------------------------------------------------------------------------------
+
+[Rank #24] Score: 1.4079 | Length: 87 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+(p_{3}-q_{3})^{2}}}.}
+--------------------------------------------------------------------------------
+
+[Rank #25] Score: 1.3871 | Length: 95 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+{\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+\cdots +(p_{n}-q_{n})^{2}}}.}
+--------------------------------------------------------------------------------
+
+[Rank #26] Score: 1.3833 | Length: 160 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+3. ↑ « 3.1.1 The Distance Between Two Points », dans Complex Numbers from A to... Z, Birkhäuser Boston, 53–88 p. (pages) (ISBN 978-0-8176-4326-3, lire en ligne)
+--------------------------------------------------------------------------------
+
+[Rank #27] Score: 1.3226 | Length: 165 chars
+Source: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content:
+5. ↑ (en) (Langue : anglais) Mícheál O'Searcoid, Metric Spaces, Springer Science & Business Media, 26 décembre 2006 (ISBN 978-1-84628-627-8, lire en ligne), p. 29-30
 --------------------------------------------------------------------------------
 
 
@@ -140,78 +203,76 @@ Content:
 [#01] Score: 1.7540 | Selected: YES | 596 chars | Preview: La distance entre deux objets qui ne sont pas des points est généralement défini
 [#02] Score: 1.7459 | Selected: YES | 151 chars | Preview: La distance euclidienne peut également être exprimée de manière plus compacte en
 [#03] Score: 1.7059 | Selected: YES | 91 chars | Preview: Utilisation du théorème de Pythagore pour calculer la distance euclidienne bidim
-[#04] Score: 1.6757 | Selected: YES | 357 chars | Preview: La distance entre deux points quelconques sur la ligne des nombres réel est la v
-[#05] Score: 1.6675 | Selected: YES | 498 chars | Preview: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être 
-[#06] Score: 1.6455 | Selected: YES | 837 chars | Preview: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des m
-[#07] Score: 1.6423 | Selected: YES | 409 chars | Preview: Il est également possible de calculer la distance pour des points donnés par leu
-[#08] Score: 1.6203 | Selected: YES | 95 chars | Preview: En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, 
-[#09] Score: 1.6176 | Selected: YES | 370 chars | Preview: Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées c
-[#10] Score: 1.6020 | Selected: YES | 139 chars | Preview: Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension 
-[#11] Score: 1.5930 | Selected: YES | 371 chars | Preview: Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres
-[#12] Score: 1.5352 | Selected: YES | 14 chars | Preview: <!--THE END-->
-[#13] Score: 1.5318 | Selected: YES | 299 chars | Preview: En mathématiques, la **distance euclidienne** entre deux points de l'espace eucl
-[#14] Score: 1.5245 | Selected: YES | 145 chars | Preview: - La distance d'un point à une ligne, dans le plan euclidien<sup>[\[6\]](https:/
-[#15] Score: 1.5182 | Selected: YES | 159 chars | Preview: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel<sup>[
-[#16] Score: 1.5115 | Selected: YES | 153 chars | Preview: - La distance entre deux lignes dans l'espace euclidien tridimensionnel<sup>[\[7
-[#17] Score: 1.5073 | Selected: YES | 261 chars | Preview: La distance d'un point à une courbe peut être utilisée pour définir sa courbe pa
-[#18] Score: 1.5046 | Selected: NO  | 222 chars | Preview: En général, pour les points donnés par des coordonnées cartésiennes dans {\displ
-[#19] Score: 1.4824 | Selected: YES | 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
-[#20] Score: 1.4824 | Selected: NO  | 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
-[#21] Score: 1.4784 | Selected: NO  | 31 chars | Preview: {\displaystyle d(p,q)=\|p-q\|.}
-[#22] Score: 1.4768 | Selected: NO  | 44 chars | Preview: - icône décorative Portail des mathématiques
-[#23] Score: 1.4317 | Selected: NO  | 43 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p-q)^{2}}}.}
-[#24] Score: 1.4147 | Selected: NO  | 178 chars | Preview: En utilisant la formule généralisable aux dimensions supérieures, on obtient la 
-[#25] Score: 1.4129 | Selected: NO  | 69 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}}}.}
-[#26] Score: 1.4125 | Selected: NO  | 68 chars | Preview: {\displaystyle d(p,q)={\sqrt {r^{2}+s^{2}-2rs\cos(\theta -\psi )}}.}
-[#27] Score: 1.4079 | Selected: NO  | 87 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+(p_{3}-q_{3})^
-[#28] Score: 1.3871 | Selected: NO  | 95 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+\cdots +(p_{n}
-[#29] Score: 1.3833 | Selected: NO  | 160 chars | Preview: 3. ↑ « 3.1.1 The Distance Between Two Points », dans Complex Numbers from A to..
-[#30] Score: 1.3654 | Selected: NO  | 256 chars | Preview: 7. ↑ Robert J. T. (Robert John Tainsh) Wellesley College Library, An elementary 
-[#31] Score: 1.3368 | Selected: NO  | 277 chars | Preview: 6. 1 2 J. P. Ballantine et A. R. Jerbert, « Distance from a Line, or Plane, to a
-[#32] Score: 1.3226 | Selected: NO  | 165 chars | Preview: 5. ↑ (en) (Langue : anglais) Mícheál O'Searcoid, Metric Spaces, Springer Science
-[#33] Score: 1.3125 | Selected: NO  | 171 chars | Preview: 2. 1 2 (en) (Langue : anglais) David Cohen, Precalculus: A Problems-Oriented App
-[#34] Score: 1.3100 | Selected: NO  | 165 chars | Preview: 4. ↑ (en) (Langue : anglais) John Tabak, Geometry: The Language of Space and For
-[#35] Score: 1.2934 | Selected: NO  | 184 chars | Preview: 1. 1 2 (en) (Langue : anglais) Karl Smith, Precalculus: A Functional Approach to
-[#36] Score: 1.2832 | Selected: NO  | 289 chars | Preview: 8. ↑ Takashi Maekawa, « An overview of offset curves and surfaces », *Computer-A
+[#04] Score: 1.6781 | Selected: YES | 60 chars | Preview: - La distance d'un point à une ligne, dans le plan euclidien
+[#05] Score: 1.6587 | Selected: YES | 416 chars | Preview: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être 
+[#06] Score: 1.6514 | Selected: YES | 826 chars | Preview: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des m
+[#07] Score: 1.6417 | Selected: YES | 71 chars | Preview: - La distance entre deux lignes dans l'espace euclidien tridimensionnel
+[#08] Score: 1.6383 | Selected: YES | 74 chars | Preview: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel
+[#09] Score: 1.6277 | Selected: YES | 324 chars | Preview: Il est également possible de calculer la distance pour des points donnés par leu
+[#10] Score: 1.6203 | Selected: YES | 95 chars | Preview: En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, 
+[#11] Score: 1.6020 | Selected: YES | 139 chars | Preview: Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension 
+[#12] Score: 1.5547 | Selected: YES | 179 chars | Preview: La distance d'un point à une courbe peut être utilisée pour définir sa courbe pa
+[#13] Score: 1.5540 | Selected: YES | 140 chars | Preview: En général, pour les points donnés par des coordonnées cartésiennes dans {\displ
+[#14] Score: 1.5318 | Selected: YES | 299 chars | Preview: En mathématiques, la **distance euclidienne** entre deux points de l'espace eucl
+[#15] Score: 1.4824 | Selected: YES | 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
+[#16] Score: 1.4824 | Selected: YES | 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
+[#17] Score: 1.4784 | Selected: YES | 31 chars | Preview: {\displaystyle d(p,q)=\|p-q\|.}
+[#18] Score: 1.4768 | Selected: YES | 44 chars | Preview: - icône décorative Portail des mathématiques
+[#19] Score: 1.4568 | Selected: YES | 272 chars | Preview: La distance entre deux points quelconques sur la ligne des nombres réel est la v
+[#20] Score: 1.4488 | Selected: YES | 93 chars | Preview: En utilisant la formule généralisable aux dimensions supérieures, on obtient la 
+[#21] Score: 1.4317 | Selected: YES | 43 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p-q)^{2}}}.}
+[#22] Score: 1.4129 | Selected: YES | 69 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}}}.}
+[#23] Score: 1.4125 | Selected: YES | 68 chars | Preview: {\displaystyle d(p,q)={\sqrt {r^{2}+s^{2}-2rs\cos(\theta -\psi )}}.}
+[#24] Score: 1.4079 | Selected: YES | 87 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+(p_{3}-q_{3})^
+[#25] Score: 1.3871 | Selected: YES | 95 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+\cdots +(p_{n}
+[#26] Score: 1.3833 | Selected: YES | 160 chars | Preview: 3. ↑ « 3.1.1 The Distance Between Two Points », dans Complex Numbers from A to..
+[#27] Score: 1.3699 | Selected: NO  | 285 chars | Preview: Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées c
+[#28] Score: 1.3654 | Selected: NO  | 256 chars | Preview: 7. ↑ Robert J. T. (Robert John Tainsh) Wellesley College Library, An elementary 
+[#29] Score: 1.3588 | Selected: NO  | 289 chars | Preview: Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres
+[#30] Score: 1.3545 | Selected: NO  | 264 chars | Preview: 6.   J. P. Ballantine et A. R. Jerbert, « Distance from a Line, or Plane, to a P
+[#31] Score: 1.3226 | Selected: YES | 165 chars | Preview: 5. ↑ (en) (Langue : anglais) Mícheál O'Searcoid, Metric Spaces, Springer Science
+[#32] Score: 1.3163 | Selected: NO  | 169 chars | Preview: 2.   (en) (Langue : anglais) David Cohen, Precalculus: A Problems-Oriented Appro
+[#33] Score: 1.3100 | Selected: NO  | 165 chars | Preview: 4. ↑ (en) (Langue : anglais) John Tabak, Geometry: The Language of Space and For
+[#34] Score: 1.2968 | Selected: NO  | 182 chars | Preview: 1.   (en) (Langue : anglais) Karl Smith, Precalculus: A Functional Approach to G
+[#35] Score: 1.2961 | Selected: NO  | 267 chars | Preview: 8. ↑ Takashi Maekawa, « An overview of offset curves and surfaces », *Computer-A
 
 
 --- ALL INITIAL CHUNKS FROM RAGCHUNKER ---
 [Chunk #001] 91 chars | Preview: Utilisation du théorème de Pythagore pour calculer la distance euclidienne bidim
 [Chunk #002] 299 chars | Preview: En mathématiques, la **distance euclidienne** entre deux points de l'espace eucl
 [Chunk #003] 596 chars | Preview: La distance entre deux objets qui ne sont pas des points est généralement défini
-[Chunk #004] 357 chars | Preview: La distance entre deux points quelconques sur la ligne des nombres réel est la v
+[Chunk #004] 272 chars | Preview: La distance entre deux points quelconques sur la ligne des nombres réel est la v
 [Chunk #005] 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
-[Chunk #006] 178 chars | Preview: En utilisant la formule généralisable aux dimensions supérieures, on obtient la 
+[Chunk #006] 93 chars | Preview: En utilisant la formule généralisable aux dimensions supérieures, on obtient la 
 [Chunk #007] 43 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p-q)^{2}}}.}
-[Chunk #008] 370 chars | Preview: Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées c
+[Chunk #008] 285 chars | Preview: Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées c
 [Chunk #009] 69 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}}}.}
-[Chunk #010] 409 chars | Preview: Il est également possible de calculer la distance pour des points donnés par leu
+[Chunk #010] 324 chars | Preview: Il est également possible de calculer la distance pour des points donnés par leu
 [Chunk #011] 68 chars | Preview: {\displaystyle d(p,q)={\sqrt {r^{2}+s^{2}-2rs\cos(\theta -\psi )}}.}
-[Chunk #012] 371 chars | Preview: Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres
+[Chunk #012] 289 chars | Preview: Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres
 [Chunk #013] 29 chars | Preview: {\displaystyle d(p,q)=|p-q|.}
 [Chunk #014] 139 chars | Preview: Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension 
 [Chunk #015] 95 chars | Preview: En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, 
 [Chunk #016] 87 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+(p_{3}-q_{3})^
-[Chunk #017] 222 chars | Preview: En général, pour les points donnés par des coordonnées cartésiennes dans {\displ
+[Chunk #017] 140 chars | Preview: En général, pour les points donnés par des coordonnées cartésiennes dans {\displ
 [Chunk #018] 95 chars | Preview: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+\cdots +(p_{n}
 [Chunk #019] 151 chars | Preview: La distance euclidienne peut également être exprimée de manière plus compacte en
 [Chunk #020] 31 chars | Preview: {\displaystyle d(p,q)=\|p-q\|.}
-[Chunk #021] 498 chars | Preview: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être 
-[Chunk #022] 145 chars | Preview: - La distance d'un point à une ligne, dans le plan euclidien<sup>[\[6\]](https:/
-[Chunk #023] 159 chars | Preview: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel<sup>[
-[Chunk #024] 153 chars | Preview: - La distance entre deux lignes dans l'espace euclidien tridimensionnel<sup>[\[7
-[Chunk #025] 261 chars | Preview: La distance d'un point à une courbe peut être utilisée pour définir sa courbe pa
-[Chunk #026] 837 chars | Preview: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des m
-[Chunk #027] 184 chars | Preview: 1. 1 2 (en) (Langue : anglais) Karl Smith, Precalculus: A Functional Approach to
-[Chunk #028] 171 chars | Preview: 2. 1 2 (en) (Langue : anglais) David Cohen, Precalculus: A Problems-Oriented App
+[Chunk #021] 416 chars | Preview: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être 
+[Chunk #022] 60 chars | Preview: - La distance d'un point à une ligne, dans le plan euclidien
+[Chunk #023] 74 chars | Preview: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel
+[Chunk #024] 71 chars | Preview: - La distance entre deux lignes dans l'espace euclidien tridimensionnel
+[Chunk #025] 179 chars | Preview: La distance d'un point à une courbe peut être utilisée pour définir sa courbe pa
+[Chunk #026] 826 chars | Preview: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des m
+[Chunk #027] 182 chars | Preview: 1.   (en) (Langue : anglais) Karl Smith, Precalculus: A Functional Approach to G
+[Chunk #028] 169 chars | Preview: 2.   (en) (Langue : anglais) David Cohen, Precalculus: A Problems-Oriented Appro
 [Chunk #029] 160 chars | Preview: 3. ↑ « 3.1.1 The Distance Between Two Points », dans Complex Numbers from A to..
 [Chunk #030] 165 chars | Preview: 4. ↑ (en) (Langue : anglais) John Tabak, Geometry: The Language of Space and For
 [Chunk #031] 165 chars | Preview: 5. ↑ (en) (Langue : anglais) Mícheál O'Searcoid, Metric Spaces, Springer Science
-[Chunk #032] 277 chars | Preview: 6. 1 2 J. P. Ballantine et A. R. Jerbert, « Distance from a Line, or Plane, to a
+[Chunk #032] 264 chars | Preview: 6.   J. P. Ballantine et A. R. Jerbert, « Distance from a Line, or Plane, to a P
 [Chunk #033] 256 chars | Preview: 7. ↑ Robert J. T. (Robert John Tainsh) Wellesley College Library, An elementary 
-[Chunk #034] 289 chars | Preview: 8. ↑ Takashi Maekawa, « An overview of offset curves and surfaces », *Computer-A
-[Chunk #035] 14 chars | Preview: <!--THE END-->
-[Chunk #036] 44 chars | Preview: - icône décorative Portail des mathématiques
+[Chunk #034] 267 chars | Preview: 8. ↑ Takashi Maekawa, « An overview of offset curves and surfaces », *Computer-A
+[Chunk #035] 44 chars | Preview: - icône décorative Portail des mathématiques
 
 
 --- TOOL OUTPUT RETURNED TO MODEL ---
@@ -229,60 +290,96 @@ Content: Utilisation du théorème de Pythagore pour calculer la distance euclid
 
 --- Result 4: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: La distance entre deux points quelconques sur la ligne des nombres réel est la valeur absolue de la différence numérique de leurs coordonnées. Ainsi si {\displaystyle p} et {\displaystyle q} sont deux points sur la droite, alors la distance qui les sépare est donnée par <sup>[\[1\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:0-1)</sup>:
+Content: - La distance d'un point à une ligne, dans le plan euclidien
 
 --- Result 5: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être définie le plus simplement comme la plus petite distance entre deux points quelconques des deux objets, bien que des généralisations plus compliquées des points aux ensembles telles que la distance de Hausdorff soient également couramment utilisées<sup>[\[5\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-5)</sup>. Les formules pour calculer les distances entre différents types d'objets comprennent :
+Content: Pour les paires d'objets qui ne sont pas les deux points, la distance peut être définie le plus simplement comme la plus petite distance entre deux points quelconques des deux objets, bien que des généralisations plus compliquées des points aux ensembles telles que la distance de Hausdorff soient également couramment utilisées. Les formules pour calculer les distances entre différents types d'objets comprennent :
 
 --- Result 6: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des mathématiciens grecs anciens Euclide et Pythagore. Dans la géométrie déductive grecque illustrée par *les Éléments* d'Euclide, les distances n'étaient pas représentées par des nombres mais par des segments de ligne de même longueur, considérés comme « égaux ». La notion de distance est inhérente à l'outil boussole utilisé pour tracer un cercle, dont les points ont tous la même distance d'un point central commun. Le lien entre le théorème de Pythagore et le calcul de distance n’a été fait qu’au XVIII<sup>e</sup> (18ᵉ siècle) siècle ; dans son traité intitulé *Recherches sur les courbes à double courbure* de 1731, Alexis Clairaut utilise la formule {\displaystyle MD={\sqrt {{\overline {x\mp a}}^{2}+{\overline {y\mp b}}^{2}}}} pour un calcul de rayon.
+Content: Les noms « distance euclidienne » et « distance de Pythagore » proviennent des mathématiciens grecs anciens Euclide et Pythagore. Dans la géométrie déductive grecque illustrée par *les Éléments* d'Euclide, les distances n'étaient pas représentées par des nombres mais par des segments de ligne de même longueur, considérés comme « égaux ». La notion de distance est inhérente à l'outil boussole utilisé pour tracer un cercle, dont les points ont tous la même distance d'un point central commun. Le lien entre le théorème de Pythagore et le calcul de distance n’a été fait qu’au XVIIIe (18ᵉ siècle) siècle ; dans son traité intitulé *Recherches sur les courbes à double courbure* de 1731, Alexis Clairaut utilise la formule {\displaystyle MD={\sqrt {{\overline {x\mp a}}^{2}+{\overline {y\mp b}}^{2}}}} pour un calcul de rayon.
 
 --- Result 7: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Il est également possible de calculer la distance pour des points donnés par leurs coordonnées polaires . Si les coordonnées polaires de {\displaystyle p} sont {\displaystyle (r,\theta )} et les coordonnées polaires de {\displaystyle q} sont {\displaystyle (s,\psi )}, alors leur distance est<sup>[\[2\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:1-2)</sup> donnée par la loi des cosinus :
+Content: - La distance entre deux lignes dans l'espace euclidien tridimensionnel
 
 --- Result 8: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, la distance est
+Content: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel
 
 --- Result 9: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Dans le plan euclidien, soit le point {\displaystyle p} ayant pour coordonnées cartésiennes {\displaystyle (p_{1},p_{2})} et le point {\displaystyle q} ayant pour coordonnées {\displaystyle (q_{1},q_{2})} . Alors la distance entre {\displaystyle p} et {\displaystyle q} est donné par <sup>[\[2\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:1-2)</sup>:
+Content: Il est également possible de calculer la distance pour des points donnés par leurs coordonnées polaires . Si les coordonnées polaires de {\displaystyle p} sont {\displaystyle (r,\theta )} et les coordonnées polaires de {\displaystyle q} sont {\displaystyle (s,\psi )}, alors leur distance est donnée par la loi des cosinus :
 
 --- Result 10: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension en appliquant à plusieurs reprises le théorème de Pythagore
+Content: En trois dimensions, pour les points donnés par leurs coordonnées cartésiennes, la distance est
 
 --- Result 11: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: Quand {\displaystyle p} et {\displaystyle q} sont exprimés sous forme de nombres complexes dans le plan complexe, la même formule pour les points unidimensionnels exprimés sous forme de nombres réels peut être utilisée, bien qu'ici le signe de la valeur absolue indique la norme complexe<sup>[\[3\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-3)</sup> :
+Content: Dérivation de la formule de distance euclidienne en {\displaystyle n}-dimension en appliquant à plusieurs reprises le théorème de Pythagore
 
 --- Result 12: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: <!--THE END-->
+Content: La distance d'un point à une courbe peut être utilisée pour définir sa courbe parallèle, une autre courbe dont tous les points ont la même distance par rapport à la courbe donnée.
 
 --- Result 13: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: En mathématiques, la **distance euclidienne** entre deux points de l'espace euclidien est la longueur du segment qui sépare ces points. Elle est parfois appelée la **distance de Pythagore** car elle peut être calculée par le théorème de Pythagore à partir des coordonnées cartésiennes de ces points.
+Content: En général, pour les points donnés par des coordonnées cartésiennes dans {\displaystyle n} -espace euclidien dimensionnel, la distance est :
 
 --- Result 14: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: - La distance d'un point à une ligne, dans le plan euclidien<sup>[\[6\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:2-6)</sup>
+Content: En mathématiques, la **distance euclidienne** entre deux points de l'espace euclidien est la longueur du segment qui sépare ces points. Elle est parfois appelée la **distance de Pythagore** car elle peut être calculée par le théorème de Pythagore à partir des coordonnées cartésiennes de ces points.
 
 --- Result 15: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: - La distance d'un point à un plan dans l'espace euclidien tridimensionnel<sup>[\[6\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-:2-6)</sup>
+Content: {\displaystyle d(p,q)=|p-q|.}
 
 --- Result 16: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: - La distance entre deux lignes dans l'espace euclidien tridimensionnel<sup>[\[7\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-7)</sup>
+Content: {\displaystyle d(p,q)=|p-q|.}
 
 --- Result 17: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: La distance d'un point à une courbe peut être utilisée pour définir sa courbe parallèle, une autre courbe dont tous les points ont la même distance par rapport à la courbe donnée<sup>[\[8\]](https://fr.wikipedia.org/wiki/Distance_euclidienne#cite_note-8)</sup>.
+Content: {\displaystyle d(p,q)=\|p-q\|.}
 
 --- Result 18: Distance euclidienne
 URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
-Content: {\displaystyle d(p,q)=|p-q|.}
+Content: - icône décorative Portail des mathématiques
+
+--- Result 19: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: La distance entre deux points quelconques sur la ligne des nombres réel est la valeur absolue de la différence numérique de leurs coordonnées. Ainsi si {\displaystyle p} et {\displaystyle q} sont deux points sur la droite, alors la distance qui les sépare est donnée par :
+
+--- Result 20: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: En utilisant la formule généralisable aux dimensions supérieures, on obtient la même valeur :
+
+--- Result 21: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: {\displaystyle d(p,q)={\sqrt {(p-q)^{2}}}.}
+
+--- Result 22: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}}}.}
+
+--- Result 23: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: {\displaystyle d(p,q)={\sqrt {r^{2}+s^{2}-2rs\cos(\theta -\psi )}}.}
+
+--- Result 24: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+(p_{3}-q_{3})^{2}}}.}
+
+--- Result 25: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: {\displaystyle d(p,q)={\sqrt {(p_{1}-q_{1})^{2}+(p_{2}-q_{2})^{2}+\cdots +(p_{n}-q_{n})^{2}}}.}
+
+--- Result 26: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: 3. ↑ « 3.1.1 The Distance Between Two Points », dans Complex Numbers from A to... Z, Birkhäuser Boston, 53–88 p. (pages) (ISBN 978-0-8176-4326-3, lire en ligne)
+
+--- Result 27: Distance euclidienne
+URL: https://fr.wikipedia.org/wiki/Distance_euclidienne
+Content: 5. ↑ (en) (Langue : anglais) Mícheál O'Searcoid, Metric Spaces, Springer Science & Business Media, 26 décembre 2006 (ISBN 978-1-84628-627-8, lire en ligne), p. 29-30

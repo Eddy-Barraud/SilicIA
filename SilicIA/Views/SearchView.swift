@@ -38,7 +38,7 @@ struct SearchView: View {
     ]
 
     @StateObject private var searchService = WebSearchService()
-    @StateObject private var aiService = AIService()
+    @ObservedObject var aiService = AIService()
 
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []

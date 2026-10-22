@@ -151,6 +151,46 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertTrue(cleanedLarge.contains("Paragraphe 500: Lien 500 avec formule et image Img 500."))
     }
 
+    func testStripHTMLTagsAndFootnoteMarkers() {
+        // 1. Subscript and superscript tags (e.g. chemistry and biology formulas)
+        let bio = "Le NADH et le FADH<sub>2</sub> transportent des électrons avec libération de CO<sub>2</sub> et Mg<sup>2+</sup>."
+        let cleanedBio = RAGChunker.removeMarkdownFormatting(from: bio)
+        XCTAssertEqual(cleanedBio, "Le NADH et le FADH2 transportent des électrons avec libération de CO2 et Mg2+.")
+
+        // 2. Wikipedia superscript footnote links with escaped brackets
+        let cite = #"L'oxaloacétate combine avec le citrate.<sup>[\[55\]](https://en.wikipedia.org/wiki/Cellular_respiration#cite_note-13)</sup>"#
+        let cleanedCite = RAGChunker.removeMarkdownFormatting(from: cite)
+        XCTAssertEqual(cleanedCite, "L'oxaloacétate combine avec le citrate.")
+
+        // 3. Line breaks and block tags convert to spaces where appropriate
+        let blockText = "Premier mot<br>Deuxième mot.<p>Nouveau paragraphe.</p>"
+        let cleanedBlock = RAGChunker.removeMarkdownFormatting(from: blockText)
+        XCTAssertEqual(cleanedBlock, "Premier mot Deuxième mot. Nouveau paragraphe.")
+
+        // 4. Mathematical inequalities remain intact
+        let mathText = "Condition: 3 < 5 et x < y et 10 > 2."
+        let cleanedMath = RAGChunker.removeMarkdownFormatting(from: mathText)
+        XCTAssertEqual(cleanedMath, "Condition: 3 < 5 et x < y et 10 > 2.")
+
+        // 5. Entities are decoded
+        let entityText = "Valeur: 10&nbsp;000&nbsp;€ et symbole &amp; plus grand &gt;."
+        let cleanedEntity = RAGChunker.removeMarkdownFormatting(from: entityText)
+        XCTAssertEqual(cleanedEntity, "Valeur: 10 000 € et symbole & plus grand >.")
+
+        // 6. Tables with HTML tags inside cells
+        let tableMarkdown = #"""
+        | Molécule | Formule | Note |
+        | --- | --- | --- |
+        | Gaz | CO<sub>2</sub> | Produit<sup>[\[1\]](https://en.wikipedia.org/wiki/Test#cite_note-1)</sup> |
+        | Énergie | ATP | Vital |
+        """#
+        let tableChunks = RAGChunker.chunkParagraphs(text: tableMarkdown, source: "Table Source")
+        XCTAssertEqual(tableChunks.count, 1)
+        XCTAssertTrue(tableChunks[0].text.contains("CO2"))
+        XCTAssertFalse(tableChunks[0].text.contains("<sub>"))
+        XCTAssertFalse(tableChunks[0].text.contains("#cite_note"))
+    }
+
     func testRAGContextServiceRankingAnd4096Budgeting() async {
         let service = RAGContextService()
         let chunks = [
