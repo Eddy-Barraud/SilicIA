@@ -440,6 +440,67 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertTrue(structured.contains("lien & du texte.\n\n"), "Paragraph must end with double newlines and entities decoded")
         XCTAssertTrue(structured.contains("Premier point\n"), "List items must be separated by newlines")
     }
+
+    func testExtractWikipediaArticleKey() {
+        // Standard French article URL with percent encoding
+        let frURL = "https://fr.wikipedia.org/wiki/Quatri%C3%A8me_R%C3%A9publique_(France)"
+        let frResult = WebSearchService.extractWikipediaArticleKey(from: frURL)
+        XCTAssertNotNil(frResult)
+        XCTAssertEqual(frResult?.language, .french)
+        XCTAssertEqual(frResult?.key, "Quatrième_République_(France)")
+
+        // URL with anchor fragment (must strip fragment)
+        let anchorURL = "https://fr.wikipedia.org/wiki/Liste_des_pr%C3%A9sidents_de_la_R%C3%A9publique_fran%C3%A7aise#Quatri%C3%A8me_R%C3%A9publique"
+        let anchorResult = WebSearchService.extractWikipediaArticleKey(from: anchorURL)
+        XCTAssertNotNil(anchorResult)
+        XCTAssertEqual(anchorResult?.language, .french)
+        XCTAssertEqual(anchorResult?.key, "Liste_des_présidents_de_la_République_française")
+
+        // English article URL
+        let enURL = "https://en.wikipedia.org/wiki/Vincent_Auriol"
+        let enResult = WebSearchService.extractWikipediaArticleKey(from: enURL)
+        XCTAssertNotNil(enResult)
+        XCTAssertEqual(enResult?.language, .english)
+        XCTAssertEqual(enResult?.key, "Vincent_Auriol")
+
+        // Spanish article URL
+        let esURL = "https://es.wikipedia.org/wiki/Cuarta_Rep%C3%BAblica_Francesa"
+        let esResult = WebSearchService.extractWikipediaArticleKey(from: esURL)
+        XCTAssertNotNil(esResult)
+        XCTAssertEqual(esResult?.language, .spanish)
+        XCTAssertEqual(esResult?.key, "Cuarta_República_Francesa")
+
+        // Mobile subdomain URL
+        let mobileURL = "https://fr.m.wikipedia.org/wiki/Ren%C3%A9_Coty"
+        let mobileResult = WebSearchService.extractWikipediaArticleKey(from: mobileURL)
+        XCTAssertNotNil(mobileResult)
+        XCTAssertEqual(mobileResult?.language, .french)
+        XCTAssertEqual(mobileResult?.key, "René_Coty")
+
+        // Ignored namespaces across languages
+        let ignoredURLs = [
+            "https://fr.wikipedia.org/wiki/Sp%C3%A9cial:Recherche",
+            "https://fr.wikipedia.org/wiki/Fichier:Vincent_Auriol.jpg",
+            "https://fr.wikipedia.org/wiki/Portail:France",
+            "https://fr.wikipedia.org/wiki/Cat%C3%A9gorie:Pr%C3%A9sident_de_la_R%C3%A9publique",
+            "https://fr.wikipedia.org/wiki/Aide:Accueil",
+            "https://fr.wikipedia.org/wiki/Discussion:Vincent_Auriol",
+            "https://en.wikipedia.org/wiki/Special:Search",
+            "https://en.wikipedia.org/wiki/Category:Presidents_of_France",
+            "https://en.wikipedia.org/wiki/Help:Contents",
+            "https://en.wikipedia.org/wiki/Talk:Vincent_Auriol",
+            "https://en.wikipedia.org/wiki/Template:Infobox",
+            "https://es.wikipedia.org/wiki/Plantilla:Infobox",
+            "https://es.wikipedia.org/wiki/Categor%C3%ADa:Historia_de_Francia"
+        ]
+        for url in ignoredURLs {
+            XCTAssertNil(WebSearchService.extractWikipediaArticleKey(from: url), "Namespace in \(url) should be filtered out")
+        }
+
+        // Non-Wikipedia URL
+        let externalURL = "https://www.example.com/wiki/Vincent_Auriol"
+        XCTAssertNil(WebSearchService.extractWikipediaArticleKey(from: externalURL))
+    }
 }
 
 

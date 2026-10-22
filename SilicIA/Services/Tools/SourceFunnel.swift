@@ -150,7 +150,7 @@ struct SourceFunnel {
             scraped = await webScraper.scrapeMultiplePages(
                 urls: urlsToScrape,
                 limit: urlsToScrape.count,
-                maxCharacters: nil // Full page content, no per-page truncation
+                maxCharacters: 10_000
             )
             let toolScrapeElapsed = Date().timeIntervalSince(scrapeStart)
             onScrapeDuration?(toolScrapeElapsed)

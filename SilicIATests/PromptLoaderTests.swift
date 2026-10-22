@@ -25,6 +25,8 @@ final class PromptLoaderTests: XCTestCase {
                     "keyPoints": "1 to 3",
                     "maxOutputTokens": "200",
                     "maxOutputSentences": "10",
+                    "structureDirective": "1. Direct answer\n2. Key points",
+                    "lengthDirective": "Target length: 8 to 12 sentences.",
                     "groundingContext": "Grounding snippet\n\n"
                 ]
             )
@@ -34,13 +36,48 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertTrue(prompt.contains("Test query"))
             XCTAssertTrue(prompt.contains("Sample hint"))
             XCTAssertTrue(prompt.contains("Grounding snippet"))
-            XCTAssertTrue(prompt.contains("10"))
+            XCTAssertTrue(prompt.contains("Target length: 8 to 12 sentences."))
+            XCTAssertTrue(prompt.contains("1. Direct answer"))
             XCTAssertFalse(prompt.contains("{{query}}"))
             XCTAssertFalse(prompt.contains("{{corpusHint}}"))
             XCTAssertFalse(prompt.contains("{{groundingContext}}"))
-            XCTAssertFalse(prompt.contains("{{maxOutputSentences}}"))
+            XCTAssertFalse(prompt.contains("{{structureDirective}}"))
+            XCTAssertFalse(prompt.contains("{{lengthDirective}}"))
+            XCTAssertFalse(prompt.contains("{{keyPoints}}"))
+            XCTAssertFalse(prompt.contains("searchSources"))
             XCTAssertFalse(prompt.contains("Format de sortie requis : LaTeX"))
             XCTAssertFalse(prompt.contains("Required output format: LaTeX"))
+        }
+    }
+
+    func testSearchInstructionsPromptLoadsFromDisk() {
+        for language in [ModelLanguage.english, .french, .spanish] {
+            let prompt = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "instructions",
+                language: language,
+                replacements: [
+                    "personaDirective": "You are a helpful assistant.",
+                    "keyPointsRange": "1 to 3",
+                    "keyPointsRangeFr": "1 à 3",
+                    "keyPointsRangeEs": "1 a 3",
+                    "structureDirective": "Direct answer overview",
+                    "lengthDirective": "Target length: 8 to 12 sentences."
+                ]
+            )
+
+            XCTAssertNotNil(prompt, "Missing instructions prompt file for language: \(language.code)")
+            guard let prompt = prompt else { continue }
+            XCTAssertTrue(prompt.contains("You are a helpful assistant."))
+            XCTAssertTrue(prompt.contains("Direct answer overview"))
+            XCTAssertTrue(prompt.contains("Target length: 8 to 12 sentences."))
+            XCTAssertFalse(prompt.contains("{{personaDirective}}"))
+            XCTAssertFalse(prompt.contains("{{keyPointsRange}}"))
+            XCTAssertFalse(prompt.contains("{{keyPointsRangeFr}}"))
+            XCTAssertFalse(prompt.contains("{{keyPointsRangeEs}}"))
+            XCTAssertFalse(prompt.contains("{{structureDirective}}"))
+            XCTAssertFalse(prompt.contains("{{lengthDirective}}"))
         }
     }
 

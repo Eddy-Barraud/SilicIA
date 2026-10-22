@@ -45,27 +45,51 @@ final class TokenBudgetingTests: XCTestCase {
         XCTAssertEqual(TokenBudgeting.estimatedContextWords(forTokens: 3096), 1857)
     }
 
-    func testTokenBudgetSliderSplit4096() {
-        XCTAssertEqual(AppSettings.totalTokensBudget, 4096)
+    func testTokenBudgetSliderSplit() {
+        XCTAssertEqual(AppSettings.defaultTotalTokensBudget, 2700)
 
-        // Default settings split 4096 tokens
-        let settings = AppSettings()
-        XCTAssertEqual(settings.maxContextTokens + settings.maxResponseTokens, 4096)
+        // Default settings split totalTokensBudget
+        var settings = AppSettings()
+        XCTAssertEqual(settings.maxContextTokens + settings.maxResponseTokens, settings.totalTokensBudget)
 
-        // Any slider position splits 4096
-        for contextTokens in stride(from: 300, through: 3846, by: 50) {
-            let responseTokens = AppSettings.totalTokensBudget - contextTokens
-            XCTAssertEqual(contextTokens + responseTokens, 4096)
-            XCTAssertGreaterThanOrEqual(contextTokens, AppSettings.maxContextTokensRange.lowerBound)
-            XCTAssertLessThanOrEqual(contextTokens, AppSettings.maxContextTokensRange.upperBound)
-            XCTAssertGreaterThanOrEqual(responseTokens, AppSettings.maxResponseTokensRange.lowerBound)
-            XCTAssertLessThanOrEqual(responseTokens, AppSettings.maxResponseTokensRange.upperBound)
+        // Test across variable total token budgets (1000 to 4000)
+        for total in [1000, 1500, 2000, 2700, 3500, 4000] {
+            settings.setTotalTokensBudget(total)
+            XCTAssertEqual(settings.totalTokensBudget, total)
+            XCTAssertEqual(settings.maxContextTokens + settings.maxResponseTokens, total)
+            XCTAssertGreaterThanOrEqual(settings.maxContextTokens, AppSettings.maxContextTokensRange.lowerBound)
+            XCTAssertGreaterThanOrEqual(settings.maxResponseTokens, AppSettings.maxResponseTokensRange.lowerBound)
 
-            let inputWords = TokenBudgeting.estimatedContextWords(forTokens: contextTokens)
-            let outputWords = TokenBudgeting.estimatedOutputWords(forTokens: responseTokens)
+            let inputWords = TokenBudgeting.estimatedContextWords(forTokens: settings.maxContextTokens)
+            let outputWords = TokenBudgeting.estimatedOutputWords(forTokens: settings.maxResponseTokens)
             XCTAssertGreaterThan(inputWords, 0)
             XCTAssertGreaterThan(outputWords, 0)
         }
+    }
+
+    func testOutputProfiles() {
+        let concise = TokenBudgeting.outputProfile(forResponseTokens: 250)
+        XCTAssertEqual(concise.kind, .concise)
+        XCTAssertEqual(concise.localizedName(for: .english), "Concise")
+        XCTAssertEqual(concise.localizedName(for: .french), "Concis")
+        XCTAssertEqual(concise.keyPointsRangeString, "2 to 3")
+        XCTAssertTrue(concise.personaDirective(for: .english).contains("concise"))
+        XCTAssertTrue(concise.structureDirective(for: .french).contains("concise et directe"))
+
+        let standard = TokenBudgeting.outputProfile(forResponseTokens: 500)
+        XCTAssertEqual(standard.kind, .standard)
+        XCTAssertEqual(standard.localizedName(for: .english), "Standard")
+        XCTAssertEqual(standard.keyPointsRangeString, "3 to 5")
+        XCTAssertTrue(standard.personaDirective(for: .english).contains("comprehensive"))
+        XCTAssertTrue(standard.structureDirective(for: .french).contains("dès l'ouverture"))
+
+        let detailed = TokenBudgeting.outputProfile(forResponseTokens: 1200)
+        XCTAssertEqual(detailed.kind, .detailed)
+        XCTAssertEqual(detailed.localizedName(for: .english), "Detailed")
+        XCTAssertEqual(detailed.localizedName(for: .french), "Détaillé")
+        XCTAssertEqual(detailed.keyPointsRangeString, "5 to 7")
+        XCTAssertTrue(detailed.personaDirective(for: .english).contains("in-depth"))
+        XCTAssertTrue(detailed.structureDirective(for: .french).contains("synthèse approfondie"))
     }
 
     func testToolBudgetScalesAndClampsAtFloor() {

@@ -199,6 +199,88 @@ class WebSearchService: ObservableObject {
         return merged
     }
 
+    /// Executes web (DuckDuckGo) and Wikipedia searches for specific separate query sets in parallel,
+    /// merging and deduplicating results up to `mergedLimit`.
+    func search(
+        webQueries: [String],
+        wikiQueries: [String],
+        maxDuckDuckGoResults: Int = defaultDuckDuckGoLimit,
+        maxWikipediaResults: Int = defaultWikipediaLimit,
+        mergedLimit: Int = 10,
+        language: ModelLanguage = .english,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) async throws -> [SearchResult] {
+        let cleanWeb = useDuckDuckGo ? webQueries
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } : []
+        let cleanWiki = useWikipedia ? wikiQueries
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty } : []
+
+        guard !cleanWeb.isEmpty || !cleanWiki.isEmpty else {
+            debugLog("multi-source search skipped: no queries")
+            return []
+        }
+
+        isSearching = true
+        defer { isSearching = false }
+
+        // Distribute limits per query so total results respect requested caps
+        let webLimitPerQuery = max(1, maxDuckDuckGoResults / max(1, cleanWeb.count))
+        let wikiLimitPerQuery = max(1, maxWikipediaResults / max(1, cleanWiki.count))
+
+        debugLog(
+            "multi-source search start: webQueries=\(cleanWeb), wikiQueries=\(cleanWiki), webLimitPerQuery=\(webLimitPerQuery), wikiLimitPerQuery=\(wikiLimitPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
+        )
+
+        var perQueryResults: [[SearchResult]] = []
+        var failures: [String] = []
+
+        await withTaskGroup(of: (query: String, isWiki: Bool, result: Result<[SearchResult], Error>).self) { group in
+            for query in cleanWeb {
+                group.addTask {
+                    do {
+                        let res = try await self.executeDuckDuckGoSearch(query: query, maxResults: webLimitPerQuery)
+                        return (query, false, .success(res))
+                    } catch {
+                        return (query, false, .failure(error))
+                    }
+                }
+            }
+            for query in cleanWiki {
+                group.addTask {
+                    do {
+                        let res = try await self.executeWikipediaSearch(query: query, language: language, limit: wikiLimitPerQuery)
+                        return (query, true, .success(res))
+                    } catch {
+                        return (query, true, .failure(error))
+                    }
+                }
+            }
+
+            for await (q, isWiki, res) in group {
+                switch res {
+                case .success(let items):
+                    perQueryResults.append(items)
+                    self.debugLog("\(isWiki ? "wiki" : "web") query ok: \"\(q)\" => \(items.count) results")
+                case .failure(let err):
+                    failures.append("\(q) (\(err.localizedDescription))")
+                    self.debugLog("\(isWiki ? "wiki" : "web") query failed: \"\(q)\" => \(err.localizedDescription)")
+                }
+            }
+        }
+
+        if perQueryResults.isEmpty && !failures.isEmpty && failures.count == (cleanWeb.count + cleanWiki.count) {
+            debugLog("multi-source search failed: all queries failed")
+            throw SearchError.networkError
+        }
+
+        let merged = mergeInterleavedDeduplicatedResults(perQueryResults, mergedLimit: mergedLimit)
+        debugLog("multi-source search done: merged=\(merged.count), failures=\(failures.count)/\(cleanWeb.count + cleanWiki.count)")
+        return merged
+    }
+
     /// Runs the enabled providers for one query and merges deduplicated results.
     private func executeSearch(
         query: String,
@@ -224,12 +306,8 @@ class WebSearchService: ObservableObject {
         async let wikipediaOutcome: ([SearchResult], Error?) = {
             guard useWikipedia else { return ([], nil) }
             do {
-                let cleanedQuery = WikipediaQueryCleaner.clean(query)
-                if cleanedQuery != query {
-                    debugLog("Wikipedia query adapted: '\(query)' -> '\(cleanedQuery)'")
-                }
                 let results = try await executeWikipediaSearch(
-                    query: cleanedQuery,
+                    query: query,
                     language: language,
                     limit: maxWikipediaResults
                 )
@@ -284,7 +362,7 @@ class WebSearchService: ObservableObject {
         let (data, response) = try await session.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+              (200...299).contains(httpResponse.statusCode) else {
             throw SearchError.invalidResponse
         }
 
@@ -302,94 +380,130 @@ class WebSearchService: ObservableObject {
         try await executeWikipediaSearch(query: query, language: language, limit: limit)
     }
 
-    /// Executes Wikipedia REST search and enriches each page with full source content.
-    private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
-        let effectiveQuery = WikipediaQueryCleaner.clean(query)
-        guard let searchURL = wikipediaSearchURL(query: effectiveQuery, language: language, limit: limit) else {
-            throw SearchError.invalidURL
+    /// Extracts the language and article key from a Wikipedia URL, filtering out non-article namespaces and URL fragments.
+    nonisolated static func extractWikipediaArticleKey(
+        from rawURL: String,
+        fallbackLanguage: ModelLanguage = .english
+    ) -> (language: ModelLanguage, key: String)? {
+        let withoutFragment = rawURL.components(separatedBy: "#").first ?? rawURL
+        let trimmed = withoutFragment.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let url = URL(string: trimmed) else { return nil }
+
+        guard let host = url.host?.lowercased(), host.contains("wikipedia.org") else {
+            return nil
         }
 
-        var request = URLRequest(url: searchURL)
-        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
-
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw SearchError.invalidResponse
-        }
-
-        let decoded = try Self.jsonDecoder.decode(WikipediaSearchResponse.self, from: data)
-        let pages = Array(decoded.pages.prefix(max(limit, 0)))
-
-        // Fallback: if search API returns 0 pages, attempt direct title lookup
-        if pages.isEmpty, !effectiveQuery.isEmpty {
-            let directKey = effectiveQuery.replacingOccurrences(of: " ", with: "_")
-            if let directPage = await fetchWikipediaPageDetails(for: directKey, language: language),
-               !directPage.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let leadSnippet = directPage.markdown
-                    .components(separatedBy: "\n\n")
-                    .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
-                    ?? directPage.title
-                return [
-                    SearchResult(
-                        title: directPage.title,
-                        url: directPage.url,
-                        snippet: leadSnippet,
-                        retrievedContent: directPage.markdown
-                    )
-                ]
+        // Extract language from subdomain (e.g. fr.wikipedia.org -> .french, es.m.wikipedia.org -> .spanish)
+        let hostParts = host.components(separatedBy: ".")
+        var extractedLang: ModelLanguage?
+        for part in hostParts {
+            switch part.lowercased() {
+            case "fr": extractedLang = .french
+            case "es": extractedLang = .spanish
+            case "en": extractedLang = .english
+            default: break
             }
-            return []
+            if extractedLang != nil { break }
         }
-        guard !pages.isEmpty else { return [] }
+        let language = extractedLang ?? fallbackLanguage
 
-        let detailsByKey = await fetchWikipediaPageDetailsByKey(
-            keys: pages.map(\.key),
-            language: language
-        )
-
-        return pages.compactMap { page in
-            let details = detailsByKey[page.key]
-            let titleCandidate = details?.title ?? page.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = titleCandidate.isEmpty ? page.key.replacingOccurrences(of: "_", with: " ") : titleCandidate
-            let snippetCandidate = Self.htmlToPlainText(page.excerpt ?? page.description ?? "")
-            let snippet = snippetCandidate.isEmpty ? "Wikipedia page" : snippetCandidate
-            let pageURL = details?.url ?? wikipediaReadablePageURL(for: page.key, language: language)
-            let retrievedContent = details?.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            guard !pageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-
-            return SearchResult(
-                title: title,
-                url: pageURL,
-                snippet: snippet,
-                retrievedContent: (retrievedContent?.isEmpty == true) ? nil : retrievedContent
-            )
+        // Path must start with /wiki/
+        let path = url.path
+        guard path.hasPrefix("/wiki/") else {
+            return nil
         }
+
+        let rawKey = String(path.dropFirst("/wiki/".count))
+        guard !rawKey.isEmpty else { return nil }
+
+        let decodedKey = (rawKey.removingPercentEncoding ?? rawKey)
+            .replacingOccurrences(of: " ", with: "_")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !decodedKey.isEmpty else { return nil }
+
+        // Ignore non-article namespaces across supported languages
+        let lowerKey = decodedKey.lowercased()
+        let ignoredPrefixes = [
+            "special:", "spécial:", "especial:",
+            "file:", "fichier:", "archivo:", "image:", "imagen:",
+            "help:", "aide:", "ayuda:",
+            "talk:", "discussion:", "discusión:",
+            "category:", "catégorie:", "categoría:",
+            "portal:", "portail:",
+            "template:", "modèle:", "plantilla:",
+            "wikipedia:", "wikipédia:",
+            "user:", "utilisateur:", "usuario:",
+            "draft:", "projet:", "proyecto:"
+        ]
+        for prefix in ignoredPrefixes {
+            if lowerKey.hasPrefix(prefix) {
+                return nil
+            }
+        }
+
+        return (language: language, key: decodedKey)
     }
 
-    /// Fetches Wikipedia page details (with HTML converted to Markdown) for each page key.
-    private func fetchWikipediaPageDetailsByKey(keys: [String], language: ModelLanguage) async -> [String: (title: String, markdown: String, url: String)] {
-        var uniqueKeys: [String] = []
+    /// Executes Wikipedia search:
+    /// Uses DuckDuckGo to discover candidate Wikipedia article URLs ("site:wikipedia.org " + query),
+    /// extracts article keys from the URLs, and fetches the clean article content via the
+    /// MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) converted to Markdown.
+    /// Does not scrape raw Wikipedia HTML webpages.
+    private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return [] }
+
+        let targetLimit = max(1, limit)
+        let ddgWikiQuery = "site:wikipedia.org \(trimmedQuery)"
+        var articleCandidates: [(language: ModelLanguage, key: String, ddgTitle: String, ddgSnippet: String)] = []
         var seenKeys = Set<String>()
-        for key in keys where !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if seenKeys.insert(key).inserted {
-                uniqueKeys.append(key)
-            }
-        }
 
-        guard !uniqueKeys.isEmpty else { return [:] }
+        debugLog("Wikipedia DDG search start: query=\(ddgWikiQuery), limit=\(targetLimit), language=\(language.rawValue)")
 
-        var detailsByKey: [String: (title: String, markdown: String, url: String)] = [:]
-        await withTaskGroup(of: (String, (title: String, markdown: String, url: String)?).self) { group in
-            for key in uniqueKeys {
-                group.addTask {
-                    let page = await self.fetchWikipediaPageDetails(for: key, language: language)
-                    return (key, page)
+        do {
+            let ddgResults = try await executeDuckDuckGoSearch(query: ddgWikiQuery, maxResults: max(targetLimit * 3, 10))
+            for result in ddgResults {
+                if let extracted = Self.extractWikipediaArticleKey(from: result.url, fallbackLanguage: language) {
+                    let dedupeKey = "\(extracted.language.code):\(extracted.key.lowercased())"
+                    if seenKeys.insert(dedupeKey).inserted {
+                        articleCandidates.append((
+                            language: extracted.language,
+                            key: extracted.key,
+                            ddgTitle: result.title,
+                            ddgSnippet: result.snippet
+                        ))
+                        if articleCandidates.count >= targetLimit {
+                            break
+                        }
+                    }
                 }
             }
+        } catch {
+            debugLog("DuckDuckGo wikipedia site search failed or hit challenge: \(error.localizedDescription)")
+        }
 
+        // Fallback: if DuckDuckGo yielded 0 Wikipedia candidates (due to bot challenge, rate limit, or no matches),
+        // fallback to direct title lookup via MediaWiki API.
+        if articleCandidates.isEmpty {
+            let directKey = trimmedQuery.replacingOccurrences(of: " ", with: "_")
+            articleCandidates.append((
+                language: language,
+                key: directKey,
+                ddgTitle: trimmedQuery,
+                ddgSnippet: "Wikipedia page"
+            ))
+        }
+
+        // Fetch each candidate article via MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) concurrently
+        var detailsByKey: [String: (title: String, markdown: String, url: String)] = [:]
+        await withTaskGroup(of: (String, (title: String, markdown: String, url: String)?).self) { group in
+            for candidate in articleCandidates {
+                let candidateKey = "\(candidate.language.code):\(candidate.key)"
+                group.addTask {
+                    let page = await self.fetchWikipediaPageDetails(for: candidate.key, language: candidate.language)
+                    return (candidateKey, page)
+                }
+            }
             for await (key, page) in group {
                 if let page {
                     detailsByKey[key] = page
@@ -397,7 +511,102 @@ class WebSearchService: ObservableObject {
             }
         }
 
-        return detailsByKey
+        var searchResults: [SearchResult] = []
+        for candidate in articleCandidates {
+            let candidateKey = "\(candidate.language.code):\(candidate.key)"
+            if let details = detailsByKey[candidateKey],
+               !details.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let leadSnippet = details.markdown
+                    .components(separatedBy: "\n\n")
+                    .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    ?? candidate.ddgSnippet
+
+                searchResults.append(
+                    SearchResult(
+                        title: details.title.isEmpty ? candidate.ddgTitle : details.title,
+                        url: details.url,
+                        snippet: leadSnippet,
+                        retrievedContent: details.markdown
+                    )
+                )
+
+                if searchResults.count >= targetLimit {
+                    break
+                }
+            }
+        }
+
+        // Secondary fallback: if candidate lookups returned no valid article content (e.g. DDG was challenged and direct key 404'd),
+        // query MediaWiki search API as resilient fallback to resolve keys, then fetch full HTML via REST API.
+        if searchResults.isEmpty {
+            let directKey = trimmedQuery.replacingOccurrences(of: " ", with: "_")
+            if let directPage = await fetchWikipediaPageDetails(for: directKey, language: language),
+               !directPage.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                let leadSnippet = directPage.markdown
+                    .components(separatedBy: "\n\n")
+                    .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                    ?? directPage.title
+                searchResults.append(
+                    SearchResult(
+                        title: directPage.title,
+                        url: directPage.url,
+                        snippet: leadSnippet,
+                        retrievedContent: directPage.markdown
+                    )
+                )
+            } else if let fallbackKeys = await fetchWikipediaFallbackKeys(query: trimmedQuery, language: language, limit: targetLimit) {
+                for key in fallbackKeys {
+                    if let page = await fetchWikipediaPageDetails(for: key, language: language),
+                       !page.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let leadSnippet = page.markdown
+                            .components(separatedBy: "\n\n")
+                            .first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
+                            ?? page.title
+                        searchResults.append(
+                            SearchResult(
+                                title: page.title,
+                                url: page.url,
+                                snippet: leadSnippet,
+                                retrievedContent: page.markdown
+                            )
+                        )
+                        if searchResults.count >= targetLimit {
+                            break
+                        }
+                    }
+                }
+            }
+        }
+
+        debugLog("Wikipedia DDG search completed: found \(searchResults.count) article(s)")
+        return searchResults
+    }
+
+    /// Resilient fallback to resolve article keys when DuckDuckGo is blocked or returns 0 results.
+    private func fetchWikipediaFallbackKeys(query: String, language: ModelLanguage, limit: Int) async -> [String]? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = wikipediaHost(for: language)
+        components.path = "/w/rest.php/v1/search/page"
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: "\(max(1, limit))")
+        ]
+        guard let url = components.url else { return nil }
+
+        do {
+            var request = URLRequest(url: url)
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
+                return nil
+            }
+            let decoded = try Self.jsonDecoder.decode(WikipediaSearchFallbackResponse.self, from: data)
+            return decoded.pages.map(\.key)
+        } catch {
+            debugLog("Wikipedia fallback search API failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Calls MediaWiki /w/rest.php/v1/page/{key}/with_html and converts article HTML to Markdown.
@@ -574,18 +783,6 @@ class WebSearchService: ObservableObject {
         return decoded
     }
 
-    private func wikipediaSearchURL(query: String, language: ModelLanguage, limit: Int) -> URL? {
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = wikipediaHost(for: language)
-        components.path = "/w/rest.php/v1/search/page"
-        components.queryItems = [
-            URLQueryItem(name: "q", value: query),
-            URLQueryItem(name: "limit", value: "\(max(1, limit))")
-        ]
-        return components.url
-    }
-
     private func wikipediaWithHTMLURL(key: String, language: ModelLanguage) -> URL? {
         let decodedKey = key.removingPercentEncoding ?? key
         guard let encodedKey = decodedKey.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) else {
@@ -599,7 +796,8 @@ class WebSearchService: ObservableObject {
     }
 
     private func wikipediaReadablePageURL(for key: String, language: ModelLanguage) -> String {
-        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) ?? key
+        let decodedKey = key.removingPercentEncoding ?? key
+        let encodedKey = decodedKey.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) ?? key
         return "https://\(wikipediaHost(for: language))/wiki/\(encodedKey)"
     }
 
@@ -619,15 +817,12 @@ private struct WikipediaWithHTMLResponse: Decodable {
     let html: String?
 }
 
-private struct WikipediaSearchResponse: Decodable {
-    let pages: [WikipediaSearchPage]
+private struct WikipediaSearchFallbackResponse: Decodable {
+    let pages: [WikipediaSearchFallbackPage]
 }
 
-private struct WikipediaSearchPage: Decodable {
+private struct WikipediaSearchFallbackPage: Decodable {
     let key: String
-    let title: String
-    let excerpt: String?
-    let description: String?
 }
 
 /// Enumerates high-level search failure categories.

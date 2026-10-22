@@ -471,6 +471,7 @@ class AIService: ObservableObject {
         useWikipedia: Bool = true
     ) -> String {
         let maxSentences = TokenBudgeting.estimatedOutputSentences(forTokens: maxOutputTokens)
+        let profile = TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
         let base = PromptLoader.loadPrompt(
             mode: "normal",
             feature: "search",
@@ -479,11 +480,15 @@ class AIService: ObservableObject {
             replacements: [
                 "maxOutputTokens": "\(maxOutputTokens)",
                 "maxOutputSentences": "\(maxSentences)",
-                "keyPointsRange": "1 to 3",
-                "keyPointsRangeFr": "1 à 3"
+                "keyPointsRange": profile.keyPointsRangeString,
+                "keyPointsRangeFr": profile.keyPointsRangeFrString,
+                "keyPointsRangeEs": profile.keyPointsRangeEsString,
+                "personaDirective": profile.personaDirective(for: language),
+                "structureDirective": profile.structureDirective(for: language),
+                "lengthDirective": profile.lengthDirective(for: language)
             ]
         )
-            ?? fallbackSummaryInstructions(for: language)
+            ?? fallbackSummaryInstructions(for: language, profile: profile)
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
@@ -511,7 +516,13 @@ class AIService: ObservableObject {
         maxOutputTokens: Int,
         groundingContext: String = ""
     ) -> String {
-        let keyPoints = language == .french ? "1 à 3" : "1 to 3"
+        let profile = TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
+        let keyPoints: String
+        switch language {
+        case .french: keyPoints = profile.keyPointsRangeFrString
+        case .spanish: keyPoints = profile.keyPointsRangeEsString
+        case .english: keyPoints = profile.keyPointsRangeString
+        }
         let trimmedGrounding = groundingContext.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasGrounding = !trimmedGrounding.isEmpty
         let corpusHint = loadSearchCorpusHint(
@@ -535,6 +546,8 @@ class AIService: ObservableObject {
                 "keyPoints": keyPoints,
                 "maxOutputTokens": "\(maxOutputTokens)",
                 "maxOutputSentences": "\(maxOutputSentences)",
+                "structureDirective": profile.structureDirective(for: language),
+                "lengthDirective": profile.lengthDirective(for: language),
                 "groundingContext": contextBlock
             ]
         ) {
@@ -548,7 +561,8 @@ class AIService: ObservableObject {
             maxOutputTokens: maxOutputTokens,
             maxOutputSentences: maxOutputSentences,
             language: language,
-            groundingContext: contextBlock
+            groundingContext: contextBlock,
+            profile: profile
         )
     }
 
@@ -573,38 +587,9 @@ class AIService: ObservableObject {
     ) -> String {
         if hasGrounding {
             switch language {
-            case .french: return "Appuie ta réponse sur le contexte web ci-dessus. Si des informations manquent ou nécessitent d'être vérifiées, utilise `searchContext` ou `searchSources`."
-            case .spanish: return "Basa tu respuesta en el contexto web anterior. Si falta información o requiere verificación, usa `searchContext` o `searchSources`."
-            case .english: return "Base your answer on the web context above. If information is missing or needs verification, use `searchContext` or `searchSources`."
-            }
-        } else if chunkCount > 0 {
-            if let loaded = PromptLoader.loadPrompt(
-                mode: "normal",
-                feature: "search",
-                variant: "corpus_hint.cached",
-                language: language,
-                replacements: ["count": "\(chunkCount)"]
-            ) {
-                return loaded
-            }
-            switch language {
-            case .french: return "\(chunkCount) extraits de pages web ont déjà été récupérés pour cette requête : interroge-les via `searchContext` AVANT de tomber sur le web ouvert."
-            case .spanish: return "\(chunkCount) fragmentos de páginas web ya se han recuperado para esta consulta: consúltalos con `searchContext` ANTES de recurrir a la web abierta."
-            case .english: return "\(chunkCount) web-page chunks have already been fetched for this query — query them via `searchContext` BEFORE falling back to the open web."
-            }
-        } else if webSearchAvailable {
-            if let loaded = PromptLoader.loadPrompt(
-                mode: "normal",
-                feature: "search",
-                variant: "corpus_hint.web",
-                language: language
-            ) {
-                return loaded
-            }
-            switch language {
-            case .french: return "Aucun extrait n'a été pré-récupéré. Utilise l'outil de recherche (`searchSources`) pour obtenir l'information."
-            case .spanish: return "No hay fragmentos pre-recuperados. Usa la herramienta de búsqueda (`searchSources`) para obtener la información."
-            case .english: return "No chunks were pre-fetched. Use search tool (`searchSources`) to get the information."
+            case .french: return "Appuie ta réponse sur le contexte web ci-dessus."
+            case .spanish: return "Basa tu respuesta en el contexto web anterior."
+            case .english: return "Base your answer on the web context above."
             }
         } else {
             if let loaded = PromptLoader.loadPrompt(
@@ -630,22 +615,24 @@ class AIService: ObservableObject {
         maxOutputTokens: Int,
         maxOutputSentences: Int,
         language: ModelLanguage,
-        groundingContext: String = ""
+        groundingContext: String = "",
+        profile: TokenBudgeting.OutputProfile? = nil
     ) -> String {
+        let effProfile = profile ?? TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
+        let lengthLine = effProfile.lengthDirective(for: language)
         switch language {
         case .french:
             return """
             \(groundingContext)Sujet ou question : \(query)
 
             \(corpusHint)
-            Effectue une recherche (`searchSources`) pour recueillir des informations fiables, des chiffres exacts, des faits ou des comparaisons avant de répondre. Privilégie une seule requête ; réserve Wikipédia aux données et faits précis, et n'augmente les requêtes que si le sujet est difficile.
             N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
             Si la question nécessite un calcul, utilise `calculate`.
 
             Réponds avec :
-            1. Une réponse directe ou une présentation générale du sujet.
-            2. \(keyPoints) points clés.
-            Limite : \(maxOutputSentences) phrases.
+            \(effProfile.structureDirective(for: language))
+            \(lengthLine)
+            Sois rigoureux sur les dénombrements et listes : ne cite que les entités exactes correspondant précisément aux critères demandés, sans ajouter de personnalités d'autres époques.
             Format de sortie attendu : texte clair en Markdown.
             Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
             N'utilise jamais de LaTeX pour du code, des requêtes ou du texte ordinaire, et n'utilise jamais de commande \\text{ ni d'environnements \\begin{ (comme \\begin{array}).
@@ -655,14 +642,13 @@ class AIService: ObservableObject {
             \(groundingContext)Tema o pregunta: \(query)
 
             \(corpusHint)
-            Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder. Prioriza una sola consulta; reserva Wikipedia para datos y hechos precisos, y solo amplía las consultas si el tema es difícil.
             Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
             Si la pregunta requiere un cálculo, usa `calculate`.
 
             Responde con:
-            1. Una respuesta directa o una descripción general del tema.
-            2. \(keyPoints) puntos clave.
-            Límite: \(maxOutputSentences) frases.
+            \(effProfile.structureDirective(for: language))
+            \(lengthLine)
+            Sé riguroso con los recuentos y listas: cita únicamente las entidades exactas que correspondan precisamente a los criterios solicitados, sin añadir figuras de otros períodos.
             Formato de salida esperado: texto claro en Markdown.
             Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
             Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \\text{ ni entornos \\begin{ (como \\begin{array}).
@@ -672,14 +658,13 @@ class AIService: ObservableObject {
             \(groundingContext)Topic or question: \(query)
 
             \(corpusHint)
-            Perform a search (`searchSources`) to gather reliable information, exact figures, facts, or comparisons before answering. Favor a single query; reserve Wikipedia for precise data and facts, and only increase queries if the topic is difficult.
             Only call `currentDateTime` if the question explicitly depends on the current date or time.
             If the question requires a calculation, use `calculate`.
 
             Respond with:
-            1. A direct answer or topic overview.
-            2. \(keyPoints) key points.
-            Limit: \(maxOutputSentences) sentences.
+            \(effProfile.structureDirective(for: language))
+            \(lengthLine)
+            Be rigorous on enumerations and lists: cite only the exact entities that correspond precisely to the requested criteria, without adding figures from other periods.
             Expected output format: clear Markdown prose.
             When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
             Never wrap non-mathematical text, code, or queries in LaTeX, and never use \\text{ or \\begin{ environments (such as \\begin{array}).
@@ -790,16 +775,16 @@ class AIService: ObservableObject {
         contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async throws -> String {
-        // Always create a fresh session so that context from previous searches
-        // does not accumulate and overflow the context window.
-        let webSearchAvailable = useDuckDuckGo || useWikipedia
+        // In SearchView summary generation, searchSources is NOT allowed as a tool.
+        // Web results are pre-fetched and grounded directly; the model only uses
+        // calculate and currentDateTime.
         let instructions = buildInstructions(
             for: language,
             maxOutputTokens: maxTokens,
-            webSearchAvailable: webSearchAvailable,
-            hasCorpus: !corpusChunks.isEmpty,
-            useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            webSearchAvailable: false,
+            hasCorpus: false,
+            useDuckDuckGo: false,
+            useWikipedia: false
         )
         let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxTokens,
@@ -810,50 +795,24 @@ class AIService: ObservableObject {
         let assembled = ToolKit.assemble(
             config: ToolKit.Configuration(
                 language: language,
-                corpusChunks: corpusChunks,
+                corpusChunks: [],
                 userQuery: query,
-                webSearchAvailable: webSearchAvailable,
+                webSearchAvailable: false,
                 webSearchService: webSearchService,
                 webScraper: webScraper,
                 ragContextService: ragContextService,
                 maxDuckDuckGoResults: maxDuckDuckGoResults,
                 maxWikipediaResults: maxWikipediaResults,
-                useDuckDuckGo: useDuckDuckGo,
-                useWikipedia: useWikipedia,
-                contextUtilizationFactor: contextUtilizationFactor,
-                onWebResults: { results in
-                    Task { @MainActor [weak self = self] in
-                        await self?.appendUniqueResults(results)
-                    }
-                },
-                onScrapeDuration: { duration in
-                    #if DEBUG
-                    Task { @MainActor [weak self = self] in
-                        self?.toolRAGScrapeDuration += duration
-                    }
-                    #endif
-                },
-                onScores: { scores in
-                    Task { @MainActor [weak self = self] in
-                        self?.toolScoresCalculated = true
-                        self?.activeOnMatchingScores?(scores)
-                    }
-                },
-                onRAGDuration: { chunkElapsed, rankElapsed in
-                    #if DEBUG
-                    Task { @MainActor [weak self = self] in
-                        self?.toolRAGChunkDuration += chunkElapsed
-                        self?.toolRAGRankingDuration += rankElapsed
-                    }
-                    #endif
-                }
+                useDuckDuckGo: false,
+                useWikipedia: false,
+                contextUtilizationFactor: contextUtilizationFactor
             ),
             responseTokens: clampedOutputTokens
         )
         let toolBudget = assembled.tokenBudget
         let tools = assembled.tools
         #if DEBUG
-        debugNotes.append("generateSummaryWithFoundationModels path=tool-calling tools=[\(tools.map { $0.name }.joined(separator: ", "))] corpusChunks=\(corpusChunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
+        debugNotes.append("generateSummaryWithFoundationModels path=search-summary tools=[\(tools.map { $0.name }.joined(separator: ", "))] webSearchAvailable=false toolBudget=\(toolBudget)t")
         #endif
         let session = LanguageModelSession(tools: tools, instructions: instructions)
 
@@ -914,8 +873,8 @@ class AIService: ObservableObject {
 
         let prompt = Self.toolCallingSearchPrompt(
             query: query,
-            corpusChunkCount: corpusChunks.count,
-            webSearchAvailable: webSearchAvailable,
+            corpusChunkCount: 0,
+            webSearchAvailable: false,
             language: language,
             maxOutputTokens: effectiveMaxTokens,
             groundingContext: toolGroundingContext
@@ -957,29 +916,35 @@ class AIService: ObservableObject {
         return txt_response
     }
 
-    private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
+    private func fallbackSummaryInstructions(for language: ModelLanguage, profile: TokenBudgeting.OutputProfile) -> String {
         switch language {
         case .french:
             return """
-            Tu produis un résumé web précis et concis.
+            \(profile.personaDirective(for: language))
             Réponds en français.
-            Donne une réponse directe ou une présentation générale du sujet, puis 1 à 3 points clés.
+            \(profile.structureDirective(for: language))
+            \(profile.lengthDirective(for: language))
+            Sois rigoureux sur les dénombrements et listes : ne cite que les entités exactes correspondant précisément aux critères demandés, sans ajouter de personnalités d'autres époques.
             Ne te présente jamais, n'indique jamais quel modèle ou entreprise tu représentes. Commence directement par le contenu du résumé.
             Si une information est incertaine, indique-le clairement.
             """
         case .spanish:
             return """
-            Usted produce un resumen web preciso y conciso.
+            \(profile.personaDirective(for: language))
             Responda en español.
-            Proporcione una respuesta directa o una descripción general del tema, luego 1 a 3 puntos clave.
+            \(profile.structureDirective(for: language))
+            \(profile.lengthDirective(for: language))
+            Sé riguroso con los recuentos y listas: cita únicamente las entidades exactas que correspondan precisamente a los criterios solicitados, sin añadir figuras de otros períodos.
             Nunca se presente ni mencione qué modelo o empresa representa. Comience directamente con el contenido del resumen.
             Si una información es incierta, indíquelo claramente.
             """
         case .english:
             return """
-            You produce concise, accurate web summaries.
+            \(profile.personaDirective(for: language))
             Respond in English.
-            Provide a direct answer or topic overview, then 1 to 3 key points.
+            \(profile.structureDirective(for: language))
+            \(profile.lengthDirective(for: language))
+            Be rigorous on enumerations and lists: cite only the exact entities that correspond precisely to the requested criteria, without adding figures from other periods.
             Never introduce yourself or state what model or company you are from. Start directly with the summary content.
             If information is uncertain, state it explicitly.
             """

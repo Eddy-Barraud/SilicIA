@@ -45,6 +45,7 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 4
     var maxWikipediaResults: Int = 2
+    var totalTokensBudget: Int = 2700
     var maxResponseTokens: Int = 500
     var temperature: Double = 0.7
     var maxContextTokens: Int = 2200
@@ -77,6 +78,7 @@ struct AppSettings: Codable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case maxDuckDuckGoResults
         case maxWikipediaResults
+        case totalTokensBudget
         case maxResponseTokens
         case temperature
         case maxContextTokens
@@ -123,6 +125,8 @@ struct AppSettings: Codable, Equatable {
         maxWikipediaResults = try container.decodeIfPresent(Int.self, forKey: .maxWikipediaResults)
             ?? Self.defaultSettings.maxWikipediaResults
 
+        totalTokensBudget = try container.decodeIfPresent(Int.self, forKey: .totalTokensBudget)
+            ?? Self.defaultSettings.totalTokensBudget
         maxResponseTokens = try container.decodeIfPresent(Int.self, forKey: .maxResponseTokens)
             ?? Self.defaultSettings.maxResponseTokens
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
@@ -157,6 +161,7 @@ struct AppSettings: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(maxDuckDuckGoResults, forKey: .maxDuckDuckGoResults)
         try container.encode(maxWikipediaResults, forKey: .maxWikipediaResults)
+        try container.encode(totalTokensBudget, forKey: .totalTokensBudget)
         try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
@@ -185,25 +190,44 @@ struct AppSettings: Codable, Equatable {
     /// Combined per-search cap derived from per-source ranges; used by callers that need a
     /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
     static let maxSearchResultsRange = 2...40
-    static let totalTokensBudget = 2700
-    static let maxResponseTokensRange = 250...2700
+    static let defaultTotalTokensBudget = 2700
+    static let totalTokensBudgetRange = 1000...4000
+    static var totalTokensBudget: Int { defaultTotalTokensBudget }
+    static let maxResponseTokensRange = 250...3500
     static let temperatureRange = 0.3...1.0
-    static let maxContextTokensRange = 250...2700
+    static let maxContextTokensRange = 250...3500
 
-    static func maxAllowedContextTokens(forResponseTokens responseTokens: Int) -> Int {
+    /// Re-allocates response and context tokens proportionately when the total token budget changes.
+    mutating func setTotalTokensBudget(_ newTotal: Int) {
+        let clampedTotal = min(max(newTotal, Self.totalTokensBudgetRange.lowerBound), Self.totalTokensBudgetRange.upperBound)
+        guard clampedTotal != totalTokensBudget else { return }
+        let oldTotal = Double(max(1, totalTokensBudget))
+        let responseRatio = Double(maxResponseTokens) / oldTotal
+        totalTokensBudget = clampedTotal
+        let rawResponse = Int(round(Double(clampedTotal) * responseRatio))
+        let minResp = Self.maxResponseTokensRange.lowerBound
+        let maxResp = max(minResp, clampedTotal - Self.maxContextTokensRange.lowerBound)
+        maxResponseTokens = min(max(rawResponse, minResp), maxResp)
+        maxContextTokens = max(Self.maxContextTokensRange.lowerBound, clampedTotal - maxResponseTokens)
+    }
+
+    static func maxAllowedContextTokens(forResponseTokens responseTokens: Int, totalBudget: Int = defaultTotalTokensBudget) -> Int {
         let clampedResponse = min(max(responseTokens, maxResponseTokensRange.lowerBound), maxResponseTokensRange.upperBound)
-        return max(maxContextTokensRange.lowerBound, totalTokensBudget - clampedResponse)
+        return max(maxContextTokensRange.lowerBound, totalBudget - clampedResponse)
     }
 
     private func normalized() -> AppSettings {
         var copy = self
+        copy.totalTokensBudget = min(max(copy.totalTokensBudget, Self.totalTokensBudgetRange.lowerBound), Self.totalTokensBudgetRange.upperBound)
         copy.maxDuckDuckGoResults = min(max(copy.maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
         copy.maxWikipediaResults = min(max(copy.maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)
-        copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
-        copy.maxContextTokens = min(
-            max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound),
-            Self.totalTokensBudget - copy.maxResponseTokens
-        )
+
+        let maxAllowedResponse = max(Self.maxResponseTokensRange.lowerBound, copy.totalTokensBudget - Self.maxContextTokensRange.lowerBound)
+        let responseUpper = min(Self.maxResponseTokensRange.upperBound, maxAllowedResponse)
+        copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), responseUpper)
+        let maxAllowedContext = max(Self.maxContextTokensRange.lowerBound, copy.totalTokensBudget - copy.maxResponseTokens)
+        copy.maxContextTokens = min(max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound), maxAllowedContext)
+
         copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
         if !FoundationModelAvailability.check().isAvailable {
             copy.isReaderViewAndSummaryEnabled = false

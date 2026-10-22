@@ -54,6 +54,8 @@ final class AppSettingsStoreTests: XCTestCase {
     }
 
     func testMutationsPersistAutomatically() {
+        AppSettingsStore.shared.settings.totalTokensBudget = 2700
+
         // Individual field update & read-after-write
         AppSettingsStore.shared.settings.temperature = 0.77
         XCTAssertEqual(AppSettings.load().temperature, 0.77, accuracy: 0.0001)
@@ -71,5 +73,9 @@ final class AppSettingsStoreTests: XCTestCase {
         let reloaded = AppSettings.load()
         XCTAssertEqual(reloaded.maxContextTokens, 1234)
         XCTAssertFalse(reloaded.useWikipedia)
+
+        AppSettingsStore.shared.settings.setTotalTokensBudget(3200)
+        let reloadedBudget = AppSettings.load()
+        XCTAssertEqual(reloadedBudget.totalTokensBudget, 3200)
     }
 }

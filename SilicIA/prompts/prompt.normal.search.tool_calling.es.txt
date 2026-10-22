@@ -1,14 +1,13 @@
-{{groundingContext}}Tema o pregunta: {{query}}
-
+{{groundingContext}}
 {{corpusHint}}
-Realiza una búsqueda (`searchSources`) para recopilar información fiable, cifras exactas, hechos o comparaciones antes de responder. Prioriza una sola consulta; reserva Wikipedia para datos y hechos precisos, y solo amplía las consultas si el tema es difícil.
 Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
 Si la pregunta requiere un cálculo, usa `calculate`.
 
 Responde con:
-1. Una respuesta directa o una descripción general del tema.
-2. {{keyPoints}} puntos clave.
-Límite: {{maxOutputSentences}} frases.
+{{structureDirective}}
+{{lengthDirective}}
+Sé riguroso con los recuentos y listas.
 Formato de salida esperado: texto claro en Markdown.
 Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
 Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \text{ ni entornos \begin{ (como \begin{array}).
+Tema o pregunta: {{query}}

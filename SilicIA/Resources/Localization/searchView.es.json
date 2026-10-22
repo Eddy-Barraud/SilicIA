@@ -10,7 +10,7 @@
   "search.results.empty.title": "No se encontraron resultados",
   "search.results.scoring": "Clasificando fuentes por relevancia…",
   "search.results.empty.subtitle": "Intente con otra consulta de búsqueda",
-  "search.loading.searching": "Buscando en la web (DuckDuckGo + Wikipedia)...",
+  "search.loading.searching": "Buscando ...",
   "search.summary.aiSummary": "Resumen IA",
   "search.summary.webContextAnswer": "Respuesta con contexto web",
   "search.summary.analyzingPages": "Analizando páginas web completas...",

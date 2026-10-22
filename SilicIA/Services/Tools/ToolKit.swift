@@ -320,7 +320,7 @@ nonisolated enum ToolKit {
     }
 
     private static func loadFooter(for language: ModelLanguage, tone: ToolCallingTone, hasSearchOrCorpus: Bool) -> String {
-        if tone == .search {
+        if tone == .search && hasSearchOrCorpus {
             if let loaded = PromptLoader.loadPrompt(mode: "normal", feature: "toolkit", variant: "footer.search", language: language) {
                 return loaded
             }

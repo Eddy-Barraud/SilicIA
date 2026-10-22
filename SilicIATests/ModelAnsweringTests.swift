@@ -172,4 +172,77 @@ final class ModelAnsweringTests: XCTestCase {
             "Summary did not mention SwiftData: \(text)"
         )
     }
+
+    func testPresidentsOfFourthRepublicInFrenchAcrossThreeProfiles() async {
+        let aiService = AIService()
+        let query = "liste les présidents le 4ème république française"
+
+        let wikiPage = SearchResult(
+            title: "Quatrième République (France)",
+            url: "https://fr.wikipedia.org/wiki/Quatri%C3%A8me_R%C3%A9publique_(France)",
+            snippet: "Les deux présidents de la Quatrième République sont Vincent Auriol et René Coty.",
+            retrievedContent: """
+            # Quatrième République (France)
+
+            La Quatrième République est le régime républicain en vigueur en France de 1946 à 1958.
+            Les deux seuls présidents de la Quatrième République sont :
+            - Vincent Auriol (1947-1954)
+            - René Coty (1954-1959)
+            """
+        )
+
+        let profileTokens: [(name: String, tokens: Int)] = [
+            ("Concise", 300),
+            ("Standard", 550),
+            ("Detailed", 1100)
+        ]
+
+        for profile in profileTokens {
+            let res = await aiService.summarize(
+                query: query,
+                results: [wikiPage],
+                maxScrapingResults: 1,
+                maxScrapingChars: 2000,
+                temperature: 0.2,
+                maxTokens: profile.tokens,
+                language: .french,
+                generateAnswer: true
+            )
+            let answer = res.summary
+            #if DEBUG
+            print("┏━ Profile [\(profile.name)] Answer ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            print(answer)
+            print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+            #endif
+
+            XCTAssertFalse(answer.isEmpty, "Profile \(profile.name) produced empty answer")
+
+            let lower = answer.lowercased()
+            // Must contain both presidents
+            XCTAssertTrue(
+                lower.contains("auriol"),
+                "Profile \(profile.name) missing Vincent Auriol: \(answer)"
+            )
+            XCTAssertTrue(
+                lower.contains("coty"),
+                "Profile \(profile.name) missing René Coty: \(answer)"
+            )
+
+            // Must NOT mention other French presidents as 4th Republic presidents
+            let forbiddenPresidents = ["pompidou", "giscard", "mitterrand", "chirac", "sarkozy", "hollande", "macron", "lebrun", "de gaulle"]
+            for forbidden in forbiddenPresidents {
+                XCTAssertFalse(
+                    lower.contains(forbidden),
+                    "Profile \(profile.name) erroneously mentioned \(forbidden): \(answer)"
+                )
+            }
+
+            // Normal and Detailed profiles must open with a concise introductory statement followed by detailed content
+            let firstSentence = answer.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            XCTAssertFalse(firstSentence.isEmpty, "Profile \(profile.name) missing concise opening sentence")
+            if profile.name == "Standard" || profile.name == "Detailed" {
+                XCTAssertGreaterThan(answer.count, 150, "Profile \(profile.name) expected detailed content after opening")
+            }
+        }
+    }
 }

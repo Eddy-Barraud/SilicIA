@@ -62,7 +62,7 @@ class WebScrapingService: ObservableObject {
     nonisolated static let maxRawHTMLBytes = 4 * 1024 * 1024
     nonisolated static let maxMarkdownInputBytes = 2 * 1024 * 1024
     nonisolated static let maxDOMNestingDepth = 64
-    nonisolated static let maxDOMElementCount = 10_000
+    nonisolated static let maxDOMElementCount = 20_000
     nonisolated static let markdownThreadStackSize = 4 * 1024 * 1024
 
     @Published var isScrapingContent = false

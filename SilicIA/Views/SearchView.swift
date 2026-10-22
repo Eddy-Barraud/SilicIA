@@ -184,7 +184,7 @@ struct SearchView: View {
     }
     
     private var maxAllowedContextTokensForCurrentResponse: Int {
-        AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+        AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens, totalBudget: settings.totalTokensBudget)
     }
 
     private var effectiveContextTokens: Int {
@@ -1288,43 +1288,67 @@ struct SearchView: View {
 
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
 
-        if !noAIOnly && isModelAvailable {
-            // AI Search Mode: Let the model decide whether to call webSearch / wikipediaSearch.
-            // Start generation immediately (< 50ms) without pre-fetching or pre-scraping.
-            showingSummary = true
-            Task {
-                guard activeSearchRequestID == requestID else { return }
-                await generateSummary(
-                    maxScrapingResults: resultsCount,
-                    maxScrapingChars: scrapingChars,
-                    summaryResults: []
-                )
-            }
-        } else {
-            // Non-AI Search Mode or Foundation Models unavailable:
-            // Fetch search cards directly from DuckDuckGo / Wikipedia.
-            Task {
-                do {
-                    let fetchedResults = try await searchService.search(
-                        query: trimmedQuery,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
-                        maxWikipediaResults: settings.maxWikipediaResults,
+        Task {
+            do {
+                let fetchedResults: [SearchResult]
+                if !noAIOnly && isModelAvailable {
+                    let generated = await SearchSourcesTool.generateQueries(
+                        for: trimmedQuery,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia
                     )
 
-                    guard activeSearchRequestID == requestID else { return }
-                    searchResults = Array(fetchedResults.prefix(resultsCount))
-                    errorMessage = nil
-                } catch {
-                    guard activeSearchRequestID == requestID else { return }
-                    errorMessage = error.localizedDescription
-                    searchResults = []
+                    fetchedResults = try await searchService.search(
+                        webQueries: generated.webQueries,
+                        wikiQueries: generated.wikiQueries,
+                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                        maxWikipediaResults: settings.maxWikipediaResults,
+                        mergedLimit: resultsCount + Self.aiSummaryOverfetchResults,
+                        language: settings.language,
+                        useDuckDuckGo: settings.useDuckDuckGo,
+                        useWikipedia: settings.useWikipedia
+                    )
+                } else {
+                    fetchedResults = try await searchService.search(
+                        query: trimmedQuery,
+                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
+                        maxWikipediaResults: settings.maxWikipediaResults,
+                        language: settings.language,
+                        useDuckDuckGo: settings.useDuckDuckGo,
+                        useWikipedia: settings.useWikipedia
+                    )
+                }
 
-                    #if DEBUG
-                    debugLog("performSearch failed: \(error.localizedDescription)")
-                    #endif
+                guard activeSearchRequestID == requestID else { return }
+                searchResults = Array(fetchedResults.prefix(resultsCount))
+                errorMessage = nil
+
+                // Auto-generate summary only when AI mode is enabled
+                if !noAIOnly && isModelAvailable {
+                    showingSummary = true
+                    await generateSummary(
+                        maxScrapingResults: resultsCount,
+                        maxScrapingChars: scrapingChars,
+                        summaryResults: fetchedResults
+                    )
+                }
+            } catch {
+                guard activeSearchRequestID == requestID else { return }
+                errorMessage = error.localizedDescription
+                searchResults = []
+
+                #if DEBUG
+                debugLog("performSearch failed: \(error.localizedDescription)")
+                #endif
+
+                if !noAIOnly && isModelAvailable {
+                    showingSummary = true
+                    await generateSummary(
+                        maxScrapingResults: resultsCount,
+                        maxScrapingChars: scrapingChars,
+                        summaryResults: []
+                    )
                 }
             }
         }
@@ -1336,7 +1360,7 @@ struct SearchView: View {
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
             Task {
-                await generateSummary(summaryResults: [])
+                await generateSummary(summaryResults: searchResults)
             }
         }
     }

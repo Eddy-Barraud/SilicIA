@@ -122,6 +122,180 @@ nonisolated enum TokenBudgeting {
         max(tokens, 0) * avgCharsPerToken
     }
 
+    enum OutputProfileKind: String, Sendable, CaseIterable {
+        case concise = "Concise"
+        case standard = "Standard"
+        case detailed = "Detailed"
+    }
+
+    struct OutputProfile: Sendable, Equatable {
+        let kind: OutputProfileKind
+        let targetSentencesRange: ClosedRange<Int>
+        let maxSentences: Int
+        let keyPointsRangeString: String
+        let keyPointsRangeFrString: String
+        let keyPointsRangeEsString: String
+
+        func localizedName(for language: ModelLanguage) -> String {
+            switch language {
+            case .english:
+                switch kind {
+                case .concise: return "Concise"
+                case .standard: return "Standard"
+                case .detailed: return "Detailed"
+                }
+            case .french:
+                switch kind {
+                case .concise: return "Concis"
+                case .standard: return "Standard"
+                case .detailed: return "Détaillé"
+                }
+            case .spanish:
+                switch kind {
+                case .concise: return "Conciso"
+                case .standard: return "Estándar"
+                case .detailed: return "Detallado"
+                }
+            }
+        }
+
+        func personaDirective(for language: ModelLanguage) -> String {
+            switch language {
+            case .english:
+                switch kind {
+                case .concise:
+                    return "You produce concise, direct web summaries."
+                case .standard:
+                    return "You produce comprehensive, informative web summaries: start with a concise and direct answer at the beginning, then develop the necessary details."
+                case .detailed:
+                    return "You produce in-depth, structured web syntheses: start with a concise and direct answer at the beginning, then elaborate with comprehensive details and context."
+                }
+            case .french:
+                switch kind {
+                case .concise:
+                    return "Tu rédiges des synthèses web concises et directes."
+                case .standard:
+                    return "Tu rédiges des synthèses web complètes et instructives : commence par une réponse concise et directe au tout début, puis développe les détails utiles."
+                case .detailed:
+                    return "Tu rédiges des synthèses web approfondies et structurées : commence par une réponse concise et directe au tout début, puis développe les explications et le contexte en détail."
+                }
+            case .spanish:
+                switch kind {
+                case .concise:
+                    return "Elaboras resúmenes web concisos y directos."
+                case .standard:
+                    return "Elaboras resúmenes web completos e informativos: comienza con una respuesta concisa y directa al principio, luego desarrolla los detalles informativos."
+                case .detailed:
+                    return "Elaboras síntesis web exhaustivas y estructuradas: comienza con una respuesta concisa y directa al principio, luego profundiza en los detalles y el contexto completo."
+                }
+            }
+        }
+
+        func structureDirective(for language: ModelLanguage) -> String {
+            switch language {
+            case .english:
+                switch kind {
+                case .concise:
+                    return "Provide a direct, concise answer, followed by \(keyPointsRangeString) essential key points."
+                case .standard:
+                    return "Answer concisely and directly in opening, then present \(keyPointsRangeString) detailed, informative points with supporting facts."
+                case .detailed:
+                    return "Answer concisely and directly in opening, then present an in-depth synthesis with clear Markdown sections covering \(keyPointsRangeString) thorough aspects."
+                }
+            case .french:
+                switch kind {
+                case .concise:
+                    return "Donne une réponse concise et directe, suivie de \(keyPointsRangeFrString) éléments clés essentiels."
+                case .standard:
+                    return "Réponds de façon concise et directe dès l'ouverture, puis présente \(keyPointsRangeFrString) points détaillés et instructifs avec des faits précis."
+                case .detailed:
+                    return "Réponds de façon concise et directe dès l'ouverture, puis présente une synthèse approfondie avec des sections Markdown claires couvrant \(keyPointsRangeFrString) aspects détaillés."
+                }
+            case .spanish:
+                switch kind {
+                case .concise:
+                    return "Proporciona una respuesta directa y concisa, seguida de \(keyPointsRangeEsString) puntos clave esenciales."
+                case .standard:
+                    return "Responde de forma concisa y directa al inicio, luego presenta \(keyPointsRangeEsString) puntos detallados e informativos con hechos precisos."
+                case .detailed:
+                    return "Responde de forma concisa y directa al inicio, luego presenta una síntesis en profundidad con secciones Markdown claras que cubran \(keyPointsRangeEsString) aspectos detallados."
+                }
+            }
+        }
+
+        func lengthDirective(for language: ModelLanguage) -> String {
+            let low = targetSentencesRange.lowerBound
+            let high = targetSentencesRange.upperBound
+            switch language {
+            case .english:
+                switch kind {
+                case .concise:
+                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Be concise, rigorous, and cite only the exact entities matching the question."
+                case .standard:
+                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Answer concisely at the beginning, then elaborate each point with concrete details."
+                case .detailed:
+                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Answer concisely at the beginning, then organize with clear Markdown headings and elaborate in depth."
+                }
+            case .french:
+                switch kind {
+                case .concise:
+                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Sois concis, rigoureux et ne cite que les entités exactes correspondant à la question."
+                case .standard:
+                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Réponds d'abord de façon concise, puis développe les détails utiles."
+                case .detailed:
+                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Réponds d'abord de façon concise, puis structure avec des titres Markdown clairs et développe en profondeur."
+                }
+            case .spanish:
+                switch kind {
+                case .concise:
+                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Sé conciso, riguroso y cita solo las entidades exactas que coincidan con la pregunta."
+                case .standard:
+                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Responde primero de forma concisa, luego desarrolla los detalles pertinentes."
+                case .detailed:
+                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Responde primero de forma concisa, luego estructura con encabezados Markdown claros y profundiza en detalle."
+                }
+            }
+        }
+    }
+
+    static func outputProfile(forResponseTokens tokens: Int) -> OutputProfile {
+        let maxSentences = estimatedOutputSentences(forTokens: tokens)
+        if tokens < 400 {
+            let low = max(2, maxSentences - 2)
+            let high = max(low + 1, maxSentences)
+            return OutputProfile(
+                kind: .concise,
+                targetSentencesRange: low...high,
+                maxSentences: maxSentences,
+                keyPointsRangeString: "2 to 3",
+                keyPointsRangeFrString: "2 à 3",
+                keyPointsRangeEsString: "2 a 3"
+            )
+        } else if tokens <= 800 {
+            let low = max(6, maxSentences - 3)
+            let high = max(low + 2, maxSentences)
+            return OutputProfile(
+                kind: .standard,
+                targetSentencesRange: low...high,
+                maxSentences: maxSentences,
+                keyPointsRangeString: "3 to 5",
+                keyPointsRangeFrString: "3 à 5",
+                keyPointsRangeEsString: "3 a 5"
+            )
+        } else {
+            let low = max(12, maxSentences - 6)
+            let high = max(low + 4, maxSentences)
+            return OutputProfile(
+                kind: .detailed,
+                targetSentencesRange: low...high,
+                maxSentences: maxSentences,
+                keyPointsRangeString: "5 to 7",
+                keyPointsRangeFrString: "5 à 7",
+                keyPointsRangeEsString: "5 a 7"
+            )
+        }
+    }
+
     /// Smallest tool reply we'll allow. Below this a tool call returns so
     /// little it's not worth the round-trip (a single search result with
     /// no room for surrounding context).

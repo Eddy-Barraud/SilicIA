@@ -114,16 +114,42 @@ final class RAGChunkerTests: XCTestCase {
         """
 
         let chunks = RAGChunker.chunkParagraphs(text: sampleMarkdown, source: "Web: Example", url: "https://example.com")
-        // The title is never alone and chunks < 200 chars are merged in document order
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertFalse(RAGChunker.isMarkdownHeading(chunks[0].text))
-        XCTAssertTrue(chunks[0].text.contains("# Title of Article"))
+        XCTAssertEqual(chunks.count, 3)
         XCTAssertTrue(chunks[0].text.contains("First paragraph"))
-        XCTAssertTrue(chunks[0].text.contains("Second paragraph"))
-        XCTAssertTrue(chunks[0].text.contains("Third paragraph"))
-        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
+        XCTAssertTrue(chunks[1].text.contains("Second paragraph"))
+        XCTAssertTrue(chunks[2].text.contains("Third paragraph"))
         XCTAssertEqual(chunks[0].url, "https://example.com")
         XCTAssertEqual(chunks[0].source, "Web: Example")
+    }
+
+    func testRemoveMarkdownFormattingTitlesAndLinks() {
+        let rawMarkdown = """
+        # Main Title
+        ## Subtitle Level 2
+        ### Deep Subtitle
+
+        En [mathématiques](https://fr.wikipedia.org/wiki/Math%C3%A9matiques "Mathématiques"), la **distance euclidienne** entre deux [points](https://fr.wikipedia.org/wiki/Point_%28g%C3%A9om%C3%A9trie%29) est la longueur du [segment](https://fr.wikipedia.org/wiki/Segment) qui sépare ces points.
+
+        [![](https://thumb.wikimedia.org/thumb.png)](https://fr.wikipedia.org/wiki/File)
+        Voici un autre paragraphe avec [Vincent Auriol](https://fr.wikipedia.org/wiki/Vincent_Auriol) et [René Coty](https://fr.wikipedia.org/wiki/Ren%C3%A9_Coty).
+        """
+
+        let cleaned = RAGChunker.removeMarkdownFormatting(from: rawMarkdown)
+        XCTAssertFalse(cleaned.contains("# Main Title"))
+        XCTAssertFalse(cleaned.contains("## Subtitle Level 2"))
+        XCTAssertFalse(cleaned.contains("### Deep Subtitle"))
+        XCTAssertFalse(cleaned.contains("https://fr.wikipedia.org"))
+        XCTAssertFalse(cleaned.contains("]("))
+        XCTAssertTrue(cleaned.contains("En mathématiques, la **distance euclidienne** entre deux points est la longueur du segment qui sépare ces points."))
+        XCTAssertTrue(cleaned.contains("Voici un autre paragraphe avec Vincent Auriol et René Coty."))
+
+        let chunks = RAGChunker.chunkParagraphs(text: rawMarkdown, source: "Test Doc")
+        XCTAssertEqual(chunks.count, 2)
+        XCTAssertFalse(chunks.contains { $0.text.hasPrefix("#") })
+        XCTAssertTrue(chunks[0].text.contains("En mathématiques"))
+        XCTAssertFalse(chunks[0].text.contains("https://"))
+        XCTAssertTrue(chunks[1].text.contains("Vincent Auriol et René Coty"))
+        XCTAssertFalse(chunks[1].text.contains("https://"))
     }
 
     func testRAGContextServiceRankingAnd4096Budgeting() async {
@@ -381,121 +407,18 @@ final class RAGChunkerTests: XCTestCase {
 
         let chunks = RAGChunker.chunkMarkdown(text: markdown, source: "Wikipedia: IVe", url: "https://wikipedia.org")
 
-        // Heading must not be alone; table is exempt and intact
-        XCTAssertFalse(chunks.isEmpty)
+        XCTAssertEqual(chunks.count, 3)
+        XCTAssertTrue(chunks[0].text.contains("Voici la liste des présidents"))
 
-        // Find the table chunk
-        let tableChunk = chunks.first { chunk in
-            chunk.text.contains("| Président | Début de mandat |")
-        }
-        XCTAssertNotNil(tableChunk)
-        guard let tableChunk = tableChunk else { return }
-
-        // Table chunk has all 4 rows intact
+        let tableChunk = chunks[1]
+        XCTAssertTrue(tableChunk.text.contains("| Président | Début de mandat | Fin de mandat | Parti politique |"))
         XCTAssertTrue(tableChunk.text.contains("| --- | --- | --- | --- |"))
         XCTAssertTrue(tableChunk.text.contains("| Vincent Auriol | 16 janvier 1947 | 16 janvier 1954 | SFIO |"))
         XCTAssertTrue(tableChunk.text.contains("| René Coty | 16 janvier 1954 | 8 janvier 1959 | CNIP |"))
         let tableLines = tableChunk.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         XCTAssertEqual(tableLines.count, 4)
 
-        // No chunk in the output should be an isolated heading
-        for chunk in chunks {
-            XCTAssertFalse(RAGChunker.isMarkdownHeading(chunk.text), "Found isolated heading chunk: \(chunk.text)")
-        }
-    }
-
-    func testThreeSentenceNonOverlappingChunkingWithoutStride() {
-        let text = """
-        Première phrase détaillée sur les statistiques officielles de l'emploi en France métropolitaine. Deuxième phrase analysant en profondeur le taux de chômage au cours du premier trimestre 2026. Troisième phrase comparant méthodiquement l'évolution observée avec celle de l'année précédente. Quatrième phrase expliquant la situation spécifique et les difficultés rencontrées par les jeunes. Cinquième phrase concluant sur les perspectives économiques et les prévisions du marché du travail. Sixième phrase résumant les recommandations pour les politiques publiques de l'emploi.
-        """
-
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "INSEE", windowSize: 3)
-        // 6 sentences with non-overlapping blocks of 3 produces exactly 2 chunks:
-        // Chunk 0: [S1, S2, S3]
-        // Chunk 1: [S4, S5, S6]
-        // Zero repetition between chunks!
-        XCTAssertEqual(chunks.count, 2)
-
-        // Chunk 0 has S1, S2, S3 but NO S4, S5, S6
-        XCTAssertTrue(chunks[0].text.contains("Première phrase"))
-        XCTAssertTrue(chunks[0].text.contains("Deuxième phrase"))
-        XCTAssertTrue(chunks[0].text.contains("Troisième phrase"))
-        XCTAssertFalse(chunks[0].text.contains("Quatrième phrase"))
-        XCTAssertFalse(chunks[0].text.contains("Cinquième phrase"))
-        XCTAssertFalse(chunks[0].text.contains("Sixième phrase"))
-
-        // Chunk 1 has S4, S5, S6 but NO S1, S2, S3
-        XCTAssertFalse(chunks[1].text.contains("Première phrase"))
-        XCTAssertFalse(chunks[1].text.contains("Deuxième phrase"))
-        XCTAssertFalse(chunks[1].text.contains("Troisième phrase"))
-        XCTAssertTrue(chunks[1].text.contains("Quatrième phrase"))
-        XCTAssertTrue(chunks[1].text.contains("Cinquième phrase"))
-        XCTAssertTrue(chunks[1].text.contains("Sixième phrase"))
-
-        // All chunks must be >= 200 chars
-        for chunk in chunks {
-            XCTAssertGreaterThanOrEqual(chunk.text.count, 200)
-        }
-    }
-
-    func testMarkdownHeadingNeverAlone() {
-        let text = """
-        ### Population de Paris : chiffres clés
-
-        Paris compte 2 103 778 habitants en 2026 selon les dernières estimations officielles de l'INSEE. La capitale fait face à des mutations démographiques notables dans certains arrondissements centraux.
-        """
-
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertFalse(RAGChunker.isMarkdownHeading(chunks[0].text))
-        XCTAssertTrue(chunks[0].text.contains("### Population de Paris : chiffres clés"))
-        XCTAssertTrue(chunks[0].text.contains("Paris compte 2 103 778 habitants"))
-        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
-    }
-
-    func testSmallChunksMergedInDocumentOrder() {
-        let text = """
-        Population
-        519 127
-        Densité
-        10 822 hab/km²
-
-        Lyon est la troisième commune la plus peuplée de France après Paris et Marseille. Son dynamisme économique attire chaque année de nouveaux résidents dans la métropole.
-        """
-
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertTrue(chunks[0].text.contains("Population"))
-        XCTAssertTrue(chunks[0].text.contains("519 127"))
-        XCTAssertTrue(chunks[0].text.contains("Lyon est la troisième commune"))
-        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
-    }
-
-    func testTrailingChunkMergedBackward() {
-        let text = """
-        Paris compte 2 103 778 habitants en 2026 selon les données publiées par l'Institut national de la statistique et des études économiques. La densité moyenne y est particulièrement élevée dans les arrondissements du centre et de l'est parisien.
-
-        Conclusion brève.
-        """
-
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertTrue(chunks[0].text.contains("Paris compte 2 103 778 habitants"))
-        XCTAssertTrue(chunks[0].text.contains("Conclusion brève."))
-        XCTAssertGreaterThanOrEqual(chunks[0].text.count, 200)
-    }
-
-    func testTablesExemptFrom200CharMerge() {
-        let text = """
-        | Ville | Hab |
-        | --- | --- |
-        | Lyon | 519k |
-        """
-
-        let chunks = RAGChunker.chunkMarkdown(text: text, source: "Test")
-        XCTAssertEqual(chunks.count, 1)
-        XCTAssertLessThan(chunks[0].text.count, 200)
-        XCTAssertTrue(chunks[0].text.contains("| Ville | Hab |"))
+        XCTAssertTrue(chunks[2].text.contains("Cette période s'est achevée"))
     }
 
     func testInseeFixtureTablesPreserved() throws {
@@ -526,20 +449,6 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertTrue(table1.text.contains("2015-T1"))
         let table1Rows = table1.text.components(separatedBy: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         XCTAssertEqual(table1Rows.count, 95)
-
-        // No isolated headings in the entire fixture output
-        for chunk in chunks {
-            XCTAssertFalse(RAGChunker.isMarkdownHeading(chunk.text), "Found isolated heading: \(chunk.text)")
-        }
-
-        // All non-table chunks must be >= 200 characters
-        let nonTableChunks = chunks.filter { chunk in
-            let firstLine = chunk.text.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespaces) ?? ""
-            return !(firstLine.hasPrefix("|") && firstLine.hasSuffix("|"))
-        }
-        for chunk in nonTableChunks {
-            XCTAssertGreaterThanOrEqual(chunk.text.count, 200, "Prose chunk < 200 chars: [\(chunk.text)]")
-        }
     }
 
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
