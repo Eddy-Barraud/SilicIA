@@ -1281,6 +1281,7 @@ struct SearchView: View {
         isNoAIMode = noAIOnly
         summaryStartTime = nil
         summaryElapsedSeconds = nil
+        searchService.isSearching = true
         #if DEBUG
         aiService.debugTimings = []
         aiService.debugNotes = []
@@ -1320,21 +1321,34 @@ struct SearchView: View {
                     )
                 }
 
-                guard activeSearchRequestID == requestID else { return }
+                guard activeSearchRequestID == requestID else {
+                    searchService.isSearching = false
+                    return
+                }
                 searchResults = Array(fetchedResults.prefix(resultsCount))
                 errorMessage = nil
 
                 // Auto-generate summary only when AI mode is enabled
                 if !noAIOnly && isModelAvailable {
                     showingSummary = true
+                    if searchResults.isEmpty {
+                        aiService.isSummarizing = true
+                    }
+                    searchService.isSearching = false
                     await generateSummary(
                         maxScrapingResults: resultsCount,
                         maxScrapingChars: scrapingChars,
                         summaryResults: fetchedResults
                     )
+                } else {
+                    searchService.isSearching = false
                 }
             } catch {
-                guard activeSearchRequestID == requestID else { return }
+                guard activeSearchRequestID == requestID else {
+                    searchService.isSearching = false
+                    return
+                }
+                searchService.isSearching = false
                 errorMessage = error.localizedDescription
                 searchResults = []
 
@@ -1458,6 +1472,7 @@ struct SearchView: View {
         errorMessage = nil
         summaryStartTime = nil
         summaryElapsedSeconds = nil
+        searchService.isSearching = false
         #if DEBUG
         aiService.debugTimings = []
         aiService.debugNotes = []
