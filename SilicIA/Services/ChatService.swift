@@ -144,7 +144,7 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             imageURLs: imageURLs,
             includeWebSearch: effectiveIncludeWebSearch,
-            searchQuerySeed: effectiveIncludeWebSearch ? message : "",
+            searchQuerySeed: "",
             clampedDuckDuckGoResults: effectiveMaxDDGResults,
             clampedWikipediaResults: effectiveMaxWikiResults
         )

@@ -66,7 +66,7 @@ enum ImageAnalysisService {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ), let dummyCG = context.makeImage() else { return }
 
-            let textRequest = makeTextRequest(languages: defaultRecognitionLanguages)
+            let textRequest = await makeTextRequest(languages: defaultRecognitionLanguages)
             let classifyRequest = VNClassifyImageRequest()
             let handler = VNImageRequestHandler(cgImage: dummyCG, options: [:])
             try? handler.perform([textRequest, classifyRequest])

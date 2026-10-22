@@ -120,6 +120,37 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertFalse(chunks[1].text.contains("https://"))
     }
 
+    func testStripMarkdownLinksAndImagesBalancedParenthesesAndImages() {
+        // Balanced parenthesis in URL
+        let text1 = "Voir [Glycolyse (biochimie)](https://fr.wikipedia.org/wiki/Glycolyse_(biochimie)) pour plus d'infos."
+        let cleaned1 = RAGChunker.removeMarkdownFormatting(from: text1)
+        XCTAssertEqual(cleaned1, "Voir Glycolyse (biochimie) pour plus d'infos.")
+
+        // Image tag
+        let text2 = "Schéma de la voie: ![Voie d'Embden-Meyerhof-Parnas](https://upload.wikimedia.org/path/to/diagram.png)"
+        let cleaned2 = RAGChunker.removeMarkdownFormatting(from: text2)
+        XCTAssertEqual(cleaned2, "Schéma de la voie: Voie d'Embden-Meyerhof-Parnas")
+
+        // Unclosed / tricky bracket syntax (does not crash or freeze)
+        let text3 = "Formule [ATP + Glucose -> Glucose-6-P(unclosed paren\nDeuxième ligne."
+        let cleaned3 = RAGChunker.removeMarkdownFormatting(from: text3)
+        XCTAssertTrue(cleaned3.contains("Formule [ATP + Glucose -> Glucose-6-P(unclosed paren"))
+        XCTAssertTrue(cleaned3.contains("Deuxième ligne."))
+
+        // Large synthetic block (150,000 characters) with tricky combinations to ensure strictly linear time
+        var largeText = ""
+        for i in 1...1000 {
+            largeText += "Paragraphe \(i): [Lien \(i)](https://fr.wikipedia.org/wiki/Article_\(i)_(spec)) avec formule et image ![Img \(i)](https://img/\(i).png).\n\n"
+        }
+        let start = Date()
+        let cleanedLarge = RAGChunker.removeMarkdownFormatting(from: largeText)
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertLessThan(elapsed, 0.5, "removeMarkdownFormatting must be fast and linear-time (took \(elapsed)s)")
+        XCTAssertFalse(cleanedLarge.contains("https://fr.wikipedia.org"))
+        XCTAssertFalse(cleanedLarge.contains("https://img"))
+        XCTAssertTrue(cleanedLarge.contains("Paragraphe 500: Lien 500 avec formule et image Img 500."))
+    }
+
     func testRAGContextServiceRankingAnd4096Budgeting() async {
         let service = RAGContextService()
         let chunks = [

@@ -62,21 +62,14 @@ struct RAGChunker {
         pattern: "[ \t]+\n",
         options: []
     )
-    private static let imageRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"!\[([^\]\n]*)\]\((?:[^()"]+|"[^"]*")*\)"#,
-        options: []
-    )
-    private static let linkRegex: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"\[([^\]\n]*)\]\((?:[^()"]+|"[^"]*")*\)"#,
-        options: []
-    )
 
     private enum MarkdownSegment {
         case table(String)
         case prose(String)
     }
 
-    /// Strips Markdown headings (#...) and converts Markdown links [name](url) into "name".
+    /// Strips Markdown headings (#...), converts Markdown links [name](url) into "name",
+    /// and flattens image tags ![alt](url) into "alt" using fast linear-time scanners.
     static func removeMarkdownFormatting(from text: String) -> String {
         // 1. Remove lines of titles and subtitles (starting with #)
         let lines = text.components(separatedBy: "\n")
@@ -86,35 +79,138 @@ struct RAGChunker {
         }
         let withoutTitles = filteredLines.joined(separator: "\n")
 
-        // 2. Remove / flatten markdown image tags ![alt](url) -> alt
-        let withoutImages: String
-        if let imgRegex = Self.imageRegex {
-            let range = NSRange(withoutTitles.startIndex..<withoutTitles.endIndex, in: withoutTitles)
-            withoutImages = imgRegex.stringByReplacingMatches(
-                in: withoutTitles,
-                options: [],
-                range: range,
-                withTemplate: "$1"
-            )
-        } else {
-            withoutImages = withoutTitles
+        // 2. Strip images ![alt](url) -> alt first, so nested linked images [![alt](img)](link) simplify cleanly
+        let withoutImages = stripMarkdownImages(from: withoutTitles)
+
+        // 3. Strip links [name](url) -> name
+        return stripMarkdownLinks(from: withoutImages)
+    }
+
+    /// Single-pass linear scanner replacing markdown images ![alt](url) -> alt.
+    /// Handles balanced parentheses in URLs without catastrophic regex backtracking.
+    static func stripMarkdownImages(from text: String) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "!" && text.index(after: i) < text.endIndex && text[text.index(after: i)] == "[" {
+                let bracketStart = text.index(after: i)
+                let contentStart = text.index(after: bracketStart)
+
+                var bracketEnd: String.Index? = nil
+                var scan = contentStart
+                while scan < text.endIndex {
+                    let c = text[scan]
+                    if c == "\n" { break }
+                    if c == "]" {
+                        bracketEnd = scan
+                        break
+                    }
+                    scan = text.index(after: scan)
+                }
+
+                if let bEnd = bracketEnd,
+                   text.index(after: bEnd) < text.endIndex,
+                   text[text.index(after: bEnd)] == "(" {
+                    let parenStart = text.index(after: bEnd)
+                    let urlStart = text.index(after: parenStart)
+                    var parenEnd: String.Index? = nil
+                    var parenDepth = 1
+                    var pScan = urlStart
+
+                    while pScan < text.endIndex {
+                        let c = text[pScan]
+                        if c == "\n" { break }
+                        if c == "(" {
+                            parenDepth += 1
+                        } else if c == ")" {
+                            parenDepth -= 1
+                            if parenDepth == 0 {
+                                parenEnd = pScan
+                                break
+                            }
+                        }
+                        pScan = text.index(after: pScan)
+                    }
+
+                    if let pEnd = parenEnd {
+                        let label = text[contentStart..<bEnd]
+                        result.append(contentsOf: label)
+                        i = text.index(after: pEnd)
+                        continue
+                    }
+                }
+            }
+
+            result.append(text[i])
+            i = text.index(after: i)
         }
 
-        // 3. Transform links [name](url) -> name
-        let cleaned: String
-        if let linkRegex = Self.linkRegex {
-            let range = NSRange(withoutImages.startIndex..<withoutImages.endIndex, in: withoutImages)
-            cleaned = linkRegex.stringByReplacingMatches(
-                in: withoutImages,
-                options: [],
-                range: range,
-                withTemplate: "$1"
-            )
-        } else {
-            cleaned = withoutImages
+        return result
+    }
+
+    /// Single-pass linear scanner replacing markdown links [name](url) -> name.
+    /// Handles balanced parentheses in URLs (e.g. Wikipedia article titles) without catastrophic regex backtracking.
+    static func stripMarkdownLinks(from text: String) -> String {
+        var result = ""
+        result.reserveCapacity(text.count)
+
+        var i = text.startIndex
+        while i < text.endIndex {
+            if text[i] == "[" {
+                let contentStart = text.index(after: i)
+
+                var bracketEnd: String.Index? = nil
+                var scan = contentStart
+                while scan < text.endIndex {
+                    let c = text[scan]
+                    if c == "\n" { break }
+                    if c == "]" {
+                        bracketEnd = scan
+                        break
+                    }
+                    scan = text.index(after: scan)
+                }
+
+                if let bEnd = bracketEnd,
+                   text.index(after: bEnd) < text.endIndex,
+                   text[text.index(after: bEnd)] == "(" {
+                    let parenStart = text.index(after: bEnd)
+                    let urlStart = text.index(after: parenStart)
+                    var parenEnd: String.Index? = nil
+                    var parenDepth = 1
+                    var pScan = urlStart
+
+                    while pScan < text.endIndex {
+                        let c = text[pScan]
+                        if c == "\n" { break }
+                        if c == "(" {
+                            parenDepth += 1
+                        } else if c == ")" {
+                            parenDepth -= 1
+                            if parenDepth == 0 {
+                                parenEnd = pScan
+                                break
+                            }
+                        }
+                        pScan = text.index(after: pScan)
+                    }
+
+                    if let pEnd = parenEnd {
+                        let label = text[contentStart..<bEnd]
+                        result.append(contentsOf: label)
+                        i = text.index(after: pEnd)
+                        continue
+                    }
+                }
+            }
+
+            result.append(text[i])
+            i = text.index(after: i)
         }
 
-        return cleaned
+        return result
     }
 
     /// Splits markdown text into retrieval chunks:

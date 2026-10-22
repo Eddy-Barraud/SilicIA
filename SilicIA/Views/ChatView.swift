@@ -110,7 +110,6 @@ struct ChatView: View {
     @State private var showHistory = false
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
-    @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
     @State private var loggedAssistantSnapshots: [ChatMessage.ID: String] = [:]
 
 
@@ -604,13 +603,8 @@ struct ChatView: View {
 
         return VStack(alignment: .leading, spacing: 8) {
             // Attached-source list. Hidden when nothing has been added.
-            // The web-search toggle surfaces as a chip when enabled, so
-            // its state is visible alongside the actual sources.
-            if isWebSearchEnabled || !contextSources.isEmpty {
+            if !contextSources.isEmpty {
                 VStack(spacing: 6) {
-                    if isWebSearchEnabled {
-                        webSearchChip
-                    }
                     ForEach(Array(contextSources.enumerated()), id: \.element.id) { index, source in
                         contextRow(source: source, at: index)
                     }
@@ -724,10 +718,6 @@ struct ChatView: View {
             } label: {
                 Label(L.t("chat.context.addImage", language: settings.language), systemImage: "photo")
             }
-            Divider()
-            Toggle(isOn: $isWebSearchEnabled) {
-                Label(L.t("chat.context.web", language: settings.language), systemImage: "globe")
-            }
         } label: {
             Image(systemName: "plus.circle.fill")
                 .resizable()
@@ -742,31 +732,6 @@ struct ChatView: View {
         .buttonStyle(.plain)
         .help(L.t("chat.context.addAttachment", language: settings.language))
         .accessibilityLabel(L.t("chat.context.addAttachment", language: settings.language))
-    }
-
-    /// Compact pill showing that web search is currently enabled. Tap
-    /// to disable — mirrors the "delete chip" gesture on attached
-    /// sources.
-    private var webSearchChip: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "globe")
-                .foregroundStyle(Color.accentColor)
-            Text(L.t("chat.context.web", language: settings.language))
-                .lineLimit(1)
-                .foregroundStyle(.primary)
-            Spacer()
-            Button {
-                isWebSearchEnabled = false
-            } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(L.t("common.delete", language: settings.language))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .subtleAccentChip(cornerRadius: 10)
     }
 
     /// Appends a fresh empty URL row to `contextSources` and focuses

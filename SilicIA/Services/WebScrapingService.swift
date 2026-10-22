@@ -508,7 +508,7 @@ class WebScrapingService: ObservableObject {
     }
     """
 
-    private static let readerMathJaxSnippet = """
+    nonisolated private static let readerMathJaxSnippet = """
     <script>
     window.MathJax = {
       tex: {
