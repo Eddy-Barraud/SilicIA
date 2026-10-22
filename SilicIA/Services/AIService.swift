@@ -58,9 +58,21 @@ class AIService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     // Fraction of the *available* context window (after instructions +
     // overhead + output are reserved) that the search-summary path fills
-    // with retrieved context. Higher = the model sees more sources per
-    // answer, using more of the 4096-token budget.
+    // with retrieved context. Scaled by output profile to prevent concise
+    // answers from being flooded with excessive peripheral chunks.
     private static let summaryContextUtilizationFactor = 0.80
+
+    private static func summaryContextUtilizationFactor(forTokens maxTokens: Int) -> Double {
+        let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
+        switch profile.kind {
+        case .concise:
+            return 0.40
+        case .standard:
+            return 0.60
+        case .detailed:
+            return 0.80
+        }
+    }
 
     // MARK: - Cached LaTeX-sanitizer regexes
     private func debugLog(_ message: String) {
@@ -259,7 +271,7 @@ class AIService: ObservableObject {
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
         )
-        let contextUtilizationFactor = Self.summaryContextUtilizationFactor
+        let contextUtilizationFactor = Self.summaryContextUtilizationFactor(forTokens: maxTokens)
         self.activeEffectiveMaxTokens = effectiveMaxTokens
         self.activeContextUtilizationFactor = contextUtilizationFactor
 
@@ -563,11 +575,11 @@ class AIService: ObservableObject {
         guard !trimmedContext.isEmpty else { return "" }
         switch language {
         case .french:
-            return "Contexte web :\n\(trimmedContext)\n\n"
+            return "Contexte web de référence (support factuel) :\n\(trimmedContext)\n\n"
         case .spanish:
-            return "Contexto web:\n\(trimmedContext)\n\n"
+            return "Contexto web de referencia (apoyo factual):\n\(trimmedContext)\n\n"
         case .english:
-            return "Web context:\n\(trimmedContext)\n\n"
+            return "Web reference context (factual support):\n\(trimmedContext)\n\n"
         }
     }
 
@@ -578,10 +590,21 @@ class AIService: ObservableObject {
         hasGrounding: Bool = false
     ) -> String {
         if hasGrounding {
+            if let loaded = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "corpus_hint.grounding",
+                language: language
+            ) {
+                return loaded
+            }
             switch language {
-            case .french: return "Appuie ta réponse sur le contexte web ci-dessus."
-            case .spanish: return "Basa tu respuesta en el contexto web anterior."
-            case .english: return "Base your answer on the web context above."
+            case .french:
+                return "Réponds d'abord clairement et directement à la question posée à partir de tes connaissances fondamentales. Utilise le contexte web ci-dessus comme support factuel. Si le contexte est incomplet ou omet des notions essentielles, complète impérativement avec tes connaissances sans inclure de détails hors sujet."
+            case .spanish:
+                return "Responde primero de forma clara y directa a la pregunta planteada a partir de tus conocimientos fundamentales. Utiliza el contexto web anterior como apoyo factual. Si el contexto es incompleto u omite nociones esenciales, completa imperativamente con tus conocimientos sin incluir detalles fuera de tema."
+            case .english:
+                return "Answer the question clearly and directly first using your foundational knowledge. Use the web context above as factual support. If the context is incomplete or omits essential fundamentals, supplement it with your knowledge without including off-topic details."
             }
         } else {
             if let loaded = PromptLoader.loadPrompt(
@@ -747,7 +770,7 @@ class AIService: ObservableObject {
         let effectiveMaxTokens = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
         let maxContextChars = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: effectiveMaxTokens,
-            contextUtilizationFactor: Self.summaryContextUtilizationFactor
+            contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)
         )
         
         // If context fits, use it all; otherwise intelligently select summaries

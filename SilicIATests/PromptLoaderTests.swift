@@ -110,6 +110,14 @@ final class PromptLoaderTests: XCTestCase {
                 language: language
             )
             XCTAssertNotNil(direct, "Missing direct corpus hint for \(language.code)")
+
+            let grounding = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                variant: "corpus_hint.grounding",
+                language: language
+            )
+            XCTAssertNotNil(grounding, "Missing grounding corpus hint for \(language.code)")
         }
     }
 

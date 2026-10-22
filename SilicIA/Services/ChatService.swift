@@ -1322,7 +1322,7 @@ final class ChatService: ObservableObject {
         switch language {
         case .french:
             if hasGrounding {
-                answerImperative = "Appuie ta réponse sur le contexte ci-dessus. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées. Réponds à la question suivante :"
+                answerImperative = "Réponds clairement et directement à la question suivante. Appuie-toi sur le contexte ci-dessus pour les faits précis et complète avec tes connaissances si le contexte est partiel ou omet des éléments essentiels. N'inclus pas de détails secondaires hors sujet. S'il ne suffit pas, appelle searchContext pour obtenir d'autres passages. Cite les sources utilisées :"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
                     answerImperative = "Pour répondre précisément, effectue une recherche avec l'outil searchSources avant de répondre. Privilégie une seule requête, réserve Wikipédia aux données et faits précis (ou laisse vide []), et n'augmente les requêtes (jusqu'à 2) que si le sujet est difficile. N'appelle calculate que pour un calcul et currentDateTime que si la date/heure actuelle est requise :"
@@ -1338,7 +1338,7 @@ final class ChatService: ObservableObject {
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             if hasGrounding {
-                answerImperative = "Basa tu respuesta en el contexto anterior. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas. Responde a la siguiente pregunta:"
+                answerImperative = "Responde de forma clara y directa a la siguiente pregunta. Apóyate en el contexto anterior para los hechos precisos y completa con tus conocimientos si el contexto es parcial u omite elementos esenciales. No incluyas detalles secundarios fuera de tema. Si no es suficiente, llama a searchContext para obtener más pasajes. Cita las fuentes utilizadas:"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
                     answerImperative = "Para responder con precisión, realiza una búsqueda con searchSources antes de responder. Prioriza una sola consulta, reserva Wikipedia para datos y hechos precisos (o déjala vacía []), y solo amplía consultas (hasta 2) si el tema es difícil. Llama a calculate solo para cálculos y a currentDateTime solo si se requiere la fecha/hora actual:"
@@ -1354,7 +1354,7 @@ final class ChatService: ObservableObject {
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             if hasGrounding {
-                answerImperative = "Base your answer on the context above. If it isn't enough, call searchContext for more passages. Cite the sources you use. Answer the following question:"
+                answerImperative = "Answer the following question clearly and directly. Use the context above for specific facts and supplement with your knowledge if the context is incomplete or omits essential elements. Do not include off-topic secondary details. If it isn't enough, call searchContext for more passages. Cite the sources you use:"
             } else if webSearchAvailable {
                 if useDuckDuckGo && useWikipedia {
                     answerImperative = "To answer accurately, search with searchSources before answering. Favor a single query, reserve Wikipedia for precise data and facts (or leave empty []), and only use up to 2 queries if the topic is difficult. Only call calculate for math and currentDateTime if real-time date/time is required:"
@@ -1402,17 +1402,17 @@ final class ChatService: ObservableObject {
         let transcriptHeader: String
         switch language {
         case .french:
-            answerImperative = "Les appels d'outils précédents ont déjà fourni le contexte utile. N'appelle plus aucun outil. Réponds maintenant à la question suivante en t'appuyant d'abord sur les résultats d'outils ci-dessus, puis sur le contexte joint si nécessaire :"
+            answerImperative = "Les appels d'outils précédents ont déjà fourni le contexte utile. N'appelle plus aucun outil. Réponds maintenant clairement et directement à la question suivante en t'appuyant sur les faits utiles obtenus et en complétant avec tes connaissances si nécessaire, sans t'attarder sur les détails secondaires :"
             earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
             groundingHeader = "Contexte tiré des documents joints :"
             transcriptHeader = "Résultats d'outils déjà obtenus :"
         case .spanish:
-            answerImperative = "Las llamadas previas a herramientas ya aportaron el contexto útil. No llames más herramientas. Responde ahora a la siguiente pregunta apoyándote primero en los resultados de herramientas anteriores y después, si hace falta, en el contexto adjunto:"
+            answerImperative = "Las llamadas previas a herramientas ya aportaron el contexto útil. No llames más herramientas. Responde ahora de forma clara y directa a la siguiente pregunta apoyándote en los datos útiles obtenidos y completando con tus conocimientos si hace falta, sin detenerte en detalles secundarios:"
             earlierLabel = "Preguntas anteriores del usuario (contexto):"
             groundingHeader = "Contexto de los documentos adjuntos:"
             transcriptHeader = "Resultados de herramientas ya obtenidos:"
         case .english:
-            answerImperative = "The previous tool calls already gathered the useful context. Do not call any more tools. Answer the following question now using the tool results above first, then the attached-document context if needed:"
+            answerImperative = "The previous tool calls already gathered the useful context. Do not call any more tools. Answer the following question clearly and directly now using the gathered facts and supplementing with your knowledge as needed, without dwelling on secondary details:"
             earlierLabel = "Earlier user questions (context):"
             groundingHeader = "Context from the attached documents:"
             transcriptHeader = "Tool results already gathered:"

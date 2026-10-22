@@ -1,0 +1,4 @@
+Responde primero de forma clara y directa a la pregunta planteada utilizando tus conocimientos fundamentales.
+Utiliza el contexto web anterior como apoyo factual (para verificar, precisar o enriquecer datos).
+Si el contexto es parcial, demasiado especializado u omite nociones elementales (definiciones básicas, componentes esenciales), completa obligatoriamente con tus conocimientos para ofrecer una respuesta exacta, natural y completa.
+No incluyas detalles secundarios o periféricos del contexto que no respondan directamente a la pregunta.

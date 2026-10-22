@@ -1,0 +1,4 @@
+Answer the question clearly and directly first using your core foundational knowledge.
+Use the web context above as factual support (to verify, clarify, or enrich data).
+If the context is incomplete, overly specialized, or omits elementary fundamentals (basic definitions, essential components), you must complete the answer with your knowledge so that it is accurate, natural, and comprehensive.
+Do not include secondary or tangential details from the context that do not directly answer the question.

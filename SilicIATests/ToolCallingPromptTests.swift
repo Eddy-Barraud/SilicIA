@@ -47,7 +47,7 @@ final class ToolCallingPromptTests: XCTestCase {
         )
         XCTAssertTrue(prompt.contains(grounding))
         XCTAssertTrue(prompt.contains("Context from the attached documents:"))
-        XCTAssertTrue(prompt.lowercased().contains("base your answer on the context above"))
+        XCTAssertTrue(prompt.lowercased().contains("use the context above for specific facts"))
 
         // Ordering: grounding precedes prior questions, which precede current question
         let groundingPos = prompt.range(of: grounding)!.lowerBound
@@ -74,6 +74,20 @@ final class ToolCallingPromptTests: XCTestCase {
             let prompt = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: language, groundingContext: "Doc text")
             XCTAssertTrue(prompt.contains(header), "Missing header for \(language)")
         }
+    }
+
+    func testGroundedAnswerImperativeLocalization() {
+        let promptEN = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .english, groundingContext: "Doc")
+        XCTAssertTrue(promptEN.contains("Answer the following question clearly and directly."))
+        XCTAssertTrue(promptEN.contains("Use the context above for specific facts and supplement with your knowledge"))
+
+        let promptFR = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .french, groundingContext: "Doc")
+        XCTAssertTrue(promptFR.contains("Réponds clairement et directement à la question suivante."))
+        XCTAssertTrue(promptFR.contains("Appuie-toi sur le contexte ci-dessus pour les faits précis et complète avec tes connaissances"))
+
+        let promptES = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: [], language: .spanish, groundingContext: "Doc")
+        XCTAssertTrue(promptES.contains("Responde de forma clara y directa a la siguiente pregunta."))
+        XCTAssertTrue(promptES.contains("Apóyate en el contexto anterior para los hechos precisos y completa con tus conocimientos"))
     }
 
     func testToolTranscriptRecoveryPrompt() {
