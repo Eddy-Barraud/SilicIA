@@ -47,7 +47,7 @@ struct ChatView: View {
     @Binding var sharedImages: [URL]
     @Environment(\.modelContext) private var modelContext
 
-    let chatService: ChatService
+    @ObservedObject var chatService: ChatService
     var mode: ChatViewMode = .full
     /// Called whenever a PDF lands in `contextSources` via this view (drop,
     /// "+" menu, shared inbox). Hosts use it to mirror the file into their
