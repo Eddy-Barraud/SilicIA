@@ -1,0 +1,1 @@
+Target length: approximately {{lowSentences}} to {{highSentences}} sentences (maximum {{maxSentences}} sentences). Answer concisely at the beginning, then elaborate key points with concrete details.

@@ -12,69 +12,41 @@ import AppKit
 
 final class RAGChunkerTests: XCTestCase {
 
-    private let chunker = RAGChunker()
-
-    func testBasicChunkingBoundaries() async {
+    func testBasicChunkingBoundaries() {
         // Empty & whitespace inputs return empty chunks
-        let empty = await chunker.chunk(text: "", source: "test", maxChunkTokens: 100, overlapTokens: 10)
+        let empty = RAGChunker.chunkParagraphs(text: "", source: "test")
         XCTAssertTrue(empty.isEmpty)
 
-        let whitespace = await chunker.chunk(text: "   \n\t  ", source: "test", maxChunkTokens: 100, overlapTokens: 10)
+        let whitespace = RAGChunker.chunkParagraphs(text: "   \n\t  ", source: "test")
         XCTAssertTrue(whitespace.isEmpty)
 
         // Short input produces a single chunk
         let text = "Hello world"
-        let short = await chunker.chunk(text: text, source: "test", maxChunkTokens: 200, overlapTokens: 10)
+        let short = RAGChunker.chunkParagraphs(text: text, source: "test")
         XCTAssertEqual(short.count, 1)
         XCTAssertEqual(short.first?.text, text)
     }
 
-    func testLongInputProducesBoundedChunks() async {
-        let word = "word "
-        let longText = String(repeating: word, count: 1000)
-        let maxChunkTokens = 50
-        let chunks = await chunker.chunk(text: longText, source: "test", maxChunkTokens: maxChunkTokens, overlapTokens: 0)
-        XCTAssertGreaterThan(chunks.count, 1)
-
-        let maxChunkChars = max(200, maxChunkTokens * 3)
-        for chunk in chunks {
-            XCTAssertLessThanOrEqual(chunk.text.count, maxChunkChars)
-        }
+    func testMultiParagraphInputProducesParagraphChunks() {
+        let p1 = "First paragraph discussing modern natural language processing and tokenization."
+        let p2 = "Second paragraph elaborating on vector embeddings and semantic search mechanisms."
+        let text = "\(p1)\n\n\(p2)"
+        let chunks = RAGChunker.chunkParagraphs(text: text, source: "test")
+        XCTAssertEqual(chunks.count, 2)
+        XCTAssertEqual(chunks[0].text, p1)
+        XCTAssertEqual(chunks[1].text, p2)
     }
 
-    func testSentenceBoundaryHandling() async {
-        let text = """
-        Sentence one uses enough extra words to consume part of the chunk budget without filling it completely.
-        Sentence two carries the chargedrepulsiveparameters keyword and should become the overlapping sentence.
-        Sentence three adds enough trailing content to force another chunk after the first two sentences.
-        """
-        let chunks = await chunker.chunk(text: text, source: "test", maxChunkTokens: 18, overlapTokens: 20)
-        guard chunks.count >= 2 else {
-            return XCTFail("Expected at least 2 chunks for overlap test")
-        }
-        XCTAssertTrue(chunks[0].text.hasSuffix("."))
-        XCTAssertTrue(chunks[1].text.hasPrefix("Sentence two carries the chargedrepulsiveparameters keyword"))
-
-        // Avoid mid-word heads
-        let filler = String(repeating: "aa ", count: 53)
-        let midWordText = "\(filler)chargedrepulsiveparameters tailword.\nNext sentence adds enough trailing text."
-        let midChunks = await chunker.chunk(text: midWordText, source: "test", maxChunkTokens: 70, overlapTokens: 10)
-        XCTAssertGreaterThanOrEqual(midChunks.count, 2)
-        XCTAssertFalse(midChunks.dropFirst().contains(where: {
-            $0.text.hasPrefix("chargedrepulsiveparameters") || $0.text.hasPrefix("epulsiveparameters")
-        }))
-    }
-
-    func testSourceAndMetadataPreserved() async {
+    func testSourceAndMetadataPreserved() {
         let text = "Some content here."
         let url = "https://example.com"
-        let chunks = await chunker.chunk(text: text, source: "mysource", maxChunkTokens: 200, overlapTokens: 0, url: url, pdfPage: 3)
+        let chunks = RAGChunker.chunkParagraphs(text: text, source: "mysource", url: url, pdfPage: 3)
         XCTAssertEqual(chunks[0].source, "mysource")
         XCTAssertEqual(chunks[0].url, url)
         XCTAssertEqual(chunks[0].pdfPage, 3)
     }
 
-    func testFixturePDFDoesNotRestartMidWordOrTableCell() async {
+    func testFixturePDFExtractsTablesAndParagraphs() async {
         let pdfURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("2025.PFAS.CMC.page.3.pdf")
@@ -87,19 +59,15 @@ final class RAGChunkerTests: XCTestCase {
             return XCTFail("Failed to analyze fixture PDF at \(pdfURL.path)")
         }
 
-        let chunks = await chunker.chunk(
-            text: analysis.recognizedText,
+        let converted = RAGChunker.convertWhitespaceAlignedTables(analysis.recognizedText)
+        let chunks = RAGChunker.chunkParagraphs(
+            text: converted,
             source: "fixture",
-            maxChunkTokens: 220,
-            overlapTokens: 30,
             pdfPage: 1
         )
 
         XCTAssertGreaterThanOrEqual(chunks.count, 2)
         XCTAssertTrue(chunks.contains { $0.text.contains("|") })
-        XCTAssertFalse(chunks.dropFirst().contains {
-            $0.text.hasPrefix("epulsion parameters") || $0.text.hasPrefix("bAE/RT |")
-        })
     }
 
     func testParagraphChunkingUsingNLTokenizer() {
@@ -405,7 +373,7 @@ final class RAGChunkerTests: XCTestCase {
         Cette période s'est achevée avec l'adoption de la Constitution de la Ve République.
         """
 
-        let chunks = RAGChunker.chunkMarkdown(text: markdown, source: "Wikipedia: IVe", url: "https://wikipedia.org")
+        let chunks = RAGChunker.chunkParagraphs(text: markdown, source: "Wikipedia: IVe", url: "https://wikipedia.org")
 
         XCTAssertEqual(chunks.count, 3)
         XCTAssertTrue(chunks[0].text.contains("Voici la liste des présidents"))
@@ -433,7 +401,7 @@ final class RAGChunkerTests: XCTestCase {
         }
 
         let content = try String(contentsOf: fixturePath, encoding: .utf8)
-        let chunks = RAGChunker.chunkMarkdown(text: content, source: "INSEE Fixture")
+        let chunks = RAGChunker.chunkParagraphs(text: content, source: "INSEE Fixture")
 
         // In this document, there are 10 tables
         let tableChunks = chunks.filter { chunk in

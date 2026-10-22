@@ -1,0 +1,1 @@
+Proporciona primero una respuesta clara, directa y concisa, luego presenta {{keyPointsRange}} puntos clave esenciales acompañados de hechos precisos.

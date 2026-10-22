@@ -1,0 +1,1 @@
+Longitud objetivo: aproximadamente de {{lowSentences}} a {{highSentences}} oraciones (máximo {{maxSentences}} oraciones). Responde primero de forma concisa, luego desarrolla los puntos clave con detalles concretos.

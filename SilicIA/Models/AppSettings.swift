@@ -45,10 +45,10 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 4
     var maxWikipediaResults: Int = 2
-    var totalTokensBudget: Int = 2700
+    var totalTokensBudget: Int = 2500
     var maxResponseTokens: Int = 500
     var temperature: Double = 0.7
-    var maxContextTokens: Int = 2200
+    var maxContextTokens: Int = 2000
     private var _isReaderViewAndSummaryEnabled: Bool = false
     var isReaderViewAndSummaryEnabled: Bool {
         get {

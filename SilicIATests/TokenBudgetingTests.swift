@@ -74,14 +74,15 @@ final class TokenBudgetingTests: XCTestCase {
         XCTAssertEqual(concise.localizedName(for: .french), "Concis")
         XCTAssertEqual(concise.keyPointsRangeString, "2 to 3")
         XCTAssertTrue(concise.personaDirective(for: .english).contains("concise"))
-        XCTAssertTrue(concise.structureDirective(for: .french).contains("concise et directe"))
+        XCTAssertTrue(concise.structureDirective(for: .french).contains("concise"))
 
         let standard = TokenBudgeting.outputProfile(forResponseTokens: 500)
         XCTAssertEqual(standard.kind, .standard)
         XCTAssertEqual(standard.localizedName(for: .english), "Standard")
         XCTAssertEqual(standard.keyPointsRangeString, "3 to 5")
-        XCTAssertTrue(standard.personaDirective(for: .english).contains("comprehensive"))
-        XCTAssertTrue(standard.structureDirective(for: .french).contains("dès l'ouverture"))
+        XCTAssertTrue(standard.personaDirective(for: .english).contains("informative"))
+        XCTAssertTrue(standard.structureDirective(for: .french).contains("concise"))
+        XCTAssertTrue(standard.structureDirective(for: .french).contains("points clés"))
 
         let detailed = TokenBudgeting.outputProfile(forResponseTokens: 1200)
         XCTAssertEqual(detailed.kind, .detailed)

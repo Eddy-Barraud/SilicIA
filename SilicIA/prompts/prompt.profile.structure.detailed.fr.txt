@@ -1,0 +1,1 @@
+Donne d'abord une réponse claire, directe et concise, présente {{keyPointsRange}} points clés, puis développe une synthèse approfondie et structurée avec des sections Markdown claires couvrant les aspects détaillés.

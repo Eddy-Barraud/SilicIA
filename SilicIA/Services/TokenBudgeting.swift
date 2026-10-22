@@ -128,6 +128,10 @@ nonisolated enum TokenBudgeting {
         case detailed = "Detailed"
     }
 
+    /// Output profiles customize the tone, persona, structure, and length of model summaries
+    /// based on token budgets. Directives are loaded externally from `SilicIA/prompts/`
+    /// (`prompt.profile.<directive>.<profile>.<lang>.txt`), providing an incremental 3-tier
+    /// hierarchy (concise -> standard -> detailed).
     struct OutputProfile: Sendable, Equatable {
         let kind: OutputProfileKind
         let targetSentencesRange: ClosedRange<Int>
@@ -159,102 +163,47 @@ nonisolated enum TokenBudgeting {
             }
         }
 
-        func personaDirective(for language: ModelLanguage) -> String {
+        func keyPointsRange(for language: ModelLanguage) -> String {
             switch language {
-            case .english:
-                switch kind {
-                case .concise:
-                    return "You produce concise, direct web summaries."
-                case .standard:
-                    return "You produce comprehensive, informative web summaries: start with a concise and direct answer at the beginning, then develop the necessary details."
-                case .detailed:
-                    return "You produce in-depth, structured web syntheses: start with a concise and direct answer at the beginning, then elaborate with comprehensive details and context."
-                }
-            case .french:
-                switch kind {
-                case .concise:
-                    return "Tu rédiges des synthèses web concises et directes."
-                case .standard:
-                    return "Tu rédiges des synthèses web complètes et instructives : commence par une réponse concise et directe au tout début, puis développe les détails utiles."
-                case .detailed:
-                    return "Tu rédiges des synthèses web approfondies et structurées : commence par une réponse concise et directe au tout début, puis développe les explications et le contexte en détail."
-                }
-            case .spanish:
-                switch kind {
-                case .concise:
-                    return "Elaboras resúmenes web concisos y directos."
-                case .standard:
-                    return "Elaboras resúmenes web completos e informativos: comienza con una respuesta concisa y directa al principio, luego desarrolla los detalles informativos."
-                case .detailed:
-                    return "Elaboras síntesis web exhaustivas y estructuradas: comienza con una respuesta concisa y directa al principio, luego profundiza en los detalles y el contexto completo."
-                }
+            case .english: return keyPointsRangeString
+            case .french: return keyPointsRangeFrString
+            case .spanish: return keyPointsRangeEsString
             }
+        }
+
+        func personaDirective(for language: ModelLanguage) -> String {
+            PromptLoader.loadPrompt(
+                mode: "profile",
+                feature: "persona",
+                variant: kind.rawValue.lowercased(),
+                language: language
+            ) ?? ""
         }
 
         func structureDirective(for language: ModelLanguage) -> String {
-            switch language {
-            case .english:
-                switch kind {
-                case .concise:
-                    return "Provide a direct, concise answer, followed by \(keyPointsRangeString) essential key points."
-                case .standard:
-                    return "Answer concisely and directly in opening, then present \(keyPointsRangeString) detailed, informative points with supporting facts."
-                case .detailed:
-                    return "Answer concisely and directly in opening, then present an in-depth synthesis with clear Markdown sections covering \(keyPointsRangeString) thorough aspects."
-                }
-            case .french:
-                switch kind {
-                case .concise:
-                    return "Donne une réponse concise et directe, suivie de \(keyPointsRangeFrString) éléments clés essentiels."
-                case .standard:
-                    return "Réponds de façon concise et directe dès l'ouverture, puis présente \(keyPointsRangeFrString) points détaillés et instructifs avec des faits précis."
-                case .detailed:
-                    return "Réponds de façon concise et directe dès l'ouverture, puis présente une synthèse approfondie avec des sections Markdown claires couvrant \(keyPointsRangeFrString) aspects détaillés."
-                }
-            case .spanish:
-                switch kind {
-                case .concise:
-                    return "Proporciona una respuesta directa y concisa, seguida de \(keyPointsRangeEsString) puntos clave esenciales."
-                case .standard:
-                    return "Responde de forma concisa y directa al inicio, luego presenta \(keyPointsRangeEsString) puntos detallados e informativos con hechos precisos."
-                case .detailed:
-                    return "Responde de forma concisa y directa al inicio, luego presenta una síntesis en profundidad con secciones Markdown claras que cubran \(keyPointsRangeEsString) aspectos detallados."
-                }
-            }
+            PromptLoader.loadPrompt(
+                mode: "profile",
+                feature: "structure",
+                variant: kind.rawValue.lowercased(),
+                language: language,
+                replacements: [
+                    "keyPointsRange": keyPointsRange(for: language)
+                ]
+            ) ?? ""
         }
 
         func lengthDirective(for language: ModelLanguage) -> String {
-            let low = targetSentencesRange.lowerBound
-            let high = targetSentencesRange.upperBound
-            switch language {
-            case .english:
-                switch kind {
-                case .concise:
-                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Be concise, rigorous, and cite only the exact entities matching the question."
-                case .standard:
-                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Answer concisely at the beginning, then elaborate each point with concrete details."
-                case .detailed:
-                    return "Target length: approximately \(low) to \(high) sentences (maximum \(maxSentences) sentences). Answer concisely at the beginning, then organize with clear Markdown headings and elaborate in depth."
-                }
-            case .french:
-                switch kind {
-                case .concise:
-                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Sois concis, rigoureux et ne cite que les entités exactes correspondant à la question."
-                case .standard:
-                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Réponds d'abord de façon concise, puis développe les détails utiles."
-                case .detailed:
-                    return "Longueur cible : environ \(low) à \(high) phrases (maximum \(maxSentences) phrases). Réponds d'abord de façon concise, puis structure avec des titres Markdown clairs et développe en profondeur."
-                }
-            case .spanish:
-                switch kind {
-                case .concise:
-                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Sé conciso, riguroso y cita solo las entidades exactas que coincidan con la pregunta."
-                case .standard:
-                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Responde primero de forma concisa, luego desarrolla los detalles pertinentes."
-                case .detailed:
-                    return "Longitud objetivo: aproximadamente de \(low) a \(high) oraciones (máximo \(maxSentences) oraciones). Responde primero de forma concisa, luego estructura con encabezados Markdown claros y profundiza en detalle."
-                }
-            }
+            PromptLoader.loadPrompt(
+                mode: "profile",
+                feature: "length",
+                variant: kind.rawValue.lowercased(),
+                language: language,
+                replacements: [
+                    "lowSentences": "\(targetSentencesRange.lowerBound)",
+                    "highSentences": "\(targetSentencesRange.upperBound)",
+                    "maxSentences": "\(maxSentences)"
+                ]
+            ) ?? ""
         }
     }
 

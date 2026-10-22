@@ -1,0 +1,1 @@
+Longueur cible : environ {{lowSentences}} à {{highSentences}} phrases (maximum {{maxSentences}} phrases). Sois concis, rigoureux et ne cite que les entités exactes correspondant à la question.

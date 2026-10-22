@@ -918,14 +918,38 @@ final class ChatService: ObservableObject {
             return [RAGChunk(source: source, text: cleanText, url: nil, pdfPage: pdfPage)]
         }
 
-        let chunker = RAGChunker()
-        return await chunker.chunk(
-            text: cleanText,
-            source: source,
-            maxChunkTokens: pdfChunkMaxTokens,
-            overlapTokens: pdfChunkOverlapTokens,
-            pdfPage: pdfPage
-        )
+        let chunks = RAGChunker.chunkParagraphs(text: cleanText, source: source, pdfPage: pdfPage)
+        if chunks.count > 1 {
+            return chunks
+        }
+
+        // If the oversized text has no paragraph breaks, split sentences into bounded chunks
+        let sentenceTokenizer = NLTokenizer(unit: .sentence)
+        sentenceTokenizer.string = cleanText
+        var sentenceChunks: [RAGChunk] = []
+        var currentChunk = ""
+        let maxChunkChars = max(200, pdfChunkMaxTokens * TokenBudgeting.avgCharsPerToken)
+
+        sentenceTokenizer.enumerateTokens(in: cleanText.startIndex..<cleanText.endIndex) { range, _ in
+            let sentence = cleanText[range].trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !sentence.isEmpty else { return true }
+            if !currentChunk.isEmpty && currentChunk.count + sentence.count + 1 > maxChunkChars {
+                sentenceChunks.append(RAGChunk(source: source, text: currentChunk, url: nil, pdfPage: pdfPage))
+                currentChunk = sentence
+            } else {
+                if currentChunk.isEmpty {
+                    currentChunk = sentence
+                } else {
+                    currentChunk += " " + sentence
+                }
+            }
+            return true
+        }
+        if !currentChunk.isEmpty {
+            sentenceChunks.append(RAGChunk(source: source, text: currentChunk, url: nil, pdfPage: pdfPage))
+        }
+
+        return sentenceChunks.isEmpty ? chunks : sentenceChunks
     }
 
     /// Runs Vision OCR + image classification on the file and packages the
@@ -1152,8 +1176,7 @@ final class ChatService: ObservableObject {
             replacements: [
                 "maxOutputCharacters": "\(maxOutputCharacters)"
             ]
-        )
-            ?? fallbackChatInstructions(for: language, hasContext: hasContext)
+        ) ?? ""
         guard appendToolsAppendix else { return base }
         return base + "\n\n" + toolCallingInstructionsAppendix(
             for: language,
@@ -1429,54 +1452,6 @@ final class ChatService: ObservableObject {
         return description.contains("duplicate calls")
             || description.contains("calls reached for this turn")
             || description.contains("tool call limit")
-    }
-
-    private func fallbackChatInstructions(for language: ModelLanguage, hasContext: Bool = true) -> String {
-        if !hasContext {
-            switch language {
-            case .french:
-                return """
-                Vous êtes un assistant de chat utile. Répondez aux questions de l'utilisateur avec clarté et précision.
-                Lorsque des outils de recherche sont disponibles, utilisez-les pour vérifier les faits, définitions, statistiques et chiffres avant de répondre.
-                Ne dites jamais « d'après le contexte fourni » et ne vous excusez jamais de l'absence de documents ou de contexte.
-                Répondez dans la même langue que la question de l'utilisateur.
-                """
-            case .spanish:
-                return """
-                Usted es un asistente de chat útil. Responda a las preguntas del usuario con claridad y precisión.
-                Cuando haya herramientas de búsqueda disponibles, utilícelas para verificar hechos, definiciones, estadísticas y cifras antes de responder.
-                Nunca mencione «según el contexto proporcionado» ni se disculpe por la falta de documentos o contexto.
-                Responda en el mismo idioma que la pregunta del usuario.
-                """
-            case .english:
-                return """
-                You are a helpful chat assistant. Answer the user's questions clearly and accurately.
-                When search tools are available, use them to verify facts, definitions, statistics, and figures before answering.
-                Never state "based on the provided context" and never apologize for lacking context or documents.
-                Respond in the same language as the user's latest question.
-                """
-            }
-        }
-        switch language {
-        case .french:
-            return """
-            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
-            Appuyez principalement vos réponses sur le contexte fourni. Si le contexte ne répond pas entièrement à la question, complétez avec vos connaissances avec précision.
-            Répondez dans la même langue que la question de l'utilisateur.
-            """
-        case .spanish:
-            return """
-            Usted es un asistente de chat útil. Responda con claridad y precisión.
-            Base sus respuestas principalmente en el contexto recuperado proporcionado. Si el contexto no responde completamente a la pregunta, complemente con sus conocimientos con precisión.
-            Responda en el mismo idioma que la pregunta del usuario.
-            """
-        case .english:
-            return """
-            You are a helpful chat assistant. Answer the user clearly and accurately.
-            Base your answers primarily on the retrieved context provided. If the context does not fully answer the question, supplement with your knowledge while maintaining accuracy.
-            Respond in the same language as the user's latest question.
-            """
-        }
     }
 
     private func debugLog(_ message: String) {

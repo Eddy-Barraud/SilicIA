@@ -1,0 +1,1 @@
+Provide a clean, direct, and concise answer first, present {{keyPointsRange}} key points, followed by an in-depth, structured synthesis with clear Markdown sections covering thorough aspects and details.

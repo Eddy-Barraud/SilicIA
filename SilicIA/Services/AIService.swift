@@ -92,13 +92,12 @@ class AIService: ObservableObject {
         let trimmedContent = pageMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else { return ("", "") }
 
-        let instructions = PromptLoader.loadPrompt(
+        guard let instructions = PromptLoader.loadPrompt(
             mode: "normal",
             feature: "webpage",
             variant: "instructions",
             language: language
-        ) ?? fallbackWebPageInstructions(for: language)
-
+        ),
         let prompt = PromptLoader.loadPrompt(
             mode: "normal",
             feature: "webpage",
@@ -108,12 +107,12 @@ class AIService: ObservableObject {
                 "url": url,
                 "content": String(trimmedContent.prefix(maxCharacters))
             ]
-        ) ?? fallbackWebPagePrompt(
-            title: title,
-            url: url,
-            content: String(trimmedContent.prefix(maxCharacters)),
-            language: language
-        )
+        ) else {
+            #if DEBUG
+            assertionFailure("Failed to load webpage prompt templates for language: \(language.code)")
+            #endif
+            return ("", "")
+        }
 
         do {
             let session = LanguageModelSession(instructions: instructions)
@@ -487,8 +486,7 @@ class AIService: ObservableObject {
                 "structureDirective": profile.structureDirective(for: language),
                 "lengthDirective": profile.lengthDirective(for: language)
             ]
-        )
-            ?? fallbackSummaryInstructions(for: language, profile: profile)
+        ) ?? ""
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
@@ -554,16 +552,10 @@ class AIService: ObservableObject {
             return loaded
         }
 
-        return fallbackToolCallingSearchPrompt(
-            query: query,
-            corpusHint: corpusHint,
-            keyPoints: keyPoints,
-            maxOutputTokens: maxOutputTokens,
-            maxOutputSentences: maxOutputSentences,
-            language: language,
-            groundingContext: contextBlock,
-            profile: profile
-        )
+        #if DEBUG
+        assertionFailure("Missing tool_calling prompt template for language: \(language.code)")
+        #endif
+        return ""
     }
 
     private static func localizedSearchContextBlock(from selectedContext: String, language: ModelLanguage) -> String {
@@ -605,70 +597,6 @@ class AIService: ObservableObject {
             case .spanish: return "No hay fragmentos pre-recuperados y la búsqueda web está desactivada. Responde con tus conocimientos."
             case .english: return "No chunks were pre-fetched and web search is disabled. Answer from your own knowledge."
             }
-        }
-    }
-
-    private static func fallbackToolCallingSearchPrompt(
-        query: String,
-        corpusHint: String,
-        keyPoints: String,
-        maxOutputTokens: Int,
-        maxOutputSentences: Int,
-        language: ModelLanguage,
-        groundingContext: String = "",
-        profile: TokenBudgeting.OutputProfile? = nil
-    ) -> String {
-        let effProfile = profile ?? TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
-        let lengthLine = effProfile.lengthDirective(for: language)
-        switch language {
-        case .french:
-            return """
-            \(groundingContext)Sujet ou question : \(query)
-
-            \(corpusHint)
-            N'appelle `currentDateTime` que si la question dépend explicitement de la date ou de l'heure actuelle.
-            Si la question nécessite un calcul, utilise `calculate`.
-
-            Réponds avec :
-            \(effProfile.structureDirective(for: language))
-            \(lengthLine)
-            Sois rigoureux sur les dénombrements et listes : ne cite que les entités exactes correspondant précisément aux critères demandés, sans ajouter de personnalités d'autres époques.
-            Format de sortie attendu : texte clair en Markdown.
-            Quand c'est pertinent, inclus des formules mathématiques simples en LaTeX ($...$ en ligne, $$...$$ en bloc).
-            N'utilise jamais de LaTeX pour du code, des requêtes ou du texte ordinaire, et n'utilise jamais de commande \\text{ ni d'environnements \\begin{ (comme \\begin{array}).
-            """
-        case .spanish:
-            return """
-            \(groundingContext)Tema o pregunta: \(query)
-
-            \(corpusHint)
-            Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
-            Si la pregunta requiere un cálculo, usa `calculate`.
-
-            Responde con:
-            \(effProfile.structureDirective(for: language))
-            \(lengthLine)
-            Sé riguroso con los recuentos y listas: cita únicamente las entidades exactas que correspondan precisamente a los criterios solicitados, sin añadir figuras de otros períodos.
-            Formato de salida esperado: texto claro en Markdown.
-            Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
-            Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \\text{ ni entornos \\begin{ (como \\begin{array}).
-            """
-        case .english:
-            return """
-            \(groundingContext)Topic or question: \(query)
-
-            \(corpusHint)
-            Only call `currentDateTime` if the question explicitly depends on the current date or time.
-            If the question requires a calculation, use `calculate`.
-
-            Respond with:
-            \(effProfile.structureDirective(for: language))
-            \(lengthLine)
-            Be rigorous on enumerations and lists: cite only the exact entities that correspond precisely to the requested criteria, without adding figures from other periods.
-            Expected output format: clear Markdown prose.
-            When relevant, include simple mathematical formulas in LaTeX ($...$ inline, $$...$$ block).
-            Never wrap non-mathematical text, code, or queries in LaTeX, and never use \\text{ or \\begin{ environments (such as \\begin{array}).
-            """
         }
     }
 
@@ -915,93 +843,4 @@ class AIService: ObservableObject {
 
         return txt_response
     }
-
-    private func fallbackSummaryInstructions(for language: ModelLanguage, profile: TokenBudgeting.OutputProfile) -> String {
-        switch language {
-        case .french:
-            return """
-            \(profile.personaDirective(for: language))
-            Réponds en français.
-            \(profile.structureDirective(for: language))
-            \(profile.lengthDirective(for: language))
-            Sois rigoureux sur les dénombrements et listes : ne cite que les entités exactes correspondant précisément aux critères demandés, sans ajouter de personnalités d'autres époques.
-            Ne te présente jamais, n'indique jamais quel modèle ou entreprise tu représentes. Commence directement par le contenu du résumé.
-            Si une information est incertaine, indique-le clairement.
-            """
-        case .spanish:
-            return """
-            \(profile.personaDirective(for: language))
-            Responda en español.
-            \(profile.structureDirective(for: language))
-            \(profile.lengthDirective(for: language))
-            Sé riguroso con los recuentos y listas: cita únicamente las entidades exactas que correspondan precisamente a los criterios solicitados, sin añadir figuras de otros períodos.
-            Nunca se presente ni mencione qué modelo o empresa representa. Comience directamente con el contenido del resumen.
-            Si una información es incierta, indíquelo claramente.
-            """
-        case .english:
-            return """
-            \(profile.personaDirective(for: language))
-            Respond in English.
-            \(profile.structureDirective(for: language))
-            \(profile.lengthDirective(for: language))
-            Be rigorous on enumerations and lists: cite only the exact entities that correspond precisely to the requested criteria, without adding figures from other periods.
-            Never introduce yourself or state what model or company you are from. Start directly with the summary content.
-            If information is uncertain, state it explicitly.
-            """
-        }
-    }
-
-    private func fallbackWebPageInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
-            return """
-            Tu produis des résumés de pages web précis et concis.
-            Réponds en français.
-            Résume la page en 5 phrases maximum.
-            Sois factuel et évite la spéculation.
-            """
-        }
-
-        return """
-        You produce concise, accurate web page summaries.
-        Respond in English.
-        Summarize the page in 5 sentences maximum.
-        Be factual and avoid speculation.
-        """
-    }
-
-    private func fallbackWebPagePrompt(
-        title: String,
-        url: String,
-        content: String,
-        language: ModelLanguage
-    ) -> String {
-        if language == .french {
-            return """
-            Titre : \(title)
-            URL : \(url)
-
-            Contenu de la page :
-            \(content)
-
-            Rédige un résumé concis de la page ci-dessus.
-            Limite : 5 phrases maximum.
-            Reste factuel ; n'invente pas d'informations absentes de la page.
-            Réponds en français.
-            """
-        }
-
-        return """
-        Title: \(title)
-        URL: \(url)
-
-        Page content:
-        \(content)
-
-        Write a concise summary of the page above.
-        Limit: 5 sentences maximum.
-        Stay factual; do not invent information that is not in the page.
-        Respond in English.
-        """
-    }
-
 }

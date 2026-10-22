@@ -18,31 +18,18 @@ struct RAGChunk: Identifiable {
     let pdfPage: Int?
 }
 
-/// Splits long context text into overlapping retrieval chunks.
+/// Chunks structured markdown and text into clean retrieval chunks.
 ///
-/// The chunker now packs **whole units** instead of slicing raw characters:
-/// - prose is tokenized into sentences,
-/// - Markdown tables stay atomic whenever possible,
-/// - and overlap is carried as whole trailing sentences / rows.
-///
-/// This avoids retrieval snippets that begin or end mid-sentence such as
-/// `"epulsion parameters"` or mid-cell table fragments like `"bAE/RT |"`.
+/// Chunker architecture:
+/// 1. Markdown tables are isolated first and preserved as atomic tabular chunks.
+/// 2. Formatting noise (titles/headings `#...` and link URLs `[text](url)` -> `text`)
+///    is stripped via `removeMarkdownFormatting`.
+/// 3. Source input language is detected over the first 500 characters using `NLLanguageRecognizer`.
+/// 4. Natural paragraphs are extracted using `NLTokenizer(unit: .paragraph)` configured with
+///    the detected source language.
 struct RAGChunker {
     static let avgCharsPerToken = 3
     private static let minimumChunkCharacters = 200
-
-    private enum ChunkUnitKind {
-        case sentence
-        case line
-        case table
-    }
-
-    private struct ChunkUnit {
-        let text: String
-        let sectionID: Int
-        let kind: ChunkUnitKind
-    }
-
 
     /// Cached regex collapsing horizontal whitespace runs (spaces, tabs,
     /// non-breaking spaces, Unicode whitespace) to a single space. Newlines
@@ -87,15 +74,6 @@ struct RAGChunker {
     private enum MarkdownSegment {
         case table(String)
         case prose(String)
-    }
-
-    /// Checks if a string consists exclusively of Markdown headings (# ...).
-    static func isMarkdownHeading(_ text: String) -> Bool {
-        let lines = text.components(separatedBy: "\n")
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        guard !lines.isEmpty else { return false }
-        return lines.allSatisfy { $0.hasPrefix("#") }
     }
 
     /// Strips Markdown headings (#...) and converts Markdown links [name](url) into "name".
@@ -193,18 +171,6 @@ struct RAGChunker {
         return chunks
     }
 
-    /// Alias for chunkParagraphs to maintain backward compatibility.
-    static func chunkMarkdown(
-        text: String,
-        source: String,
-        url: String? = nil,
-        pdfPage: Int? = nil,
-        windowSize: Int = 3,
-        minCharacters: Int = 200
-    ) -> [RAGChunk] {
-        chunkParagraphs(text: text, source: source, url: url, pdfPage: pdfPage)
-    }
-
     private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
         let lines = markdown.components(separatedBy: "\n")
         var segments: [MarkdownSegment] = []
@@ -248,352 +214,6 @@ struct RAGChunker {
         return segments
     }
 
-    /// Chunks text with overlap while preserving non-empty slices.
-    func chunk(
-        text: String,
-        source: String,
-        maxChunkTokens: Int,
-        overlapTokens: Int,
-        url: String? = nil,
-        pdfPage: Int? = nil
-    ) async -> [RAGChunk] {
-        // Convert whitespace-aligned tables BEFORE collapsing whitespace.
-        // Vision's OCR joins cells with 4 spaces — once normalizeWhitespace
-        // runs, those boundaries are unrecoverable and tables flatten.
-        let withTables = Self.convertWhitespaceAlignedTables(text)
-        let cleanText = Self.normalizeWhitespace(withTables)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard !cleanText.isEmpty else { return [] }
-
-        let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
-        let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
-        let units = await Self.makeChunkUnits(from: cleanText, maxChunkChars: maxChunkChars)
-        guard !units.isEmpty else { return [] }
-
-        var chunks: [RAGChunk] = []
-        var startUnitIndex = 0
-
-        while startUnitIndex < units.count {
-            var endUnitIndex = startUnitIndex
-            var currentLength = 0
-
-            while endUnitIndex < units.count {
-                let additionalLength = Self.additionalRenderedLength(
-                    for: units[endUnitIndex],
-                    after: endUnitIndex > startUnitIndex ? units[endUnitIndex - 1] : nil
-                )
-                if endUnitIndex > startUnitIndex, currentLength + additionalLength > maxChunkChars {
-                    break
-                }
-                currentLength += additionalLength
-                endUnitIndex += 1
-            }
-
-            let rendered = Self.renderChunkUnits(Array(units[startUnitIndex..<endUnitIndex]))
-            if !rendered.isEmpty {
-                chunks.append(RAGChunk(source: source, text: rendered, url: url, pdfPage: pdfPage))
-            }
-
-            if endUnitIndex >= units.count { break }
-            startUnitIndex = Self.nextChunkStartIndex(
-                units: units,
-                chunkStart: startUnitIndex,
-                chunkEnd: endUnitIndex,
-                overlapChars: overlapChars
-            )
-        }
-
-        return Self.preserveTableHeadersAcrossChunks(chunks)
-    }
-
-    private nonisolated static func makeChunkUnits(from text: String, maxChunkChars: Int) async -> [ChunkUnit] {
-        let lines = text.components(separatedBy: "\n")
-        var units: [ChunkUnit] = []
-        var pendingParagraph: [String] = []
-        var nextSectionID = 0
-        var index = 0
-
-        func appendUnit(text: String, kind: ChunkUnitKind, sectionID: Int) async {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            if trimmed.count <= maxChunkChars {
-                units.append(ChunkUnit(text: trimmed, sectionID: sectionID, kind: kind))
-                return
-            }
-            for piece in await MainActor.run(body: { splitOversizedText(trimmed, maxChunkChars: maxChunkChars) }) {
-                units.append(ChunkUnit(text: piece, sectionID: sectionID, kind: kind))
-            }
-        }
-
-        func flushParagraph() async {
-            let paragraph = pendingParagraph
-                .joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            pendingParagraph.removeAll(keepingCapacity: true)
-            guard !paragraph.isEmpty else { return }
-
-            let sectionID = nextSectionID
-            nextSectionID += 1
-
-            let sentenceUnits = sentenceStrings(in: paragraph)
-            if sentenceUnits.count >= 2 {
-                for sentence in sentenceUnits {
-                    await appendUnit(text: sentence, kind: .sentence, sectionID: sectionID)
-                }
-                return
-            }
-
-            let proseLines = paragraph
-                .components(separatedBy: "\n")
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-            if proseLines.count >= 2 {
-                for line in proseLines {
-                    await appendUnit(text: line, kind: .line, sectionID: sectionID)
-                }
-            } else {
-                await appendUnit(text: paragraph, kind: .line, sectionID: sectionID)
-            }
-        }
-
-        while index < lines.count {
-            let rawLine = lines[index]
-            let trimmedLine = rawLine.trimmingCharacters(in: .whitespaces)
-
-            if trimmedLine.isEmpty {
-                await flushParagraph()
-                index += 1
-                continue
-            }
-
-            if isMarkdownTableRow(trimmedLine) {
-                await flushParagraph()
-                let sectionID = nextSectionID
-                nextSectionID += 1
-                var tableLines: [String] = []
-                while index < lines.count {
-                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
-                    guard isMarkdownTableRow(candidate) else { break }
-                    tableLines.append(candidate)
-                    index += 1
-                }
-                await appendUnit(text: tableLines.joined(separator: "\n"), kind: .table, sectionID: sectionID)
-                continue
-            }
-
-            pendingParagraph.append(rawLine)
-            index += 1
-        }
-
-        await flushParagraph()
-        return units
-    }
-
-    private nonisolated static func sentenceStrings(in text: String) -> [String] {
-        let tokenizer = NLTokenizer(unit: .sentence)
-        tokenizer.string = text
-        var sentences: [String] = []
-        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-            let sentence = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !sentence.isEmpty {
-                sentences.append(String(sentence))
-            }
-            return true
-        }
-        return sentences
-    }
-
-    private static func splitOversizedText(_ text: String, maxChunkChars: Int) -> [String] {
-        guard text.count > maxChunkChars else { return [text] }
-        var pieces: [String] = []
-        var start = text.startIndex
-
-        while start < text.endIndex {
-            let hardEnd = text.index(start, offsetBy: maxChunkChars, limitedBy: text.endIndex) ?? text.endIndex
-            let end = hardEnd == text.endIndex
-                ? hardEnd
-                : safeChunkBoundary(in: text, from: start, idealEnd: hardEnd)
-            let piece = text[start..<end].trimmingCharacters(in: .whitespacesAndNewlines)
-            if !piece.isEmpty {
-                pieces.append(String(piece))
-            }
-            if end >= text.endIndex { break }
-            start = end
-        }
-
-        return pieces
-    }
-
-    private static func additionalRenderedLength(for unit: ChunkUnit, after previous: ChunkUnit?) -> Int {
-        unit.text.count + (previous.map { separator(between: $0, and: unit).count } ?? 0)
-    }
-
-    private static func renderChunkUnits(_ units: [ChunkUnit]) -> String {
-        guard let first = units.first else { return "" }
-        var rendered = first.text
-        var previous = first
-        for unit in units.dropFirst() {
-            rendered += separator(between: previous, and: unit)
-            rendered += unit.text
-            previous = unit
-        }
-        return rendered
-    }
-
-    private static func separator(between previous: ChunkUnit, and current: ChunkUnit) -> String {
-        if previous.sectionID != current.sectionID { return "\n\n" }
-        if previous.kind == .sentence && current.kind == .sentence { return " " }
-        return "\n"
-    }
-
-    private static func nextChunkStartIndex(
-        units: [ChunkUnit],
-        chunkStart: Int,
-        chunkEnd: Int,
-        overlapChars: Int
-    ) -> Int {
-        guard overlapChars > 0 else { return chunkEnd }
-        guard chunkEnd - chunkStart > 1 else { return chunkEnd }
-
-        var overlapStart = chunkEnd - 1
-        var accumulated = units[overlapStart].text.count
-
-        while overlapStart > chunkStart {
-            let previous = units[overlapStart - 1]
-            let current = units[overlapStart]
-            let candidate = accumulated + separator(between: previous, and: current).count + previous.text.count
-            guard candidate <= overlapChars else { break }
-            overlapStart -= 1
-            accumulated = candidate
-        }
-
-        return overlapStart > chunkStart ? overlapStart : (chunkEnd - 1)
-    }
-
-    /// Post-process chunks so that Markdown table headers survive across
-    /// chunk boundaries. Without this, a table that spans multiple chunks
-    /// loses its column labels in every chunk except the first — the model
-    /// then sees rows like
-    ///
-    ///     | AR00002 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |
-    ///
-    /// with no way to know which column is "unit price" vs "total" vs "TVA".
-    ///
-    /// Two fixes per chunk:
-    ///   1. Drop a leading orphan separator line (`| --- | --- |`) — these
-    ///      appear when the previous chunk's overlap clipped a *different*
-    ///      table's separator into the current chunk. Wrong column count,
-    ///      pure noise for the model.
-    ///   2. If the chunk contains data rows but no header+separator pair,
-    ///      prepend the most recently seen header from earlier chunks.
-    ///      The header column count is tracked so a wider items-table
-    ///      header is preferred over a stale narrow header from a sibling
-    ///      table on the same page.
-    nonisolated static func preserveTableHeadersAcrossChunks(_ chunks: [RAGChunk]) -> [RAGChunk] {
-        guard chunks.count > 1 else { return chunks }
-
-        // Keyed by column count so a 5-column ID table and a 6-column items
-        // table coexisting on the same page don't clobber each other. When a
-        // later chunk carries N-column data rows, we look up the N-column
-        // header — not "whichever header came last".
-        var recentHeaders: [Int: (header: String, separator: String)] = [:]
-
-        var result: [RAGChunk] = []
-        result.reserveCapacity(chunks.count)
-
-        for chunk in chunks {
-            var lines = chunk.text.components(separatedBy: "\n")
-
-            // 1. Drop leading orphan separator(s) — overlap artifacts from
-            //    a different table whose header isn't in this chunk.
-            while let first = lines.first?.trimmingCharacters(in: .whitespaces),
-                  isMarkdownTableSeparator(first) {
-                lines.removeFirst()
-            }
-
-            // 2. Locate the first data row in the chunk and check whether a
-            //    matching header+separator pair already sits above it. If
-            //    it does, the chunk is self-sufficient — no propagation.
-            let firstDataRow = findFirstDataRow(in: lines)
-            let hasHeaderAboveData: Bool = {
-                guard let dataIndex = firstDataRow.index, dataIndex > 0 else {
-                    return false
-                }
-                // Scan everything before the first data row for a
-                // header+separator pair whose column count matches.
-                var i = 0
-                while i < dataIndex - 1 {
-                    let line = lines[i].trimmingCharacters(in: .whitespaces)
-                    let next = lines[i + 1].trimmingCharacters(in: .whitespaces)
-                    if isMarkdownTableRow(line), !isMarkdownTableSeparator(line),
-                       isMarkdownTableSeparator(next),
-                       markdownColumnCount(in: line) == firstDataRow.columnCount {
-                        return true
-                    }
-                    i += 1
-                }
-                return false
-            }()
-
-            // 3. No matching header above the first data row → prepend the
-            //    cached header for that column count, if we have one.
-            if !hasHeaderAboveData,
-               let dataCount = firstDataRow.columnCount,
-               let header = recentHeaders[dataCount] {
-                lines = [header.header, header.separator] + lines
-            }
-
-            // 4. Update the header cache with every header+separator pair
-            //    visible in this (possibly already-modified) chunk, so the
-            //    next chunk picks up the most recent N-column header.
-            collectHeaders(in: lines, into: &recentHeaders)
-
-            result.append(RAGChunk(
-                source: chunk.source,
-                text: lines.joined(separator: "\n"),
-                url: chunk.url,
-                pdfPage: chunk.pdfPage
-            ))
-        }
-        return result
-    }
-
-    /// Scans `lines` and returns the position + column count of the first
-    /// non-separator table row, or `(nil, nil)` if there isn't one.
-    private nonisolated static func findFirstDataRow(in lines: [String]) -> (index: Int?, columnCount: Int?) {
-        for (idx, raw) in lines.enumerated() {
-            let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            if isMarkdownTableRow(trimmed), !isMarkdownTableSeparator(trimmed) {
-                return (idx, markdownColumnCount(in: trimmed))
-            }
-        }
-        return (nil, nil)
-    }
-
-    /// Walks `lines` and records every header+separator pair found, keyed
-    /// by column count. Later pairs replace earlier ones at the same key,
-    /// so the cache always reflects the most-recently-seen header for that
-    /// column shape.
-    private nonisolated static func collectHeaders(
-        in lines: [String],
-        into cache: inout [Int: (header: String, separator: String)]
-    ) {
-        guard lines.count >= 2 else { return }
-        var i = 0
-        while i < lines.count - 1 {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-            let next = lines[i + 1].trimmingCharacters(in: .whitespaces)
-            if isMarkdownTableRow(line), !isMarkdownTableSeparator(line),
-               isMarkdownTableSeparator(next) {
-                cache[markdownColumnCount(in: line)] = (lines[i], lines[i + 1])
-                i += 2
-            } else {
-                i += 1
-            }
-        }
-    }
-
     private nonisolated static func isMarkdownTableRow(_ line: String) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         return trimmed.hasPrefix("|") && trimmed.hasSuffix("|") && trimmed.count >= 3
@@ -609,16 +229,6 @@ struct RAGChunker {
             guard !trimmedCell.isEmpty else { return false }
             return trimmedCell.allSatisfy { $0 == "-" || $0 == ":" }
         }
-    }
-
-    private nonisolated static func markdownColumnCount(in row: String) -> Int {
-        // A row "| a | b | c |" has 4 pipes — 3 cells. Be defensive about
-        // rows that start or end without a pipe.
-        let pipes = row.filter { $0 == "|" }.count
-        if row.hasPrefix("|"), row.hasSuffix("|") {
-            return max(pipes - 1, 1)
-        }
-        return max(pipes, 1)
     }
 
     /// Detects rows in plain text where columns are aligned by 2+ spaces
@@ -775,113 +385,6 @@ struct RAGChunker {
         }
         return result
     }
-
-    /// Finds the best split point at or before `idealEnd`, walking back at
-    /// most 20% of the chunk size to find a paragraph break, sentence end,
-    /// or single newline. Falls back to a non-mid-number position so a chunk
-    /// boundary never bisects a digit sequence with its thousands/decimal
-    /// separators (e.g. `8,432,567` or `105.4`).
-    static func safeChunkBoundary(
-        in text: String,
-        from start: String.Index,
-        idealEnd: String.Index
-    ) -> String.Index {
-        let totalChars = text.distance(from: start, to: idealEnd)
-        let maxWalkback = max(1, totalChars / 5)
-        let walkbackStart = text.index(idealEnd, offsetBy: -maxWalkback, limitedBy: start) ?? start
-
-        // Pass 1: scan walkback range for the strongest boundary closest
-        // to `idealEnd`. Paragraph (`\n\n`) beats sentence end beats single
-        // newline.
-        var paragraphHit: String.Index? = nil
-        var sentenceHit: String.Index? = nil
-        var newlineHit: String.Index? = nil
-
-        var cursor = walkbackStart
-        while cursor < idealEnd {
-            let next = text.index(after: cursor)
-            let c = text[cursor]
-
-            if c == "\n" {
-                if next < idealEnd, text[next] == "\n" {
-                    paragraphHit = text.index(after: next)
-                } else {
-                    newlineHit = next
-                }
-                cursor = next
-                continue
-            }
-
-            if (c == "." || c == "!" || c == "?"),
-               next < idealEnd, text[next].isWhitespace,
-               !isLikelyDecimalSeparator(text: text, periodIndex: cursor) {
-                sentenceHit = next
-            }
-
-            cursor = next
-        }
-
-        if let paragraphHit { return paragraphHit }
-        if let sentenceHit { return sentenceHit }
-        if let newlineHit { return newlineHit }
-
-        // Pass 2: no strong boundary found. Step back from `idealEnd` while
-        // we'd be bisecting a word or a digit/separator cluster.
-        // - Two adjacent lowercase letters: never split mid-word
-        //   ("Poly" + "ments" → keep together).
-        // - Digit/separator cluster: avoid bisecting "1,234.56" or
-        //   "105.4".
-        // - European thousands separator: "10 000".
-        var fallback = idealEnd
-        while fallback > walkbackStart {
-            let prev = text.index(before: fallback)
-            let cPrev = text[prev]
-            let cAt = text[fallback]
-
-            // Never split between two lowercase letters — mid-word break.
-            if cPrev.isLowercase && cPrev.isLetter && cAt.isLowercase && cAt.isLetter {
-                // Walk back to the space before the second half of the word.
-                while fallback > walkbackStart, !text[fallback].isWhitespace {
-                    fallback = text.index(before: fallback)
-                }
-                // Step past the whitespace so the split lands *after* it.
-                if fallback > walkbackStart, text[fallback].isWhitespace {
-                    fallback = text.index(after: fallback)
-                }
-                break
-            }
-
-            let prevIsNumeric = cPrev.isNumber || cPrev == "." || cPrev == ","
-            guard prevIsNumeric else { break }
-            guard fallback < text.endIndex else { break }
-            let atIsNumeric = cAt.isNumber || cAt == "." || cAt == ","
-            if atIsNumeric, cPrev.isNumber || cAt.isNumber {
-                fallback = prev
-                continue
-            }
-            // European thousands separator: "10 000".
-            if cPrev.isNumber, cAt == " " {
-                let next = text.index(after: fallback)
-                if next < text.endIndex, text[next].isNumber {
-                    fallback = prev
-                    continue
-                }
-            }
-            break
-        }
-        return fallback
-    }
-
-    /// True when the period at `periodIndex` is sandwiched between digits
-    /// (e.g. the `.` in `"1.234"` or `"105.4"`). Such periods are not
-    /// sentence boundaries.
-    private static func isLikelyDecimalSeparator(text: String, periodIndex: String.Index) -> Bool {
-        guard periodIndex > text.startIndex else { return false }
-        let prev = text.index(before: periodIndex)
-        let next = text.index(after: periodIndex)
-        guard next < text.endIndex else { return false }
-        return text[prev].isNumber && text[next].isNumber
-    }
 }
 
 /// Parameters used to keep retrieved context within the model context window.
@@ -1013,7 +516,15 @@ struct RAGSelectionResult {
     }
 }
 
-/// Shared context selection/relevance service for chat and search.
+/// Shared context selection and semantic relevance ranking service for chat and search.
+///
+/// Implements a 2-stage ranking pipeline:
+/// - Stage 1 (Fast Pre-filtering): Candidate chunks are pre-scored via Discrete Cosine Transform (DCT)
+///   hash embeddings and cosine similarity against the query. Top candidates fitting within twice the
+///   target context budget (<= 2x token budget) are retained for deep semantic scoring.
+/// - Stage 2 (Semantic Ranking): Candidates are ranked using NaturalLanguage `NLEmbedding` sentence embeddings
+///   (with word embedding fallback) matched to the query's detected language, augmented with numeric/factual intent boosts.
+///   The top-scoring chunks fitting within the remaining 4096-token context budget (<= 1x budget) are returned.
 actor RAGContextService {
     /// In-memory cache of sentence embeddings by language to avoid repeated disk reads.
     private var embeddingCache: [NLLanguage: NLEmbedding] = [:]
@@ -1357,23 +868,6 @@ actor RAGContextService {
         let total = sums.values.reduce(0, +)
         guard total > 0 else { return [:] }
         return sums.mapValues { ($0 / total) * 100 }
-    }
-
-    private func calculateMaxContextCharacters(
-        maxOutputTokens: Int,
-        contextUtilizationFactor: Double,
-        options: RAGSelectionOptions
-    ) async -> Int {
-        await MainActor.run {
-            TokenBudgeting.maxContextCharacters(
-                maxOutputTokens: maxOutputTokens,
-                contextUtilizationFactor: contextUtilizationFactor,
-                instructionTokens: options.instructionTokens,
-                promptOverheadTokens: options.promptOverheadTokens,
-                minContextTokens: options.minContextTokens,
-                avgCharsPerToken: options.avgCharsPerToken
-            )
-        }
     }
 
     private func calculate4096BudgetedContextCharacters(

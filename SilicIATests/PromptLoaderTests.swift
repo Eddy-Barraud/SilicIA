@@ -180,4 +180,56 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertFalse(noWebAppendix.contains("searchSources"))
         }
     }
+
+    func testProfileDirectivesLoadFromDisk() {
+        let kinds = ["concise", "standard", "detailed"]
+        let languages = [ModelLanguage.english, .french, .spanish]
+
+        for language in languages {
+            for kind in kinds {
+                // Structure
+                let structure = PromptLoader.loadPrompt(
+                    mode: "profile",
+                    feature: "structure",
+                    variant: kind,
+                    language: language,
+                    replacements: ["keyPointsRange": "3 to 5"]
+                )
+                XCTAssertNotNil(structure, "Missing structure directive for \(kind) in \(language.code)")
+                XCTAssertFalse(structure?.contains("{{keyPointsRange}}") == true)
+                XCTAssertFalse(structure?.contains("{{") == true)
+
+                // Persona
+                let persona = PromptLoader.loadPrompt(
+                    mode: "profile",
+                    feature: "persona",
+                    variant: kind,
+                    language: language
+                )
+                XCTAssertNotNil(persona, "Missing persona directive for \(kind) in \(language.code)")
+                XCTAssertFalse(persona?.contains("{{") == true)
+
+                // Length
+                let length = PromptLoader.loadPrompt(
+                    mode: "profile",
+                    feature: "length",
+                    variant: kind,
+                    language: language,
+                    replacements: [
+                        "lowSentences": "5",
+                        "highSentences": "8",
+                        "maxSentences": "10"
+                    ]
+                )
+                XCTAssertNotNil(length, "Missing length directive for \(kind) in \(language.code)")
+                XCTAssertTrue(length?.contains("5") == true)
+                XCTAssertTrue(length?.contains("8") == true)
+                XCTAssertTrue(length?.contains("10") == true)
+                XCTAssertFalse(length?.contains("{{lowSentences}}") == true)
+                XCTAssertFalse(length?.contains("{{highSentences}}") == true)
+                XCTAssertFalse(length?.contains("{{maxSentences}}") == true)
+                XCTAssertFalse(length?.contains("{{") == true)
+            }
+        }
+    }
 }

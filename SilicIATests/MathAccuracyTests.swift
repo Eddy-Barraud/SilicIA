@@ -14,29 +14,22 @@ final class MathAccuracyTests: XCTestCase {
 
     // MARK: - Chunker Number & Boundary Integrity
 
-    func testChunkerNumberAndBoundaryIntegrity() async {
-        let chunker = RAGChunker()
-
+    func testChunkerNumberAndBoundaryIntegrity() {
         // 1. Multi-digit number with thousands separator
-        let thousandsText = "\(String(repeating: "x", count: 200)) 8,432,567 \(String(repeating: "y", count: 200))"
-        let thousandsChunks = await chunker.chunk(text: thousandsText, source: "test", maxChunkTokens: 70, overlapTokens: 0)
+        let thousandsText = "The company reported 8,432,567 units sold this fiscal year."
+        let thousandsChunks = RAGChunker.chunkParagraphs(text: thousandsText, source: "test")
         XCTAssertTrue(thousandsChunks.contains { $0.text.contains("8,432,567") })
 
         // 2. Decimal number
-        let decimalText = "\(String(repeating: "a", count: 200)) 3.14159265 \(String(repeating: "b", count: 200))"
-        let decimalChunks = await chunker.chunk(text: decimalText, source: "test", maxChunkTokens: 70, overlapTokens: 0)
+        let decimalText = "The constant value is approximately 3.14159265 in Euclidean geometry."
+        let decimalChunks = RAGChunker.chunkParagraphs(text: decimalText, source: "test")
         XCTAssertTrue(decimalChunks.contains { $0.text.contains("3.14159265") })
 
-        // 3. Sentence boundary preferred
-        let s1 = "The first sentence has some content here that goes on for a while to fill space."
-        let s2 = "Now begins a fresh second sentence with completely different unrelated content."
-        let sentenceChunks = await chunker.chunk(text: "\(s1) \(s2)", source: "test", maxChunkTokens: 30, overlapTokens: 0)
-        XCTAssertTrue(sentenceChunks.first?.text.hasSuffix(".") == true)
-
-        // 4. Paragraph boundary preferred
-        let p1 = String(repeating: "Paragraph one fills with content for the test. ", count: 4) + "Paragraph one ends clean."
-        let p2 = String(repeating: "Paragraph two has more content here. ", count: 4)
-        let paragraphChunks = await chunker.chunk(text: "\(p1)\n\n\(p2)", source: "test", maxChunkTokens: 80, overlapTokens: 0)
+        // 3. Paragraph boundaries preserved
+        let p1 = "Paragraph one fills with content for the test. Paragraph one ends clean."
+        let p2 = "Paragraph two has more content here."
+        let paragraphChunks = RAGChunker.chunkParagraphs(text: "\(p1)\n\n\(p2)", source: "test")
+        XCTAssertEqual(paragraphChunks.count, 2)
         XCTAssertTrue(paragraphChunks.first?.text.hasSuffix("clean.") == true)
     }
 
@@ -182,48 +175,11 @@ final class MathAccuracyTests: XCTestCase {
         Total TTC: 298,17
         """
         let converted = RAGChunker.convertWhitespaceAlignedTables(pdf)
-        let chunks = await RAGChunker().chunk(text: converted, source: "test", maxChunkTokens: 200, overlapTokens: 20)
+        let chunks = RAGChunker.chunkParagraphs(text: converted, source: "test")
         let priceChunk = chunks.first { $0.text.contains("Amortisseurs") }
         XCTAssertNotNil(priceChunk)
         XCTAssertTrue(priceChunk?.text.contains("154,17") == true)
         XCTAssertTrue(priceChunk?.text.contains("| Description | Qté | Prix HT | TVA | Prix TTC | Total |") == true)
-    }
-
-    // MARK: - Table Header Propagation Across Chunks
-
-    func testTableHeaderPropagation() {
-        let withTwoHeaders = RAGChunk(
-            source: "test", text: """
-            | Numéro | Date | Code | Mode | TVA |
-            | --- | --- | --- | --- | --- |
-            | DE001 | 21/01 | CL01 | 30j | FR25 |
-
-            | Code | Description | Qté | P.U. HT | Montant HT | TVA |
-            | --- | --- | --- | --- | --- | --- |
-            | AR1 | Triangles | 2,00 | 63,33 | 126,65 | 20,00 |
-            """,
-            url: nil, pdfPage: 1
-        )
-        let itemsOnly = RAGChunk(
-            source: "test", text: """
-            | AR2 | Amortisseurs | 2,00 | 77,08 | 154,17 | 20,00 |
-            | AR3 | Coupelles | 2,00 | 33,33 | 66,65 | 20,00 |
-            """,
-            url: nil, pdfPage: 1
-        )
-        let result = RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, itemsOnly])
-        XCTAssertEqual(result.count, 2)
-        XCTAssertTrue(result[1].text.hasPrefix("| Code | Description | Qté | P.U. HT | Montant HT | TVA |"))
-        XCTAssertFalse(result[1].text.contains("| Numéro | Date | Code | Mode | TVA |"))
-
-        // Orphan leading separator stripped
-        let orphan = RAGChunk(source: "test", text: "| --- | --- |\n| X | Y |", url: nil, pdfPage: 1)
-        let orphanResult = RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, orphan])
-        XCTAssertFalse(orphanResult[1].text.hasPrefix("| --- |"))
-
-        // Prose chunk unchanged
-        let prose = RAGChunk(source: "test", text: "Plain text with no table.", url: nil, pdfPage: 1)
-        XCTAssertEqual(RAGChunker.preserveTableHeadersAcrossChunks([withTwoHeaders, prose])[1].text, "Plain text with no table.")
     }
 
     // MARK: - Scientific OCR Table Conversion

@@ -1,0 +1,1 @@
+Longitud objetivo: aproximadamente de {{lowSentences}} a {{highSentences}} oraciones (máximo {{maxSentences}} oraciones). Responde primero de forma concisa, presenta los puntos clave, luego estructura con encabezados Markdown claros y profundiza en detalle.

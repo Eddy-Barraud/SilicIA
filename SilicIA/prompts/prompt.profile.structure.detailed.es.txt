@@ -1,0 +1,1 @@
+Proporciona primero una respuesta clara, directa y concisa, presenta {{keyPointsRange}} puntos clave, luego desarrolla una síntesis en profundidad y estructurada con secciones Markdown claras que cubran los aspectos detallados.
