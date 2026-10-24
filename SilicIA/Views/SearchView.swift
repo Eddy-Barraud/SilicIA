@@ -78,8 +78,11 @@ struct SearchView: View {
         displayedURLs: Set<String>
     ) -> [String: Double] {
         let filtered = raw.filter { displayedURLs.contains($0.key) }
+        guard !filtered.isEmpty else { return [:] }
         let total = filtered.values.reduce(0, +)
-        guard total > 0 else { return [:] }
+        guard total > 0 else {
+            return filtered.mapValues { _ in 0.0 }
+        }
 
         let scaled = filtered.mapValues { ($0 / total) * 100 }
 
@@ -1308,7 +1311,8 @@ struct SearchView: View {
                         mergedLimit: resultsCount + Self.aiSummaryOverfetchResults,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
+                        useWikipedia: settings.useWikipedia,
+                        userQuery: trimmedQuery
                     )
                 } else {
                     fetchedResults = try await searchService.search(

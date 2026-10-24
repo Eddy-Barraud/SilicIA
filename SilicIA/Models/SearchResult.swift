@@ -14,14 +14,29 @@ struct SearchResult: Identifiable, Codable, Equatable {
     let url: String
     let snippet: String
     let retrievedContent: String?
+    /// Optional `NLEmbedding` similarity score `[0, 1]` between the user query and `snippet`.
+    let snippetSimilarity: Double?
+    /// True when the `NLEmbedding` similarity of `snippet` is below the relevance threshold,
+    /// instructing downstream pipelines to skip downloading/scraping full content and assign `0%` used content.
+    let isBelowRelevanceThreshold: Bool
 
     /// Creates a search result with title, URL and snippet metadata.
-    init(id: UUID = UUID(), title: String, url: String, snippet: String, retrievedContent: String? = nil) {
+    init(
+        id: UUID = UUID(),
+        title: String,
+        url: String,
+        snippet: String,
+        retrievedContent: String? = nil,
+        snippetSimilarity: Double? = nil,
+        isBelowRelevanceThreshold: Bool = false
+    ) {
         self.id = id
         self.title = title
         self.url = url
         self.snippet = snippet
         self.retrievedContent = retrievedContent
+        self.snippetSimilarity = snippetSimilarity
+        self.isBelowRelevanceThreshold = isBelowRelevanceThreshold
     }
 }
 

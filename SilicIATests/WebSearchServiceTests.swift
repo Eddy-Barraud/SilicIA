@@ -501,6 +501,107 @@ final class WebSearchServiceTests: XCTestCase {
         let externalURL = "https://www.example.com/wiki/Vincent_Auriol"
         XCTAssertNil(WebSearchService.extractWikipediaArticleKey(from: externalURL))
     }
+
+    func testNLEmbeddingSnippetSimilarityAndCrossLanguageDetection() {
+        let threshold = WebSearchService.minimumSnippetSimilarityThreshold
+
+        // Relevant French snippet vs French query
+        let frRelevant = WebSearchService.snippetSimilarity(
+            query: "de quoi est constitué l'ADN",
+            snippet: "L'acide désoxyribonucléique (ADN) est une macromolécule constituée de nucléotides (adénine, thymine, cytosine, guanine).",
+            language: .french
+        )
+        XCTAssertGreaterThanOrEqual(frRelevant, threshold, "Relevant French snippet should pass threshold")
+
+        // Irrelevant French snippet vs French query
+        let frIrrelevant = WebSearchService.snippetSimilarity(
+            query: "de quoi est constitué l'ADN",
+            snippet: "Horaires d'ouverture de la mairie de Lyon et démarches administratives en ligne.",
+            language: .french
+        )
+        XCTAssertLessThan(frIrrelevant, threshold, "Irrelevant French snippet should be below threshold")
+
+        // Cross-language: French query vs relevant English snippet (detected via NLLanguageRecognizer)
+        let crossLangRelevant = WebSearchService.snippetSimilarity(
+            query: "Comment configurer SwiftData étape par étape",
+            snippet: "SwiftData makes it easy to persist data using declarative code in Swift and SwiftUI.",
+            language: .french
+        )
+        XCTAssertGreaterThanOrEqual(crossLangRelevant, threshold, "Cross-language relevant snippet should pass threshold")
+
+        // Cross-language: French query vs irrelevant English snippet
+        let crossLangIrrelevant = WebSearchService.snippetSimilarity(
+            query: "Comment configurer SwiftData étape par étape",
+            snippet: "Best cheap hotels and flights to Miami Beach Florida.",
+            language: .french
+        )
+        XCTAssertLessThan(crossLangIrrelevant, threshold, "Cross-language irrelevant snippet should be below threshold")
+
+        // Empty or placeholder snippet
+        let emptyScore = WebSearchService.snippetSimilarity(
+            query: "Swift programming language",
+            snippet: "No description available",
+            language: .english
+        )
+        XCTAssertEqual(emptyScore, 0.0, "Placeholder snippet must score 0.0")
+    }
+
+    @MainActor
+    func testBelowThresholdResultsSkipDownloadAndReceiveZeroPercentScore() async {
+        let aiService = AIService()
+
+        let relevantSource = SearchResult(
+            title: "ADN — Wikipédia",
+            url: "https://fr.wikipedia.org/wiki/Acide_d%C3%A9soxyribonucl%C3%A9ique",
+            snippet: "L'ADN est un polymère de nucléotides comprenant l'adénine, la thymine, la cytosine et la guanine.",
+            retrievedContent: """
+            # Acide désoxyribonucléique
+
+            L'acide désoxyribonucléique (ADN) est une macromolécule biologique présente dans toutes les cellules, formée de quatre bases nucléiques : adénine, thymine, cytosine et guanine.
+            """,
+            snippetSimilarity: 0.85,
+            isBelowRelevanceThreshold: false
+        )
+
+        let skippedSource = SearchResult(
+            title: "Mairie de Lyon",
+            url: "http://127.0.0.1:1/should-never-be-downloaded",
+            snippet: "Horaires d'ouverture de la mairie de Lyon et démarches administratives.",
+            retrievedContent: nil,
+            snippetSimilarity: 0.25,
+            isBelowRelevanceThreshold: true
+        )
+
+        var updatedValidSources: [SearchResult]? = nil
+        var reportedScores: [String: Double] = [:]
+
+        _ = await aiService.summarize(
+            query: "de quoi est constitué l'ADN",
+            results: [relevantSource, skippedSource],
+            maxScrapingResults: 2,
+            maxScrapingChars: 4000,
+            language: .french,
+            generateAnswer: false,
+            onMatchingScores: { scores in
+                reportedScores = scores
+            },
+            onValidSourcesUpdated: { valid in
+                updatedValidSources = valid
+            }
+        )
+
+        #if DEBUG
+        let statsNote = aiService.debugNotes.first { $0.contains("scrape stats:") }
+        XCTAssertTrue(
+            statsNote?.contains("candidates=0") == true,
+            "Below-threshold URL must not be queued for downloading/scraping, got: \(statsNote ?? "nil")"
+        )
+        #endif
+
+        XCTAssertEqual(updatedValidSources?.count, 2, "Below-threshold result should remain in search results list with 0% score")
+        XCTAssertEqual(reportedScores[skippedSource.url], 0.0, "Below-threshold result must be assigned 0% (0.0) of used content")
+        XCTAssertEqual(reportedScores[relevantSource.url] ?? 0, 100.0, accuracy: 0.01, "Relevant source should receive 100% of used content")
+    }
 }
 
 

@@ -84,7 +84,12 @@ struct SourceFunnel {
             for query in cleanWeb {
                 group.addTask {
                     do {
-                        let res = try await self.webSearchService.searchDuckDuckGo(query: query, limit: webLimitPerQuery)
+                        let res = try await self.webSearchService.searchDuckDuckGo(
+                            query: query,
+                            limit: webLimitPerQuery,
+                            userQuery: self.userQuery,
+                            language: self.language
+                        )
                         return .success(res)
                     } catch {
                         return .failure(error)
@@ -94,7 +99,12 @@ struct SourceFunnel {
             for query in cleanWiki {
                 group.addTask {
                     do {
-                        let res = try await self.webSearchService.searchWikipedia(query: query, language: self.language, limit: wikiLimitPerQuery)
+                        let res = try await self.webSearchService.searchWikipedia(
+                            query: query,
+                            language: self.language,
+                            limit: wikiLimitPerQuery,
+                            userQuery: self.userQuery
+                        )
                         return .success(res)
                     } catch {
                         return .failure(error)
@@ -136,8 +146,11 @@ struct SourceFunnel {
             uniqueResults.append(result)
         }
 
-        // Scrape web pages that did not already have full retrieved content (Wikipedia already has it)
+        // Scrape web pages that did not already have full retrieved content and passed the snippet similarity threshold
         let urlsToScrape = uniqueResults.compactMap { result -> String? in
+            guard !result.isBelowRelevanceThreshold else {
+                return nil
+            }
             guard (result.retrievedContent ?? "").trimmingCharacters(in: .whitespaces).isEmpty else {
                 return nil
             }
@@ -160,6 +173,9 @@ struct SourceFunnel {
 
         // Enrich results and prune pages that failed Markdown extraction
         let enrichedResults = uniqueResults.compactMap { result -> SearchResult? in
+            if result.isBelowRelevanceThreshold {
+                return result
+            }
             if let retrieved = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrieved.isEmpty {
                 return result
@@ -171,7 +187,9 @@ struct SourceFunnel {
                     title: result.title,
                     url: result.url,
                     snippet: result.snippet,
-                    retrievedContent: scrapedText
+                    retrievedContent: scrapedText,
+                    snippetSimilarity: result.snippetSimilarity,
+                    isBelowRelevanceThreshold: false
                 )
             }
             return nil
@@ -183,10 +201,10 @@ struct SourceFunnel {
 
         onResults?(enrichedResults)
 
-        // Chunk all enriched sources for RAG ranking
+        // Chunk all enriched sources that passed the snippet similarity threshold for RAG ranking
         let chunkStart = Date()
         var allChunks: [RAGChunk] = []
-        for result in enrichedResults {
+        for result in enrichedResults where !result.isBelowRelevanceThreshold {
             let text = (result.retrievedContent ?? result.snippet).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             let chunks = RAGChunker.chunkParagraphs(
@@ -199,6 +217,13 @@ struct SourceFunnel {
         let chunkElapsed = Date().timeIntervalSince(chunkStart)
 
         guard !allChunks.isEmpty else {
+            if !enrichedResults.isEmpty {
+                var zeroScores: [String: Double] = [:]
+                for r in enrichedResults where r.isBelowRelevanceThreshold {
+                    zeroScores[r.url] = 0.0
+                }
+                onScores?(zeroScores)
+            }
             return "No readable content found for the provided search queries. Answer from your own knowledge."
         }
 
@@ -224,7 +249,10 @@ struct SourceFunnel {
         let rankElapsed = Date().timeIntervalSince(rankStart)
         onRAGDuration?(chunkElapsed, rankElapsed)
 
-        let scores = RAGContextService.normalizedSourceScores(from: selectionResult)
+        var scores = RAGContextService.normalizedSourceScores(from: selectionResult)
+        for result in enrichedResults where result.isBelowRelevanceThreshold {
+            scores[result.url] = 0.0
+        }
         onScores?(scores)
 
         let topChunks = selectionResult.selectedChunks

@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import NaturalLanguage
 #if os(iOS)
 import UIKit
 #endif
@@ -21,6 +22,188 @@ class WebSearchService: ObservableObject {
     nonisolated static let defaultDuckDuckGoLimit = 6
     /// Default Wikipedia per-query cap when callers do not override.
     nonisolated static let defaultWikipediaLimit = 2
+    /// Minimum `NLEmbedding` similarity `[0, 1]` between the query and the DuckDuckGo snippet
+    /// required to trigger downloading/scraping full page content for RAG context.
+    nonisolated static let minimumSnippetSimilarityThreshold: Double = 0.40
+
+    private nonisolated static let snippetStopWords: Set<String> = [
+        // French
+        "les", "des", "une", "dans", "pour", "par", "sur", "avec", "sans", "sous",
+        "aux", "ces", "ses", "nos", "vos", "leur", "leurs", "cet", "cette", "mon", "ton", "son",
+        "mais", "donc", "car", "que", "qui", "quoi", "dont", "ou", "comment", "pourquoi", "quand",
+        "quel", "quelle", "quels", "quelles", "est", "sont", "etre", "avoir", "fait", "faire",
+        "plus", "moins", "tres", "tout", "tous", "toute", "toutes", "comme", "aussi", "meme",
+        "entre", "vers", "chez", "depuis", "pendant", "avant", "apres", "alors", "ainsi",
+        "propose", "proposer", "donne", "donner", "explique", "expliquer", "constitue",
+        // English
+        "the", "and", "for", "with", "that", "this", "from", "are", "was", "were", "been",
+        "have", "has", "had", "not", "but", "what", "which", "who", "whom", "whose",
+        "when", "where", "why", "how", "can", "could", "would", "should", "will", "shall",
+        "into", "onto", "upon", "about", "above", "below", "between", "through", "during",
+        "before", "after", "more", "most", "some", "such", "than", "too", "very", "also", "proposed",
+        // Spanish
+        "los", "las", "una", "unos", "unas", "del", "por", "para", "con", "sin", "sobre",
+        "entre", "hasta", "desde", "como", "pero", "mas", "menos", "muy", "todo", "toda",
+        "todos", "todas", "este", "esta", "estos", "estas", "ese", "esa", "esos", "esas",
+        "que", "quien", "quienes", "cual", "cuales", "cuando", "donde", "porque", "son", "esta"
+    ]
+
+    /// Detects the dominant language of a query or snippet text using `NLLanguageRecognizer`,
+    /// falling back to `fallback` when confidence is low or undetermined.
+    nonisolated static func detectTextLanguage(for text: String, fallback: NLLanguage) -> NLLanguage {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(trimmed)
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 3)
+        if let dominant = recognizer.dominantLanguage,
+           dominant != .undetermined,
+           let confidence = hypotheses[dominant],
+           confidence >= 0.40 {
+            return dominant
+        }
+
+        let detected = RAGContextService.detectQueryLanguage(for: trimmed, fallback: nil)
+        if detected != .undetermined {
+            if let confidence = hypotheses[detected], confidence >= 0.25 {
+                return detected
+            }
+        }
+        return fallback
+    }
+
+    /// Computes `NLEmbedding` similarity in `[0, 1]` between the query (and optional `userQuery`)
+    /// and the URL excerpt (`snippet` from `parseDuckDuckGoHTMLResults`).
+    /// Explicitly detects both the query language and the snippet language via `NLLanguageRecognizer`
+    /// beforehand so cross-language query/snippet pairs are evaluated in both embedding spaces.
+    nonisolated static func snippetSimilarity(
+        query: String,
+        userQuery: String? = nil,
+        snippet: String,
+        language: ModelLanguage = .english
+    ) -> Double {
+        let trimmedSnippet = snippet.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSnippet.isEmpty,
+              trimmedSnippet.caseInsensitiveCompare("No description available") != .orderedSame else {
+            return 0.0
+        }
+
+        var candidateQueries: [String] = []
+        if let uq = userQuery?.trimmingCharacters(in: .whitespacesAndNewlines), !uq.isEmpty {
+            candidateQueries.append(uq)
+        }
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedQuery.isEmpty && !candidateQueries.contains(where: { $0.caseInsensitiveCompare(trimmedQuery) == .orderedSame }) {
+            candidateQueries.append(trimmedQuery)
+        }
+        guard !candidateQueries.isEmpty else { return 0.0 }
+
+        var maxSimilarity = 0.0
+        for q in candidateQueries {
+            let sim = singleQuerySnippetSimilarity(query: q, snippet: trimmedSnippet, fallbackLanguage: language.nlLanguage)
+            if sim > maxSimilarity {
+                maxSimilarity = sim
+            }
+        }
+        return min(1.0, max(0.0, maxSimilarity))
+    }
+
+    nonisolated private static func singleQuerySnippetSimilarity(
+        query: String,
+        snippet: String,
+        fallbackLanguage: NLLanguage
+    ) -> Double {
+        let queryLanguage = detectTextLanguage(for: query, fallback: fallbackLanguage)
+        let snippetLanguage = detectTextLanguage(for: snippet, fallback: queryLanguage)
+
+        var candidateLanguages: [NLLanguage] = [queryLanguage]
+        if snippetLanguage != queryLanguage {
+            candidateLanguages.append(snippetLanguage)
+        }
+
+        let queryTokens = contentTokens(from: query)
+        let snippetTokens = contentTokens(from: snippet)
+
+        var bestScore = 0.0
+        for lang in candidateLanguages {
+            let sentenceEmbedding = NLEmbedding.sentenceEmbedding(for: lang)
+            let wordEmbedding = NLEmbedding.wordEmbedding(for: lang)
+
+            let sentenceDistance = sentenceEmbedding?.distance(between: query, and: snippet, distanceType: .cosine) ?? 2.0
+            let sentenceSim = sentenceDistance.isNaN ? 0.0 : max(0.0, 1.0 - sentenceDistance / 2.0)
+
+            guard !queryTokens.isEmpty, !snippetTokens.isEmpty else {
+                if sentenceSim > bestScore {
+                    bestScore = sentenceSim
+                }
+                continue
+            }
+
+            var wordSimSum = 0.0
+            for qToken in queryTokens {
+                let qFolded = foldToken(qToken)
+                let qStem = RAGContextService.stemStatic(qFolded)
+                var bestTermSim = 0.0
+
+                for sToken in snippetTokens {
+                    let sFolded = foldToken(sToken)
+                    let sStem = RAGContextService.stemStatic(sFolded)
+
+                    if qToken == sToken || qFolded == sFolded || qStem == sStem {
+                        bestTermSim = 1.0
+                        break
+                    }
+                    // Cross-lingual cognate / prefix stem match (e.g. relativit- / relativ-, nucleotid-)
+                    if qFolded.count >= 5 && sFolded.count >= 5 && qFolded.prefix(5) == sFolded.prefix(5) {
+                        bestTermSim = max(bestTermSim, 0.90)
+                    }
+
+                    if let wordEmbedding {
+                        let qLookup = wordEmbedding.contains(qToken)
+                            ? qToken
+                            : (wordEmbedding.contains(qFolded) ? qFolded : (wordEmbedding.contains(qStem) ? qStem : nil))
+                        let sLookup = wordEmbedding.contains(sToken)
+                            ? sToken
+                            : (wordEmbedding.contains(sFolded) ? sFolded : (wordEmbedding.contains(sStem) ? sStem : nil))
+                        if let qLookup, let sLookup {
+                            let dist = wordEmbedding.distance(between: qLookup, and: sLookup, distanceType: .cosine)
+                            if !dist.isNaN {
+                                let sim = max(0.0, 1.0 - dist / 2.0)
+                                if sim > bestTermSim {
+                                    bestTermSim = sim
+                                }
+                            }
+                        }
+                    }
+                }
+                wordSimSum += bestTermSim
+            }
+
+            let wordSim = wordSimSum / Double(queryTokens.count)
+            let combined = sentenceSim * 0.40 + wordSim * 0.60
+            if combined > bestScore {
+                bestScore = combined
+            }
+        }
+
+        return bestScore
+    }
+
+    nonisolated private static func foldToken(_ token: String) -> String {
+        token.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+    }
+
+    nonisolated private static func contentTokens(from text: String) -> [String] {
+        text.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+            .filter { token in
+                guard token.count > 2 else { return false }
+                let folded = foldToken(token)
+                return !snippetStopWords.contains(token) && !snippetStopWords.contains(folded)
+            }
+    }
 
     /// Strip HTML tags and decode common HTML entities from a raw HTML string.
     nonisolated private static func htmlToPlainText(_ html: String) -> String {
@@ -209,7 +392,8 @@ class WebSearchService: ObservableObject {
         mergedLimit: Int = 10,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        userQuery: String? = nil
     ) async throws -> [SearchResult] {
         let cleanWeb = useDuckDuckGo ? webQueries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -241,7 +425,12 @@ class WebSearchService: ObservableObject {
             for query in cleanWeb {
                 group.addTask {
                     do {
-                        let res = try await self.executeDuckDuckGoSearch(query: query, maxResults: webLimitPerQuery)
+                        let res = try await self.executeDuckDuckGoSearch(
+                            query: query,
+                            maxResults: webLimitPerQuery,
+                            userQuery: userQuery,
+                            language: language
+                        )
                         return (query, false, .success(res))
                     } catch {
                         return (query, false, .failure(error))
@@ -251,7 +440,12 @@ class WebSearchService: ObservableObject {
             for query in cleanWiki {
                 group.addTask {
                     do {
-                        let res = try await self.executeWikipediaSearch(query: query, language: language, limit: wikiLimitPerQuery)
+                        let res = try await self.executeWikipediaSearch(
+                            query: query,
+                            language: language,
+                            limit: wikiLimitPerQuery,
+                            userQuery: userQuery
+                        )
                         return (query, true, .success(res))
                     } catch {
                         return (query, true, .failure(error))
@@ -296,7 +490,12 @@ class WebSearchService: ObservableObject {
         async let duckDuckGoOutcome: ([SearchResult], Error?) = {
             guard useDuckDuckGo else { return ([], nil) }
             do {
-                let results = try await executeDuckDuckGoSearch(query: query, maxResults: maxDuckDuckGoResults)
+                let results = try await executeDuckDuckGoSearch(
+                    query: query,
+                    maxResults: maxDuckDuckGoResults,
+                    userQuery: query,
+                    language: language
+                )
                 return (results, nil)
             } catch {
                 return ([], error)
@@ -309,7 +508,8 @@ class WebSearchService: ObservableObject {
                 let results = try await executeWikipediaSearch(
                     query: query,
                     language: language,
-                    limit: maxWikipediaResults
+                    limit: maxWikipediaResults,
+                    userQuery: query
                 )
                 return (results, nil)
             } catch {
@@ -347,8 +547,14 @@ class WebSearchService: ObservableObject {
         return mergedProviders
     }
 
-    /// Executes DuckDuckGo HTML search.
-    private func executeDuckDuckGoSearch(query: String, maxResults: Int) async throws -> [SearchResult] {
+    /// Executes DuckDuckGo HTML search and evaluates `NLEmbedding` snippet similarity when requested.
+    private func executeDuckDuckGoSearch(
+        query: String,
+        maxResults: Int,
+        userQuery: String? = nil,
+        language: ModelLanguage = .english,
+        evaluateSnippetRelevance: Bool = true
+    ) async throws -> [SearchResult] {
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let urlString = "https://html.duckduckgo.com/html/?q=\(encodedQuery)"
 
@@ -366,18 +572,65 @@ class WebSearchService: ObservableObject {
             throw SearchError.invalidResponse
         }
 
-        let results = try parseDuckDuckGoHTMLResults(from: data)
-        return Array(results.prefix(maxResults))
+        let parsed = try parseDuckDuckGoHTMLResults(from: data)
+        let capped = Array(parsed.prefix(maxResults))
+        guard evaluateSnippetRelevance else {
+            return capped
+        }
+
+        return capped.map { result in
+            let sim = Self.snippetSimilarity(
+                query: query,
+                userQuery: userQuery,
+                snippet: result.snippet,
+                language: language
+            )
+            let isBelow = sim < Self.minimumSnippetSimilarityThreshold
+            if isBelow {
+                debugLog("DDG snippet below threshold (\(String(format: "%.3f", sim)) < \(Self.minimumSnippetSimilarityThreshold)), skipping download -> 0% used content: \(result.url)")
+            } else {
+                debugLog("DDG snippet passed threshold (\(String(format: "%.3f", sim)) >= \(Self.minimumSnippetSimilarityThreshold)): \(result.url)")
+            }
+            return SearchResult(
+                id: result.id,
+                title: result.title,
+                url: result.url,
+                snippet: result.snippet,
+                retrievedContent: result.retrievedContent,
+                snippetSimilarity: sim,
+                isBelowRelevanceThreshold: isBelow
+            )
+        }
     }
 
     /// Executes a search on DuckDuckGo and returns results.
-    func searchDuckDuckGo(query: String, limit: Int = defaultDuckDuckGoLimit) async throws -> [SearchResult] {
-        try await executeDuckDuckGoSearch(query: query, maxResults: limit)
+    func searchDuckDuckGo(
+        query: String,
+        limit: Int = defaultDuckDuckGoLimit,
+        userQuery: String? = nil,
+        language: ModelLanguage = .english
+    ) async throws -> [SearchResult] {
+        try await executeDuckDuckGoSearch(
+            query: query,
+            maxResults: limit,
+            userQuery: userQuery,
+            language: language
+        )
     }
 
     /// Executes a search on Wikipedia using the REST API and converts article HTML to Markdown.
-    func searchWikipedia(query: String, language: ModelLanguage = .english, limit: Int = defaultWikipediaLimit) async throws -> [SearchResult] {
-        try await executeWikipediaSearch(query: query, language: language, limit: limit)
+    func searchWikipedia(
+        query: String,
+        language: ModelLanguage = .english,
+        limit: Int = defaultWikipediaLimit,
+        userQuery: String? = nil
+    ) async throws -> [SearchResult] {
+        try await executeWikipediaSearch(
+            query: query,
+            language: language,
+            limit: limit,
+            userQuery: userQuery
+        )
     }
 
     /// Extracts the language and article key from a Wikipedia URL, filtering out non-article namespaces and URL fragments.
@@ -446,31 +699,57 @@ class WebSearchService: ObservableObject {
 
     /// Executes Wikipedia search:
     /// Uses DuckDuckGo to discover candidate Wikipedia article URLs ("site:wikipedia.org " + query),
-    /// extracts article keys from the URLs, and fetches the clean article content via the
-    /// MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) converted to Markdown.
-    /// Does not scrape raw Wikipedia HTML webpages.
-    private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
+    /// compares the DuckDuckGo excerpt (`ddgSnippet` from `parseDuckDuckGoHTMLResults`) against the user query
+    /// via `NLEmbedding` before downloading, and fetches the clean article content via the
+    /// MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) converted to Markdown only for candidates
+    /// meeting the relevance threshold.
+    private func executeWikipediaSearch(
+        query: String,
+        language: ModelLanguage,
+        limit: Int,
+        userQuery: String? = nil
+    ) async throws -> [SearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
 
         let targetLimit = max(1, limit)
         let ddgWikiQuery = "site:wikipedia.org \(trimmedQuery)"
-        var articleCandidates: [(language: ModelLanguage, key: String, ddgTitle: String, ddgSnippet: String)] = []
+        var articleCandidates: [(language: ModelLanguage, key: String, ddgTitle: String, ddgSnippet: String, snippetSimilarity: Double?, isBelowThreshold: Bool)] = []
         var seenKeys = Set<String>()
 
         debugLog("Wikipedia DDG search start: query=\(ddgWikiQuery), limit=\(targetLimit), language=\(language.rawValue)")
 
         do {
-            let ddgResults = try await executeDuckDuckGoSearch(query: ddgWikiQuery, maxResults: max(targetLimit * 3, 10))
+            let ddgResults = try await executeDuckDuckGoSearch(
+                query: ddgWikiQuery,
+                maxResults: max(targetLimit * 3, 10),
+                userQuery: userQuery,
+                language: language,
+                evaluateSnippetRelevance: false
+            )
             for result in ddgResults {
                 if let extracted = Self.extractWikipediaArticleKey(from: result.url, fallbackLanguage: language) {
                     let dedupeKey = "\(extracted.language.code):\(extracted.key.lowercased())"
                     if seenKeys.insert(dedupeKey).inserted {
+                        let sim = Self.snippetSimilarity(
+                            query: trimmedQuery,
+                            userQuery: userQuery,
+                            snippet: result.snippet,
+                            language: extracted.language
+                        )
+                        let isBelow = sim < Self.minimumSnippetSimilarityThreshold
+                        if isBelow {
+                            debugLog("Wikipedia DDG snippet below threshold (\(String(format: "%.3f", sim)) < \(Self.minimumSnippetSimilarityThreshold)), skipping REST page download -> 0% used content: \(extracted.key)")
+                        } else {
+                            debugLog("Wikipedia DDG snippet passed threshold (\(String(format: "%.3f", sim)) >= \(Self.minimumSnippetSimilarityThreshold)): \(extracted.key)")
+                        }
                         articleCandidates.append((
                             language: extracted.language,
                             key: extracted.key,
                             ddgTitle: result.title,
-                            ddgSnippet: result.snippet
+                            ddgSnippet: result.snippet,
+                            snippetSimilarity: sim,
+                            isBelowThreshold: isBelow
                         ))
                         if articleCandidates.count >= targetLimit {
                             break
@@ -482,6 +761,8 @@ class WebSearchService: ObservableObject {
             debugLog("DuckDuckGo wikipedia site search failed or hit challenge: \(error.localizedDescription)")
         }
 
+        let hadDDGCandidates = !articleCandidates.isEmpty
+
         // Fallback: if DuckDuckGo yielded 0 Wikipedia candidates (due to bot challenge, rate limit, or no matches),
         // fallback to direct title lookup via MediaWiki API.
         if articleCandidates.isEmpty {
@@ -490,14 +771,17 @@ class WebSearchService: ObservableObject {
                 language: language,
                 key: directKey,
                 ddgTitle: trimmedQuery,
-                ddgSnippet: "Wikipedia page"
+                ddgSnippet: "Wikipedia page",
+                snippetSimilarity: nil,
+                isBelowThreshold: false
             ))
         }
 
-        // Fetch each candidate article via MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) concurrently
+        // Fetch each candidate article via MediaWiki REST API (/w/rest.php/v1/page/{key}/with_html) concurrently,
+        // ONLY for candidates whose DuckDuckGo snippet passed the NLEmbedding similarity threshold.
         var detailsByKey: [String: (title: String, markdown: String, url: String)] = [:]
         await withTaskGroup(of: (String, (title: String, markdown: String, url: String)?).self) { group in
-            for candidate in articleCandidates {
+            for candidate in articleCandidates where !candidate.isBelowThreshold {
                 let candidateKey = "\(candidate.language.code):\(candidate.key)"
                 group.addTask {
                     let page = await self.fetchWikipediaPageDetails(for: candidate.key, language: candidate.language)
@@ -513,6 +797,26 @@ class WebSearchService: ObservableObject {
 
         var searchResults: [SearchResult] = []
         for candidate in articleCandidates {
+            if candidate.isBelowThreshold {
+                let fallbackTitle = candidate.key.replacingOccurrences(of: "_", with: " ")
+                let cleanTitle = candidate.ddgTitle.isEmpty ? fallbackTitle : candidate.ddgTitle
+                let readableURL = wikipediaReadablePageURL(for: candidate.key, language: candidate.language)
+                searchResults.append(
+                    SearchResult(
+                        title: cleanTitle,
+                        url: readableURL,
+                        snippet: candidate.ddgSnippet,
+                        retrievedContent: nil,
+                        snippetSimilarity: candidate.snippetSimilarity,
+                        isBelowRelevanceThreshold: true
+                    )
+                )
+                if searchResults.count >= targetLimit {
+                    break
+                }
+                continue
+            }
+
             let candidateKey = "\(candidate.language.code):\(candidate.key)"
             if let details = detailsByKey[candidateKey],
                !details.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -526,7 +830,9 @@ class WebSearchService: ObservableObject {
                         title: details.title.isEmpty ? candidate.ddgTitle : details.title,
                         url: details.url,
                         snippet: leadSnippet,
-                        retrievedContent: details.markdown
+                        retrievedContent: details.markdown,
+                        snippetSimilarity: candidate.snippetSimilarity,
+                        isBelowRelevanceThreshold: false
                     )
                 )
 
@@ -536,9 +842,9 @@ class WebSearchService: ObservableObject {
             }
         }
 
-        // Secondary fallback: if candidate lookups returned no valid article content (e.g. DDG was challenged and direct key 404'd),
+        // Secondary fallback: if DDG was blocked/empty and direct key lookup 404'd,
         // query MediaWiki search API as resilient fallback to resolve keys, then fetch full HTML via REST API.
-        if searchResults.isEmpty {
+        if searchResults.isEmpty && !hadDDGCandidates {
             let directKey = trimmedQuery.replacingOccurrences(of: " ", with: "_")
             if let directPage = await fetchWikipediaPageDetails(for: directKey, language: language),
                !directPage.markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

@@ -193,8 +193,11 @@ class AIService: ObservableObject {
         let effectiveScrapingResults = max(0, maxScrapingResults)
         let effectiveScrapingChars = max(0, maxScrapingChars)
 
-        // Scrape only URLs without provider-supplied full content.
+        // Scrape only URLs without provider-supplied full content that passed the NLEmbedding snippet threshold.
         let urlsToScrape = results.compactMap { result -> String? in
+            guard !result.isBelowRelevanceThreshold else {
+                return nil
+            }
             guard result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
                 return nil
             }
@@ -230,7 +233,11 @@ class AIService: ObservableObject {
         var chunks: [RAGChunk] = []
         let chunkingStart = Date()
         for result in results {
-            if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+            if result.isBelowRelevanceThreshold {
+                // Below NLEmbedding snippet similarity threshold: do not download or chunk for context,
+                // keep in active sources with 0% used content.
+                validResults.append(result)
+            } else if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
                 validResults.append(result)
                 let chunked = RAGChunker.chunkParagraphs(
@@ -293,10 +300,13 @@ class AIService: ObservableObject {
 
         // Expose per-source match scores derived from the selected chunks so
         // the UI can render a relevance badge on each result card. Sources
-        // whose chunks didn't survive the budget filter are absent from the
-        // map (callers treat absent keys as 0%).
+        // whose chunks didn't survive the budget filter or were below the
+        // NLEmbedding snippet similarity threshold receive 0%.
         if let onMatchingScores {
-            let scores = RAGContextService.normalizedSourceScores(from: selected)
+            var scores = RAGContextService.normalizedSourceScores(from: selected)
+            for result in validResults where result.isBelowRelevanceThreshold {
+                scores[result.url] = 0.0
+            }
             onMatchingScores(scores)
         }
 
