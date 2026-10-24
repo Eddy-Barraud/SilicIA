@@ -25,6 +25,9 @@ class WebSearchService: ObservableObject {
     /// Minimum `NLEmbedding` similarity `[0, 1]` between the query and the DuckDuckGo snippet
     /// required to trigger downloading/scraping full page content for RAG context.
     nonisolated static let minimumSnippetSimilarityThreshold: Double = 0.40
+    /// Random delay range in seconds (`0.0...0.5`) applied between consecutive DuckDuckGo requests
+    /// so parallel web and Wikipedia site searches do not fire simultaneously and trigger bot challenges.
+    nonisolated static let duckDuckGoRequestJitterRange: ClosedRange<Double> = 0.0...1.5
 
     private nonisolated static let snippetStopWords: Set<String> = [
         // French
@@ -246,6 +249,26 @@ class WebSearchService: ObservableObject {
 
     private let session: URLSession
     private let webScraper: WebScrapingService
+    private var nextDuckDuckGoLaunchTime: ContinuousClock.Instant?
+
+    /// Reserves a staggered launch slot so concurrent DuckDuckGo requests are spaced by a random `0...0.5s` delay.
+    func waitForDuckDuckGoRequestSlot() async throws {
+        let clock = ContinuousClock()
+        let now = clock.now
+        let jitter = Double.random(in: Self.duckDuckGoRequestJitterRange)
+        let jitterMilliseconds = Int((jitter * 1000).rounded())
+
+        if let nextSlot = nextDuckDuckGoLaunchTime, nextSlot > now {
+            let myLaunchTime = nextSlot
+            nextDuckDuckGoLaunchTime = myLaunchTime.advanced(by: .milliseconds(jitterMilliseconds))
+            let delay = now.duration(to: myLaunchTime)
+            let delaySeconds = Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18
+            debugLog(String(format: "Staggering DuckDuckGo request by %.3f s", delaySeconds))
+            try await Task.sleep(for: delay)
+        } else {
+            nextDuckDuckGoLaunchTime = now.advanced(by: .milliseconds(jitterMilliseconds))
+        }
+    }
 
     private nonisolated func debugLog(_ message: String) {
         #if DEBUG
@@ -564,6 +587,8 @@ class WebSearchService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        try await waitForDuckDuckGoRequestSlot()
 
         let (data, response) = try await session.data(for: request)
 

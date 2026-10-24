@@ -602,6 +602,37 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertEqual(reportedScores[skippedSource.url], 0.0, "Below-threshold result must be assigned 0% (0.0) of used content")
         XCTAssertEqual(reportedScores[relevantSource.url] ?? 0, 100.0, accuracy: 0.01, "Relevant source should receive 100% of used content")
     }
+
+    @MainActor
+    func testDuckDuckGoRequestPacerStaggersConcurrentRequests() async throws {
+        XCTAssertEqual(WebSearchService.duckDuckGoRequestJitterRange.lowerBound, 0.0)
+        XCTAssertEqual(WebSearchService.duckDuckGoRequestJitterRange.upperBound, 0.5)
+
+        let service = WebSearchService()
+        let start = Date()
+        try await withThrowingTaskGroup(of: Date.self) { group in
+            for _ in 0..<4 {
+                group.addTask {
+                    try await service.waitForDuckDuckGoRequestSlot()
+                    return Date()
+                }
+            }
+            var timestamps: [Date] = []
+            for try await ts in group {
+                timestamps.append(ts)
+            }
+            timestamps.sort()
+            XCTAssertEqual(timestamps.count, 4)
+            // First slot fires immediately; 4 concurrent requests have 3 gaps of [0.0, 0.5]s -> total <= ~1.6s
+            let totalElapsed = Date().timeIntervalSince(start)
+            XCTAssertLessThan(totalElapsed, 2.0, "4 staggered requests with 0...0.5s gaps should finish within 2.0s")
+            for i in 1..<timestamps.count {
+                let gap = timestamps[i].timeIntervalSince(timestamps[i - 1])
+                XCTAssertGreaterThanOrEqual(gap, -0.02, "Slots must be non-decreasing")
+                XCTAssertLessThanOrEqual(gap, 0.65, "Each gap between consecutive requests must be within 0...0.5s (+ scheduler tolerance)")
+            }
+        }
+    }
 }
 
 
