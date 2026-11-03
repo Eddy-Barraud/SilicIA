@@ -174,6 +174,7 @@ struct SearchView: View {
         initialQuery: String? = nil,
         onInitialQueryHandled: (() -> Void)? = nil,
         chatService: ChatService,
+        aiService: AIService? = nil,
         onOfflineQuery: ((String) -> Void)? = nil,
         onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil,
         onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil
@@ -181,6 +182,9 @@ struct SearchView: View {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
         self.chatService = chatService
+        if let aiService {
+            self._aiService = ObservedObject(wrappedValue: aiService)
+        }
         self.onOfflineQuery = onOfflineQuery
         self.onChatMore = onChatMore
         self.onAttachmentsDropped = onAttachmentsDropped
@@ -1296,19 +1300,25 @@ struct SearchView: View {
             do {
                 let fetchedResults: [SearchResult]
                 if !noAIOnly && isModelAvailable {
+                    let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
                     let generated = await SearchSourcesTool.generateQueries(
                         for: trimmedQuery,
                         language: settings.language,
+                        maxResponseTokens: settings.maxResponseTokens,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia
                     )
 
+                    let ddgLimit = isConcise ? min(5, settings.maxDuckDuckGoResults) : (settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults)
+                    let wikiLimit = isConcise ? min(2, settings.maxWikipediaResults) : settings.maxWikipediaResults
+                    let mergedLimit = isConcise ? min(6, resultsCount) : (resultsCount + Self.aiSummaryOverfetchResults)
+
                     fetchedResults = try await searchService.search(
                         webQueries: generated.webQueries,
                         wikiQueries: generated.wikiQueries,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
-                        maxWikipediaResults: settings.maxWikipediaResults,
-                        mergedLimit: resultsCount + Self.aiSummaryOverfetchResults,
+                        maxDuckDuckGoResults: ddgLimit,
+                        maxWikipediaResults: wikiLimit,
+                        mergedLimit: mergedLimit,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia,

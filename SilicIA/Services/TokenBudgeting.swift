@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import FoundationModels
 
 /// Shared token-budget helpers used across chat, search, and RAG selection.
 ///
@@ -126,6 +127,19 @@ nonisolated enum TokenBudgeting {
         case concise = "Concise"
         case standard = "Standard"
         case detailed = "Detailed"
+
+        /// Maps the output token category to its corresponding Foundation Models
+        /// `ContextOptions.ReasoningLevel` used on `LanguageModelSession.Profile`.
+        var reasoningLevel: ContextOptions.ReasoningLevel {
+            switch self {
+            case .concise:
+                return .light
+            case .standard:
+                return .moderate
+            case .detailed:
+                return .deep
+            }
+        }
     }
 
     /// Output profiles customize the tone, persona, structure, and length of model summaries
@@ -139,6 +153,11 @@ nonisolated enum TokenBudgeting {
         let keyPointsRangeString: String
         let keyPointsRangeFrString: String
         let keyPointsRangeEsString: String
+
+        /// `ContextOptions.ReasoningLevel` corresponding to this output profile's category.
+        var reasoningLevel: ContextOptions.ReasoningLevel {
+            kind.reasoningLevel
+        }
 
         func localizedName(for language: ModelLanguage) -> String {
             switch language {
@@ -243,6 +262,12 @@ nonisolated enum TokenBudgeting {
                 keyPointsRangeEsString: "5 a 7"
             )
         }
+    }
+
+    /// Returns the `ContextOptions.ReasoningLevel` matching the output profile for `tokens`
+    /// (`.concise` -> `.light`, `.standard` -> `.moderate`, `.detailed` -> `.deep`).
+    static func reasoningLevel(forResponseTokens tokens: Int) -> ContextOptions.ReasoningLevel {
+        outputProfile(forResponseTokens: tokens).reasoningLevel
     }
 
     /// Smallest tool reply we'll allow. Below this a tool call returns so

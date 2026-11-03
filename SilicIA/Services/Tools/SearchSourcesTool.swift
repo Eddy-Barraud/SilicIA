@@ -23,6 +23,15 @@ struct SearchSourcesTool: Tool {
         var wikiQueries: [String] = []
     }
 
+    @Generable
+    struct SingleQueryArguments {
+        @Guide(description: "One targeted web search query.")
+        var webQuery: String = ""
+
+        @Guide(description: "One targeted Wikipedia encyclopedic article title (empty string if not applicable).")
+        var wikiQuery: String = ""
+    }
+
     let name = "searchSources"
     let description = """
     Search the web and Wikipedia simultaneously for relevant sources. Favor a single focused query; reserve Wikipedia (wikiQueries) strictly for precise data, figures, definitions, or notable facts (pass [] if not needed). Only provide up to 2 queries per source if the topic is difficult or multi-faceted.
@@ -34,11 +43,14 @@ struct SearchSourcesTool: Tool {
         try await funnel.run(webQueries: arguments.webQueries, wikiQueries: arguments.wikiQueries)
     }
 
-    /// Generates targeted search queries for Web and Wikipedia using a dedicated, fast @Generable session,
-    /// followed by NLEmbedding cosine deduplication to keep 1 or 2 queries based on semantic diversity.
+    /// Generates targeted search queries for Web and Wikipedia using a dedicated, fast @Generable session.
+    /// In concise output mode (maxResponseTokens < 400), generates 1 targeted web query and 1 Wikipedia topic
+    /// directly, bypassing NLEmbedding deduplication for maximum speed. In standard/detailed modes, generates
+    /// 2 web + 2 Wikipedia queries followed by NLEmbedding cosine deduplication.
     static func generateQueries(
         for userQuery: String,
         language: ModelLanguage = .english,
+        maxResponseTokens: Int = 500,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) async -> (webQueries: [String], wikiQueries: [String]) {
@@ -55,6 +67,77 @@ struct SearchSourcesTool: Tool {
 
         let start = Date()
         do {
+            let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxResponseTokens).kind == .concise
+            if isConcise {
+                let conciseInstructions: String
+                switch language {
+                case .french:
+                    if useDuckDuckGo && useWikipedia {
+                        conciseInstructions = "Génère 1 requête de recherche web ciblée et 1 titre d'article Wikipédia pour le sujet (laisser vide pour Wikipédia si non applicable). Reste concis et précis."
+                    } else if useDuckDuckGo {
+                        conciseInstructions = "Génère 1 requête de recherche web ciblée pour le sujet. Reste concis et précis."
+                    } else {
+                        conciseInstructions = "Génère 1 titre d'article Wikipédia pour le sujet (laisser vide si non applicable). Reste concis et précis."
+                    }
+                case .spanish:
+                    if useDuckDuckGo && useWikipedia {
+                        conciseInstructions = "Genera 1 consulta de búsqueda web y 1 título de artículo de Wikipedia para el tema (dejar vacío para Wikipedia si no aplica). Sé conciso y preciso."
+                    } else if useDuckDuckGo {
+                        conciseInstructions = "Genera 1 consulta de búsqueda web para el tema. Sé conciso y preciso."
+                    } else {
+                        conciseInstructions = "Genera 1 título de artículo de Wikipedia para el tema (dejar vacío si no aplica). Sé conciso y preciso."
+                    }
+                case .english:
+                    if useDuckDuckGo && useWikipedia {
+                        conciseInstructions = "Generate 1 targeted web search query and 1 Wikipedia article title for the topic (leave empty for Wikipedia if not applicable). Be concise and precise."
+                    } else if useDuckDuckGo {
+                        conciseInstructions = "Generate 1 targeted web search query for the topic. Be concise and precise."
+                    } else {
+                        conciseInstructions = "Generate 1 Wikipedia article title for the topic (leave empty if not applicable). Be concise and precise."
+                    }
+                }
+
+                let session = await DynamicSessionCoordinator.shared.acquireSession(
+                    mode: .searchQueryGeneration,
+                    instructions: conciseInstructions,
+                    temperature: 0.2,
+                    maxResponseTokens: 60,
+                    reasoningLevelOverride: .light
+                )
+                let prompt = "Topic: \(userQuery)"
+                let response = try await session.respond(to: prompt, generating: SingleQueryArguments.self)
+                let elapsed = Date().timeIntervalSince(start)
+                let raw = response.content
+
+                let rawWeb = raw.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                let rawWiki = raw.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let filteredWeb: [String]
+                if useDuckDuckGo {
+                    filteredWeb = rawWeb.isEmpty ? [userQuery] : [rawWeb]
+                } else {
+                    filteredWeb = []
+                }
+
+                let filteredWiki: [String]
+                if useWikipedia {
+                    let cleanedWiki = (rawWiki.isEmpty || rawWiki.lowercased() == "n/a" || rawWiki.lowercased() == "none") ? "" : rawWiki
+                    filteredWiki = cleanedWiki.isEmpty ? (useDuckDuckGo ? [] : [userQuery]) : [cleanedWiki]
+                } else {
+                    filteredWiki = []
+                }
+
+                #if DEBUG
+                print("┏━ [SearchSourcesTool] @Generable Query Generation (Concise 1+1) ━━")
+                print("┃ User Query: \"\(userQuery)\" (elapsed: \(String(format: "%.3f s", elapsed)))")
+                print("┃ Dispatched Web Query: \(filteredWeb)")
+                print("┃ Dispatched Wiki Query: \(filteredWiki)")
+                print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+                #endif
+
+                return (webQueries: filteredWeb, wikiQueries: filteredWiki)
+            }
+
             let instructions: String
             switch language {
             case .french:
@@ -65,7 +148,13 @@ struct SearchSourcesTool: Tool {
                 instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic (leave empty for Wikipedia if not applicable). Be concise and precise."
             }
 
-            let session = LanguageModelSession(instructions: instructions)
+            let session = await DynamicSessionCoordinator.shared.acquireSession(
+                mode: .searchQueryGeneration,
+                instructions: instructions,
+                temperature: 0.2,
+                maxResponseTokens: 200,
+                reasoningLevelOverride: .light
+            )
             let prompt = "Topic: \(userQuery)"
             let response = try await session.respond(to: prompt, generating: Arguments.self)
             let elapsed = Date().timeIntervalSince(start)

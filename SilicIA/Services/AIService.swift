@@ -62,11 +62,11 @@ class AIService: ObservableObject {
     // answers from being flooded with excessive peripheral chunks.
     private static let summaryContextUtilizationFactor = 0.80
 
-    private static func summaryContextUtilizationFactor(forTokens maxTokens: Int) -> Double {
+    static func summaryContextUtilizationFactor(forTokens maxTokens: Int) -> Double {
         let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
         switch profile.kind {
         case .concise:
-            return 0.40
+            return 0.25
         case .standard:
             return 0.60
         case .detailed:
@@ -127,7 +127,12 @@ class AIService: ObservableObject {
         }
 
         do {
-            let session = LanguageModelSession(instructions: instructions)
+            let session = DynamicSessionCoordinator.shared.acquireSession(
+                mode: .webPageSummary,
+                instructions: instructions,
+                temperature: temperature,
+                maxResponseTokens: maxTokens
+            )
             let options = GenerationOptions(
                 temperature: temperature,
                 maximumResponseTokens: maxTokens
@@ -319,18 +324,30 @@ class AIService: ObservableObject {
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
+        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
+        let contextToSend: String
+        let corpusChunksToSend: [RAGChunk]
+        if isConcise && selected.selectedChunks.count > 4 {
+            let cappedChunks = Array(selected.selectedChunks.prefix(4))
+            corpusChunksToSend = cappedChunks.map(\.chunk)
+            contextToSend = cappedChunks.map { "Source: \($0.chunk.source)\n\($0.chunk.text)" }.joined(separator: "\n\n---\n\n")
+        } else {
+            contextToSend = selected.selectedContext
+            corpusChunksToSend = selected.selectedChunks.map(\.chunk)
+        }
+
         let generationStart = Date()
         var firstTokenDate: Date? = nil
         let summary: String
         if generateAnswer {
             summary = await generateSummaryWithFoundationModels(
                 query: query,
-                context: selected.selectedContext,
+                context: contextToSend,
                 results: validResults,
                 temperature: temperature,
                 maxTokens: maxTokens,
                 language: language,
-                corpusChunks: selected.selectedChunks.map(\.chunk),
+                corpusChunks: corpusChunksToSend,
                 maxDuckDuckGoResults: maxDuckDuckGoResults,
                 maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo,
@@ -483,7 +500,7 @@ class AIService: ObservableObject {
     /// appending a tool-usage paragraph via the shared `ToolKit` (search tone).
     /// The `webSearchAvailable` flag gates the `webSearch` description so the model
     /// isn't told to call a tool that isn't attached.
-    private func buildInstructions(
+    static func buildSearchInstructions(
         for language: ModelLanguage,
         maxOutputTokens: Int,
         webSearchAvailable: Bool = true,
@@ -512,6 +529,24 @@ class AIService: ObservableObject {
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        )
+    }
+
+    private func buildInstructions(
+        for language: ModelLanguage,
+        maxOutputTokens: Int,
+        webSearchAvailable: Bool = true,
+        hasCorpus: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) -> String {
+        Self.buildSearchInstructions(
+            for: language,
+            maxOutputTokens: maxOutputTokens,
             webSearchAvailable: webSearchAvailable,
             hasCorpus: hasCorpus,
             useDuckDuckGo: useDuckDuckGo,
@@ -699,7 +734,25 @@ class AIService: ObservableObject {
 
     /// Classifies a generation error into a log label + whether retrying is
     /// worthwhile.
-    nonisolated private static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
+    nonisolated static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
+        if let modelError = error as? LanguageModelError {
+            let label = "LanguageModelError.\(modelError)"
+            switch modelError {
+            case .guardrailViolation,
+                 .refusal,
+                 .unsupportedCapability,
+                 .unsupportedTranscriptContent,
+                 .unsupportedGenerationGuide,
+                 .unsupportedLanguageOrLocale:
+                return (label, false)
+            case .contextSizeExceeded,
+                 .rateLimited,
+                 .timeout:
+                return (label, true)
+            @unknown default:
+                return (label, true)
+            }
+        }
         if let genError = error as? LanguageModelSession.GenerationError {
             let full = String(describing: genError)
             let caseName = String(full.prefix(while: { $0 != "(" }))
@@ -772,12 +825,20 @@ class AIService: ObservableObject {
         )
         let toolBudget = assembled.tokenBudget
         let tools = assembled.tools
-        #if DEBUG
-        debugNotes.append("generateSummaryWithFoundationModels path=search-summary tools=[\(tools.map { $0.name }.joined(separator: ", "))] webSearchAvailable=false toolBudget=\(toolBudget)t")
-        #endif
-        let session = LanguageModelSession(tools: tools, instructions: instructions)
-
         let effectiveMaxTokens = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
+        let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxTokens)
+        #if DEBUG
+        debugNotes.append("generateSummaryWithFoundationModels path=search-summary tools=[\(tools.map { $0.name }.joined(separator: ", "))] webSearchAvailable=false toolBudget=\(toolBudget)t reasoning=\(reasoningLevel)")
+        #endif
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .searchSummary,
+            instructions: instructions,
+            tools: tools,
+            temperature: temperature,
+            maxResponseTokens: maxTokens,
+            effectiveMaxOutputTokens: effectiveMaxTokens,
+            reasoningLevelOverride: reasoningLevel
+        )
         let maxContextChars = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)

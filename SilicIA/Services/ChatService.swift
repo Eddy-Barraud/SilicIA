@@ -264,10 +264,16 @@ final class ChatService: ObservableObject {
             let toolBudget = assembled.tokenBudget
             toolTranscriptRecorder = assembled.transcriptRecorder
             let toolNames = tools.map { $0.name }.joined(separator: ", ")
-            debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
-            let session = LanguageModelSession(
+            let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxResponseTokens)
+            debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t reasoning=\(reasoningLevel)")
+            let session = DynamicSessionCoordinator.shared.acquireSession(
+                mode: .chat,
+                instructions: instructions,
                 tools: tools,
-                instructions: instructions
+                temperature: temperature,
+                maxResponseTokens: maxResponseTokens,
+                effectiveMaxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevelOverride: reasoningLevel
             )
             let toolGroundingContext: String
             if finalSelectedContext.isEmpty {
@@ -455,7 +461,12 @@ final class ChatService: ObservableObject {
             hasContext: hasContext,
             appendToolsAppendix: false
         )
-        let session = LanguageModelSession(instructions: instructions)
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .chatFallback,
+            instructions: instructions,
+            temperature: temperature,
+            maxResponseTokens: maxOutputTokens
+        )
         let prompt = buildToolCallingPrompt(
             for: message,
             language: language,
@@ -503,7 +514,12 @@ final class ChatService: ObservableObject {
             hasContext: true,
             appendToolsAppendix: false
         )
-        let session = LanguageModelSession(instructions: instructions)
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .chatFallback,
+            instructions: instructions,
+            temperature: temperature,
+            maxResponseTokens: maxOutputTokens
+        )
         let prompt = buildToolTranscriptRecoveryPrompt(
             for: message,
             selectedContext: selectedContext,
@@ -1157,7 +1173,7 @@ final class ChatService: ObservableObject {
     /// any mention of documents or context to prevent false refusals.
     /// When `appendToolsAppendix` is true, appends an extra paragraph describing
     /// available tools and when to use them.
-    private func buildInstructions(
+    static func buildChatInstructions(
         for language: ModelLanguage,
         maxOutputCharacters: Int,
         hasContext: Bool = true,
@@ -1178,8 +1194,31 @@ final class ChatService: ObservableObject {
             ]
         ) ?? ""
         guard appendToolsAppendix else { return base }
-        return base + "\n\n" + toolCallingInstructionsAppendix(
+        return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
+            tone: .chat,
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        )
+    }
+
+    private func buildInstructions(
+        for language: ModelLanguage,
+        maxOutputCharacters: Int,
+        hasContext: Bool = true,
+        appendToolsAppendix: Bool = true,
+        webSearchAvailable: Bool = false,
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) -> String {
+        Self.buildChatInstructions(
+            for: language,
+            maxOutputCharacters: maxOutputCharacters,
+            hasContext: hasContext,
+            appendToolsAppendix: appendToolsAppendix,
             webSearchAvailable: webSearchAvailable,
             hasCorpus: hasCorpus,
             useDuckDuckGo: useDuckDuckGo,
@@ -1433,7 +1472,10 @@ final class ChatService: ObservableObject {
         return sections.joined(separator: "\n\n")
     }
 
-    nonisolated private static func isContextWindowOverflow(_ error: Error) -> Bool {
+    nonisolated static func isContextWindowOverflow(_ error: Error) -> Bool {
+        if case .contextSizeExceeded = error as? LanguageModelError {
+            return true
+        }
         if let genError = error as? LanguageModelSession.GenerationError {
             let label = String(describing: genError).lowercased()
             return label.contains("exceededcontextwindowsize")

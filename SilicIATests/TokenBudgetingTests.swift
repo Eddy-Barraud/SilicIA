@@ -7,6 +7,7 @@
 //
 
 import XCTest
+import FoundationModels
 @testable import SilicIA
 
 final class TokenBudgetingTests: XCTestCase {
@@ -91,6 +92,63 @@ final class TokenBudgetingTests: XCTestCase {
         XCTAssertEqual(detailed.keyPointsRangeString, "5 to 7")
         XCTAssertTrue(detailed.personaDirective(for: .english).contains("in-depth"))
         XCTAssertTrue(detailed.structureDirective(for: .french).contains("synthèse approfondie"))
+    }
+
+    func testOutputProfileReasoningLevelMapping() {
+        XCTAssertEqual(TokenBudgeting.OutputProfileKind.concise.reasoningLevel, .light)
+        XCTAssertEqual(TokenBudgeting.OutputProfileKind.standard.reasoningLevel, .moderate)
+        XCTAssertEqual(TokenBudgeting.OutputProfileKind.detailed.reasoningLevel, .deep)
+
+        let concise = TokenBudgeting.outputProfile(forResponseTokens: 250)
+        XCTAssertEqual(concise.reasoningLevel, .light)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 250), .light)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 399), .light)
+
+        let standard = TokenBudgeting.outputProfile(forResponseTokens: 500)
+        XCTAssertEqual(standard.reasoningLevel, .moderate)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 400), .moderate)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 800), .moderate)
+
+        let detailed = TokenBudgeting.outputProfile(forResponseTokens: 1200)
+        XCTAssertEqual(detailed.reasoningLevel, .deep)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 801), .deep)
+        XCTAssertEqual(TokenBudgeting.reasoningLevel(forResponseTokens: 1500), .deep)
+    }
+
+    func testDynamicSessionCoordinatorSwitchesModesAndSettings() {
+        let coordinator = DynamicSessionCoordinator()
+        var settings = AppSettings()
+        settings.language = .english
+        settings.maxResponseTokens = 300
+        settings.temperature = 0.4
+
+        coordinator.switchActiveViewMode(.searchSummary, settings: settings, prewarm: false)
+        let searchSnap = coordinator.currentSnapshot
+        XCTAssertEqual(searchSnap.mode, .searchSummary)
+        XCTAssertEqual(searchSnap.reasoningLevel, .light)
+        XCTAssertEqual(searchSnap.temperature, 0.4)
+        XCTAssertFalse(searchSnap.instructionsText.isEmpty)
+        let searchInstructions = searchSnap.instructionsText
+
+        // Switch to Chat view mode with standard token category
+        settings.maxResponseTokens = 600
+        settings.temperature = 0.7
+        coordinator.switchActiveViewMode(.chat, settings: settings, prewarm: false)
+        let chatSnap = coordinator.currentSnapshot
+        XCTAssertEqual(chatSnap.mode, .chat)
+        XCTAssertEqual(chatSnap.reasoningLevel, .moderate)
+        XCTAssertEqual(chatSnap.temperature, 0.7)
+        XCTAssertFalse(chatSnap.instructionsText.isEmpty)
+        XCTAssertNotEqual(chatSnap.instructionsText, searchInstructions)
+
+        // Update settings to detailed token category and French language
+        settings.maxResponseTokens = 1200
+        settings.language = .french
+        coordinator.handleSettingsChanged(settings)
+        let updatedChatSnap = coordinator.currentSnapshot
+        XCTAssertEqual(updatedChatSnap.mode, .chat)
+        XCTAssertEqual(updatedChatSnap.reasoningLevel, .deep)
+        XCTAssertNotEqual(updatedChatSnap.instructionsText, chatSnap.instructionsText)
     }
 
     func testToolBudgetScalesAndClampsAtFloor() {
@@ -187,5 +245,181 @@ final class TokenBudgetingTests: XCTestCase {
                 "Hybrid grounding at responseCap=\(responseCap) leaves no room for tool replies"
             )
         }
+    }
+
+    func testProfileReasoningCapabilityGating() {
+        // When reasoning capability is absent (as on on-device SystemLanguageModel.default),
+        // effectiveReasoningLevel MUST be nil to prevent LanguageModelError.unsupportedCapability.
+        let defaultCaps = SystemLanguageModel.default.capabilities
+        let effectiveOnDefault = SilicIADynamicProfile.effectiveReasoningLevel(
+            requested: .light,
+            capabilities: defaultCaps
+        )
+        if defaultCaps.contains(.reasoning) {
+            XCTAssertEqual(effectiveOnDefault, .light)
+        } else {
+            XCTAssertNil(effectiveOnDefault)
+        }
+
+        // When reasoning capability is present, requested level is preserved.
+        let capableCaps = LanguageModelCapabilities([.reasoning])
+        XCTAssertEqual(
+            SilicIADynamicProfile.effectiveReasoningLevel(requested: .light, capabilities: capableCaps),
+            .light
+        )
+        XCTAssertEqual(
+            SilicIADynamicProfile.effectiveReasoningLevel(requested: .moderate, capabilities: capableCaps),
+            .moderate
+        )
+        XCTAssertEqual(
+            SilicIADynamicProfile.effectiveReasoningLevel(requested: .deep, capabilities: capableCaps),
+            .deep
+        )
+
+        // Empty capabilities yield nil
+        let emptyCaps = LanguageModelCapabilities([])
+        XCTAssertNil(SilicIADynamicProfile.effectiveReasoningLevel(requested: .moderate, capabilities: emptyCaps))
+    }
+
+    @MainActor
+    func testDynamicSessionCoordinatorPrewarmDeduplication() {
+        guard FoundationModelAvailability.check().isAvailable else { return }
+
+        let coordinator = DynamicSessionCoordinator()
+        var settings = AppSettings()
+        settings.language = .french
+        settings.maxResponseTokens = 500
+
+        let initialCount = coordinator.prewarmCount
+        coordinator.switchActiveViewMode(.searchSummary, settings: settings, prewarm: true)
+        let countAfterFirst = coordinator.prewarmCount
+        XCTAssertGreaterThanOrEqual(countAfterFirst, initialCount)
+
+        // Switching to identical mode & settings must not trigger a redundant prewarm
+        coordinator.switchActiveViewMode(.searchSummary, settings: settings, prewarm: true)
+        XCTAssertEqual(coordinator.prewarmCount, countAfterFirst)
+
+        // Switching to a different mode (Chat) changes the key and must trigger a prewarm
+        coordinator.switchActiveViewMode(.chat, settings: settings, prewarm: true)
+        XCTAssertEqual(coordinator.prewarmCount, countAfterFirst + 1)
+    }
+
+    func testLanguageModelErrorClassification() {
+        // Permanent / non-transient errors must NOT be retried
+        let permanentErrors: [LanguageModelError] = [
+            .guardrailViolation(LanguageModelError.GuardrailViolation(debugDescription: "guardrail")),
+            .refusal(LanguageModelError.Refusal(explanation: "policy", debugDescription: "refusal")),
+            .unsupportedCapability(
+                LanguageModelError.UnsupportedCapability(
+                    capability: .reasoning,
+                    debugDescription: "The model doesn't support the requested capability."
+                )
+            ),
+            .unsupportedTranscriptContent(
+                LanguageModelError.UnsupportedTranscriptContent(
+                    unsupportedContent: [],
+                    debugDescription: "bad transcript"
+                )
+            ),
+            .unsupportedGenerationGuide(
+                LanguageModelError.UnsupportedGenerationGuide(
+                    schemaName: "guide",
+                    debugDescription: "guide not supported"
+                )
+            ),
+            .unsupportedLanguageOrLocale(
+                LanguageModelError.UnsupportedLanguageOrLocale(
+                    languageCode: Locale.LanguageCode("xx"),
+                    debugDescription: "unsupported language"
+                )
+            )
+        ]
+        for err in permanentErrors {
+            let diagnosis = AIService.classifyGenerationError(err)
+            XCTAssertFalse(diagnosis.isTransient, "Expected permanent error for \(err)")
+            XCTAssertTrue(diagnosis.label.contains("LanguageModelError"))
+        }
+
+        // Transient errors should be eligible for retry
+        let transientErrors: [LanguageModelError] = [
+            .contextSizeExceeded(LanguageModelError.ContextSizeExceeded(contextSize: 4096, tokenCount: 5000, debugDescription: "overflow")),
+            .rateLimited(LanguageModelError.RateLimited(resetDate: nil, debugDescription: "rate limited")),
+            .timeout(LanguageModelError.Timeout(debugDescription: "timeout"))
+        ]
+        for err in transientErrors {
+            let diagnosis = AIService.classifyGenerationError(err)
+            XCTAssertTrue(diagnosis.isTransient, "Expected transient error for \(err)")
+            XCTAssertTrue(diagnosis.label.contains("LanguageModelError"))
+        }
+
+        // Cancellation
+        XCTAssertFalse(AIService.classifyGenerationError(CancellationError()).isTransient)
+    }
+
+    func testChatServiceContextWindowOverflowDetection() {
+        let overflow = LanguageModelError.contextSizeExceeded(
+            LanguageModelError.ContextSizeExceeded(contextSize: 4096, tokenCount: 5000, debugDescription: "overflow")
+        )
+        XCTAssertTrue(ChatService.isContextWindowOverflow(overflow))
+
+        let nonOverflow = LanguageModelError.timeout(
+            LanguageModelError.Timeout(debugDescription: "timeout")
+        )
+        XCTAssertFalse(ChatService.isContextWindowOverflow(nonOverflow))
+
+        let nsError = NSError(domain: "test", code: -1, userInfo: [NSLocalizedDescriptionKey: "exceeded model context window size"])
+        XCTAssertTrue(ChatService.isContextWindowOverflow(nsError))
+    }
+
+    func testSummaryContextUtilizationFactorScaling() {
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 250), 0.25)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 399), 0.25)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 400), 0.60)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 750), 0.60)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 1200), 0.80)
+    }
+
+    @MainActor
+    func testCoordinatorPreservesSharedSessionWhenQueryGenerationAcquired() {
+        let coordinator = DynamicSessionCoordinator()
+        var settings = AppSettings()
+        settings.maxResponseTokens = 500
+        coordinator.switchActiveViewMode(.searchSummary, settings: settings, prewarm: false)
+
+        XCTAssertEqual(coordinator.currentSnapshot.mode, .searchSummary)
+
+        // Acquiring an ephemeral session (e.g. searchQueryGeneration) must NOT mutate shared session snapshot
+        _ = coordinator.acquireSession(
+            mode: .searchQueryGeneration,
+            instructions: "Generate 1 query",
+            temperature: 0.2,
+            maxResponseTokens: 60
+        )
+
+        XCTAssertEqual(coordinator.currentSnapshot.mode, .searchSummary, "Shared session must remain in searchSummary mode")
+    }
+
+    func testSearchSourcesToolQueryGenerationForConciseAndStandard() async {
+        guard await FoundationModelAvailability.check().isAvailable else { return }
+
+        // Concise mode (1+1 queries)
+        let conciseResults = await SearchSourcesTool.generateQueries(
+            for: "énergie solaire en France",
+            language: .french,
+            maxResponseTokens: 250,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertFalse(conciseResults.webQueries.isEmpty)
+
+        // Standard mode (2+2 queries)
+        let standardResults = await SearchSourcesTool.generateQueries(
+            for: "énergie solaire en France",
+            language: .french,
+            maxResponseTokens: 500,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertFalse(standardResults.webQueries.isEmpty)
     }
 }

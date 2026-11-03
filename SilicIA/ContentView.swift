@@ -31,6 +31,7 @@ struct ContentView: View {
     @Binding var sharedPDFs: [URL]
     @Binding var sharedImages: [URL]
     @Binding var pendingSearchQuery: String?
+    @StateObject private var aiService = AIService()
     @StateObject private var chatService = ChatService()
     /// Shared settings store (@Observable). Reading `language` in the body
     /// re-localises the top tab bar the instant the language changes anywhere
@@ -89,6 +90,7 @@ struct ContentView: View {
                             pendingSearchQuery = nil
                         },
                         chatService: chatService,
+                        aiService: aiService,
                         onOfflineQuery: { query in
                             selectedTab = .chat
                             chatService.modelContext = modelContext
@@ -158,6 +160,20 @@ struct ContentView: View {
             if pendingSearchQuery != nil {
                 selectedTab = .searchAssist
             }
+        }
+        .onAppear {
+            DynamicSessionCoordinator.shared.switchActiveViewMode(
+                selectedTab == .searchAssist ? .searchSummary : .chat,
+                settings: settingsStore.settings,
+                prewarm: true
+            )
+        }
+        .onChange(of: selectedTabRawValue) {
+            DynamicSessionCoordinator.shared.switchActiveViewMode(
+                selectedTab == .searchAssist ? .searchSummary : .chat,
+                settings: settingsStore.settings,
+                prewarm: true
+            )
         }
     }
 }
