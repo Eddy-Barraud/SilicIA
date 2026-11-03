@@ -198,11 +198,27 @@ final class DynamicSessionCoordinator {
 
         settingsDebounceTask?.cancel()
         settingsDebounceTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            try? await Task.sleep(nanoseconds: 400_000_000)
             guard !Task.isCancelled, let self else { return }
             guard FoundationModelAvailability.check().isAvailable else { return }
             self.prewarmSharedSessionIfIdle(with: snapshot)
         }
+    }
+
+    /// Re-prewarms the active view mode's session if idle.
+    /// Useful after an ephemeral subtask (such as query generation) completes,
+    /// so the model session is hot while network I/O proceeds.
+    func reprewarmActiveSession() {
+        guard sharedSession?.isResponding != true else { return }
+        guard FoundationModelAvailability.check().isAvailable else { return }
+        let session = ensureSharedSession()
+        if !session.transcript.history.isEmpty {
+            session.transcript.history = []
+        }
+        session.prewarm()
+        #if DEBUG
+        print("[DynamicSessionCoordinator] Re-prewarmed active session during network I/O")
+        #endif
     }
 
     /// Configures and returns a `LanguageModelSession` for an imminent request.
@@ -241,9 +257,14 @@ final class DynamicSessionCoordinator {
         // Ephemeral subtasks (like query generation or webpage summary) must not
         // clobber or invalidate the persistent session prewarmed for the active view.
         if mode == activeViewMode && !session.isResponding {
-            stateStore.update(snapshot)
-            session.transcript.history = []
-            lastPrewarmedKey = PrewarmKey(snapshot: snapshot)
+            let key = PrewarmKey(snapshot: snapshot)
+            if lastPrewarmedKey != key {
+                stateStore.update(snapshot)
+                lastPrewarmedKey = key
+            }
+            if !session.transcript.history.isEmpty {
+                session.transcript.history = []
+            }
             return session
         }
 
@@ -295,35 +316,44 @@ final class DynamicSessionCoordinator {
 
         switch mode {
         case .searchSummary, .webPageSummary, .searchQueryGeneration:
+            let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
+            let allowTools = !isConcise
             let instructions = AIService.buildSearchInstructions(
                 for: settings.language,
                 maxOutputTokens: settings.maxResponseTokens,
                 webSearchAvailable: false,
                 hasCorpus: false,
                 useDuckDuckGo: false,
-                useWikipedia: false
+                useWikipedia: false,
+                includeToolsAppendix: allowTools
             )
-            let assembled = ToolKit.assemble(
-                config: ToolKit.Configuration(
-                    language: settings.language,
-                    corpusChunks: [],
-                    userQuery: "",
-                    webSearchAvailable: false,
-                    webSearchService: webSearchService,
-                    webScraper: webScraper,
-                    ragContextService: ragContextService,
-                    maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
-                    maxWikipediaResults: settings.maxWikipediaResults,
-                    useDuckDuckGo: false,
-                    useWikipedia: false,
-                    contextUtilizationFactor: nil
-                ),
-                responseTokens: effectiveMaxTokens
-            )
+            let tools: [any Tool]
+            if allowTools {
+                let assembled = ToolKit.assemble(
+                    config: ToolKit.Configuration(
+                        language: settings.language,
+                        corpusChunks: [],
+                        userQuery: "",
+                        webSearchAvailable: false,
+                        webSearchService: webSearchService,
+                        webScraper: webScraper,
+                        ragContextService: ragContextService,
+                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
+                        maxWikipediaResults: settings.maxWikipediaResults,
+                        useDuckDuckGo: false,
+                        useWikipedia: false,
+                        contextUtilizationFactor: nil
+                    ),
+                    responseTokens: effectiveMaxTokens
+                )
+                tools = assembled.tools
+            } else {
+                tools = []
+            }
             return DynamicSessionStateStore.Snapshot(
                 mode: .searchSummary,
                 instructionsText: instructions,
-                tools: assembled.tools,
+                tools: tools,
                 reasoningLevel: reasoningLevel,
                 temperature: settings.temperature,
                 maximumResponseTokens: effectiveMaxTokens

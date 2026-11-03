@@ -66,11 +66,11 @@ class AIService: ObservableObject {
         let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
         switch profile.kind {
         case .concise:
-            return 0.25
+            return 0.8
         case .standard:
-            return 0.60
+            return 0.9
         case .detailed:
-            return 0.80
+            return 1.0
         }
     }
 
@@ -195,8 +195,15 @@ class AIService: ObservableObject {
         debugNotes = []
         #endif
 
-        let effectiveScrapingResults = max(0, maxScrapingResults)
-        let effectiveScrapingChars = max(0, maxScrapingChars)
+        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
+        let effectiveScrapingResults: Int
+        if isConcise {
+            effectiveScrapingResults = min(maxScrapingResults, useWikipedia ? 2 : 3)
+        } else {
+            effectiveScrapingResults = max(0, maxScrapingResults)
+        }
+        let effectiveScrapingChars = isConcise ? min(maxScrapingChars, 2_500) : max(0, maxScrapingChars)
+        let scrapeTimeout: Double = isConcise ? 1.5 : 4.0
 
         // Scrape only URLs without provider-supplied full content that passed the NLEmbedding snippet threshold.
         let urlsToScrape = results.compactMap { result -> String? in
@@ -212,7 +219,8 @@ class AIService: ObservableObject {
         let scrapedContent = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: effectiveScrapingResults,
-            maxCharacters: effectiveScrapingChars
+            maxCharacters: effectiveScrapingChars,
+            timeoutSeconds: scrapeTimeout
         )
         let ragScrapeDuration = Date().timeIntervalSince(scrapeStart)
 
@@ -245,8 +253,9 @@ class AIService: ObservableObject {
             } else if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
                 validResults.append(result)
+                let boundedText = effectiveScrapingChars > 0 ? String(retrievedContent.prefix(effectiveScrapingChars)) : retrievedContent
                 let chunked = RAGChunker.chunkParagraphs(
-                    text: retrievedContent,
+                    text: boundedText,
                     source: result.title,
                     url: result.url
                 )
@@ -324,11 +333,10 @@ class AIService: ObservableObject {
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
-        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
         let contextToSend: String
         let corpusChunksToSend: [RAGChunk]
-        if isConcise && selected.selectedChunks.count > 4 {
-            let cappedChunks = Array(selected.selectedChunks.prefix(4))
+        if isConcise && selected.selectedChunks.count > 3 {
+            let cappedChunks = Array(selected.selectedChunks.prefix(3))
             corpusChunksToSend = cappedChunks.map(\.chunk)
             contextToSend = cappedChunks.map { "Source: \($0.chunk.source)\n\($0.chunk.text)" }.joined(separator: "\n\n---\n\n")
         } else {
@@ -506,7 +514,8 @@ class AIService: ObservableObject {
         webSearchAvailable: Bool = true,
         hasCorpus: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        includeToolsAppendix: Bool = true
     ) -> String {
         let maxSentences = TokenBudgeting.estimatedOutputSentences(forTokens: maxOutputTokens)
         let profile = TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
@@ -526,6 +535,7 @@ class AIService: ObservableObject {
                 "lengthDirective": profile.lengthDirective(for: language)
             ]
         ) ?? ""
+        guard includeToolsAppendix else { return base }
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
@@ -542,7 +552,8 @@ class AIService: ObservableObject {
         webSearchAvailable: Bool = true,
         hasCorpus: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        includeToolsAppendix: Bool = true
     ) -> String {
         Self.buildSearchInstructions(
             for: language,
@@ -550,7 +561,8 @@ class AIService: ObservableObject {
             webSearchAvailable: webSearchAvailable,
             hasCorpus: hasCorpus,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            includeToolsAppendix: includeToolsAppendix
         )
     }
 
@@ -770,6 +782,16 @@ class AIService: ObservableObject {
         return ("\(ns.domain) code=\(ns.code): \(error.localizedDescription)", true)
     }
 
+    /// Fast heuristic check to see if a factual query needs calculation or current date/time tools.
+    /// Used in concise mode to bypass tool schemas and appendix, saving ~500 tokens of prefill
+    /// and eliminating tool-routing passes to accelerate Time-To-First-Token.
+    static func queryRequiresTools(_ query: String) -> Bool {
+        let lower = query.lowercased()
+        let mathIndicators = ["+", "-", "*", "/", "%", "calcul", "combien font", "somme de", "multiplier", "diviser"]
+        let dateIndicators = ["date", "aujourd'hui", "heure", "quel jour", "today", "current time", "what day"]
+        return mathIndicators.contains { lower.contains($0) } || dateIndicators.contains { lower.contains($0) }
+    }
+
     /// Single generation attempt. Throws on failure so the orchestrator
     /// (`generateSummaryWithFoundationModels`) can retry. Builds
     /// a fresh `LanguageModelSession` every call so prior-search context
@@ -789,16 +811,20 @@ class AIService: ObservableObject {
         contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async throws -> String {
+        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
+        let allowTools = !isConcise || Self.queryRequiresTools(query)
+
         // In SearchView summary generation, searchSources is NOT allowed as a tool.
         // Web results are pre-fetched and grounded directly; the model only uses
-        // calculate and currentDateTime.
+        // calculate and currentDateTime when tools are allowed.
         let instructions = buildInstructions(
             for: language,
             maxOutputTokens: maxTokens,
             webSearchAvailable: false,
             hasCorpus: false,
             useDuckDuckGo: false,
-            useWikipedia: false
+            useWikipedia: false,
+            includeToolsAppendix: allowTools
         )
         let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxTokens,
@@ -806,25 +832,34 @@ class AIService: ObservableObject {
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
         )
-        let assembled = ToolKit.assemble(
-            config: ToolKit.Configuration(
-                language: language,
-                corpusChunks: [],
-                userQuery: query,
-                webSearchAvailable: false,
-                webSearchService: webSearchService,
-                webScraper: webScraper,
-                ragContextService: ragContextService,
-                maxDuckDuckGoResults: maxDuckDuckGoResults,
-                maxWikipediaResults: maxWikipediaResults,
-                useDuckDuckGo: false,
-                useWikipedia: false,
-                contextUtilizationFactor: contextUtilizationFactor
-            ),
-            responseTokens: clampedOutputTokens
-        )
-        let toolBudget = assembled.tokenBudget
-        let tools = assembled.tools
+
+        let tools: [any Tool]
+        let toolBudget: Int
+        if allowTools {
+            let assembled = ToolKit.assemble(
+                config: ToolKit.Configuration(
+                    language: language,
+                    corpusChunks: [],
+                    userQuery: query,
+                    webSearchAvailable: false,
+                    webSearchService: webSearchService,
+                    webScraper: webScraper,
+                    ragContextService: ragContextService,
+                    maxDuckDuckGoResults: maxDuckDuckGoResults,
+                    maxWikipediaResults: maxWikipediaResults,
+                    useDuckDuckGo: false,
+                    useWikipedia: false,
+                    contextUtilizationFactor: contextUtilizationFactor
+                ),
+                responseTokens: clampedOutputTokens
+            )
+            tools = assembled.tools
+            toolBudget = assembled.tokenBudget
+        } else {
+            tools = []
+            toolBudget = 0
+        }
+
         let effectiveMaxTokens = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
         let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxTokens)
         #if DEBUG

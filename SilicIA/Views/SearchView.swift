@@ -1309,9 +1309,13 @@ struct SearchView: View {
                         useWikipedia: settings.useWikipedia
                     )
 
-                    let ddgLimit = isConcise ? min(5, settings.maxDuckDuckGoResults) : (settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults)
+                    // Re-prewarm the active searchSummary session on the Neural Engine / GPU
+                    // concurrently while DuckDuckGo and Wikipedia network requests are in flight.
+                    DynamicSessionCoordinator.shared.reprewarmActiveSession()
+
+                    let ddgLimit = isConcise ? min(6, settings.maxDuckDuckGoResults) : (settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults)
                     let wikiLimit = isConcise ? min(2, settings.maxWikipediaResults) : settings.maxWikipediaResults
-                    let mergedLimit = isConcise ? min(6, resultsCount) : (resultsCount + Self.aiSummaryOverfetchResults)
+                    let mergedLimit = isConcise ? min(8, resultsCount + 2) : (resultsCount + Self.aiSummaryOverfetchResults)
 
                     fetchedResults = try await searchService.search(
                         webQueries: generated.webQueries,
@@ -1349,9 +1353,12 @@ struct SearchView: View {
                         aiService.isSummarizing = true
                     }
                     searchService.isSearching = false
+                    let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
+                    let targetScrapeResults = isConcise ? (settings.useWikipedia ? 2 : 3) : resultsCount
+                    let targetScrapeChars = isConcise ? min(scrapingChars, 2_500) : scrapingChars
                     await generateSummary(
-                        maxScrapingResults: resultsCount,
-                        maxScrapingChars: scrapingChars,
+                        maxScrapingResults: targetScrapeResults,
+                        maxScrapingChars: targetScrapeChars,
                         summaryResults: fetchedResults
                     )
                 } else {
@@ -1398,11 +1405,14 @@ struct SearchView: View {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
+        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
+        let defaultScrapeResults = isConcise ? (settings.useWikipedia ? 2 : 3) : settings.maxSearchResults
+        let defaultScrapeChars = isConcise ? min(defaultScrapingCharactersFromContextTokens, 2_500) : defaultScrapingCharactersFromContextTokens
         _ = await aiService.summarize(
             query: searchQuery,
             results: summaryResults ?? searchResults,
-            maxScrapingResults: maxScrapingResults ?? settings.maxSearchResults,
-            maxScrapingChars: maxScrapingChars ?? defaultScrapingCharactersFromContextTokens,
+            maxScrapingResults: maxScrapingResults ?? defaultScrapeResults,
+            maxScrapingChars: maxScrapingChars ?? defaultScrapeChars,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,

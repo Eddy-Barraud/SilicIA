@@ -622,7 +622,7 @@ class WebScrapingService: ObservableObject {
 
     /// Scrape content from a single URL into clean Markdown.
     /// Returns `nil` if the page cannot be fetched or safely reduced to Markdown within memory/depth limits.
-    func scrapeContent(from urlString: String, maxCharacters: Int? = 5000) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int? = 5000, timeoutSeconds: Double = 4.0) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
         #if DEBUG
@@ -630,7 +630,7 @@ class WebScrapingService: ObservableObject {
         #endif
 
         do {
-            let (title, markdown) = try await extractMarkdown(from: url)
+            let (title, markdown) = try await extractMarkdown(from: url, timeoutSeconds: timeoutSeconds)
             let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else {
                 #if DEBUG
@@ -659,7 +659,12 @@ class WebScrapingService: ObservableObject {
     /// Scrape content from multiple URLs concurrently into clean Markdown.
     /// Sources that fail or exceed memory/DOM depth limits are omitted from the returned dictionary
     /// and recorded in `lastFailedURLs`.
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int? = 5000) async -> [String: String] {
+    func scrapeMultiplePages(
+        urls: [String],
+        limit: Int = 10,
+        maxCharacters: Int? = 5000,
+        timeoutSeconds: Double = 4.0
+    ) async -> [String: String] {
         isScrapingContent = true
         lastFailedURLs = []
         defer { isScrapingContent = false }
@@ -689,7 +694,11 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                    let content = await self.scrapeContent(
+                        from: nextURL,
+                        maxCharacters: maxCharacters,
+                        timeoutSeconds: timeoutSeconds
+                    )
                     return (nextURL, content)
                 }
             }
@@ -718,7 +727,11 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                        let content = await self.scrapeContent(
+                            from: nextURL,
+                            maxCharacters: maxCharacters,
+                            timeoutSeconds: timeoutSeconds
+                        )
                         return (nextURL, content)
                     }
                 }

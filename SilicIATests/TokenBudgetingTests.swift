@@ -372,11 +372,18 @@ final class TokenBudgetingTests: XCTestCase {
     }
 
     func testSummaryContextUtilizationFactorScaling() {
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 250), 0.25)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 399), 0.25)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 400), 0.60)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 750), 0.60)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 250), 0.12)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 399), 0.12)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 400), 0.45)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 750), 0.45)
         XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 1200), 0.80)
+    }
+
+    func testQueryRequiresTools() {
+        XCTAssertFalse(AIService.queryRequiresTools("classe les pays exportateurs de terres rares"))
+        XCTAssertFalse(AIService.queryRequiresTools("qui est Albert Einstein"))
+        XCTAssertTrue(AIService.queryRequiresTools("combien font 42 * 3.14"))
+        XCTAssertTrue(AIService.queryRequiresTools("quelle est la date d'aujourd'hui"))
     }
 
     @MainActor
