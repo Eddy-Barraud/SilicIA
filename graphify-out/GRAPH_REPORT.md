@@ -1,7 +1,7 @@
 # Graph Report - SilicIA  (2026-11-03)
 
 ## Corpus Check
-- 121 files · ~107,404 words
+- 121 files · ~107,371 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 15 file(s) not represented in the graph (top: (none) 5, .entitlements 3, .plist 2)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `7716467e`
+- Built from commit: `71273c2e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -52,7 +52,7 @@
 - String
 - String
 - RAG Relevance Scoring Engine
-- SearchResult
+- SearchResponse
 - AppSettings
 - DebugRAGStorage
 - Settings Serialization & Coding Keys
@@ -71,21 +71,21 @@
 - bug_report.md
 - GitHub Development Helper CLI
 - pull_request_template.md
-- Token Budget Slider Controls
+- TokenBudgetSliderView
 - SilicIAApp
 - StreamingLaTeXText
 - feature_request.md
-- FilePickerKind
+- ChatView.swift
 - AppDelegate
 - WebSearchService.swift
-- Local Processing Guarantee
+- ModelAvailabilityNotice
 - Brand Logo Icon Generation
 - Shell Build Automation Script
 - Build and Run Shell Script
 - TestRAG French Wiki Benchmark
 - Offline Chat Mode Concept
 - Token Budgeting Engine Concept
-- ModelAvailabilityNotice
+- Local Processing Guarantee
 
 ## God Nodes (most connected - your core abstractions)
 1. `ModelLanguage` - 88 edges
@@ -305,7 +305,7 @@ Nodes (6): check_build_status(), check_repo_stats(), create_feature_branch(), pr
 Cohesion: 0.22
 Nodes (8): Additional Notes, Changes Made, Checklist, Description, Related Issues, Screenshots (if applicable), Testing, Type of Change
 
-### Community 55 - "Token Budget Slider Controls"
+### Community 55 - "TokenBudgetSliderView"
 Cohesion: 0.29
 Nodes (6): .chatSettingsPanel, TokenBudgetSliderView, .estimatedContextWords, .estimatedOutputWords, .outputProfile, .profileBadgeColor
 
@@ -317,7 +317,7 @@ Nodes (8): PlatformColors, .controlBackground, .textBackground, Color, .platform
 Cohesion: 0.40
 Nodes (4): Additional Context, Describe Alternatives You've Considered, Describe the Solution You'd Like, Is Your Feature Request Related to a Problem?
 
-### Community 59 - "FilePickerKind"
+### Community 59 - "ChatView.swift"
 Cohesion: 0.11
 Nodes (12): SafariServices, NetworkConstants, ChatViewMode, full, pdfTalkme, FilePickerKind, .allowedContentTypes, image (+4 more)
 
@@ -325,13 +325,13 @@ Nodes (12): SafariServices, NetworkConstants, ChatViewMode, full, pdfTalkme, Fil
 Cohesion: 0.47
 Nodes (3): NaturalLanguage, WikipediaSearchFallbackPage, WikipediaSearchFallbackResponse
 
-### Community 62 - "Local Processing Guarantee"
-Cohesion: 0.40
-Nodes (5): Local Processing Guarantee, SilicIA Privacy Policy, On-Device LLM (Apple Intelligence), Local LLM Chat Showcase, Privacy Feature Showcase
-
-### Community 69 - "ModelAvailabilityNotice"
+### Community 62 - "ModelAvailabilityNotice"
 Cohesion: 0.33
 Nodes (3): ModelAvailabilityNotice, .body, .iconName
+
+### Community 69 - "Local Processing Guarantee"
+Cohesion: 0.40
+Nodes (5): Local Processing Guarantee, SilicIA Privacy Policy, On-Device LLM (Apple Intelligence), Local LLM Chat Showcase, Privacy Feature Showcase
 
 ## Knowledge Gaps
 - **172 isolated node(s):** `searchAssist`, `chat`, `.id`, `.language`, `.selectedTabBinding` (+167 more)
@@ -341,7 +341,7 @@ Nodes (3): ModelAvailabilityNotice, .body, .iconName
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ModelLanguage` connect `Dual Web Search & Tests` to `RAG Retrieval & Chunking`, `SwiftData Conversation Persistence`, `String`, `AIService`, `SearchResult`, `AppSettings`, `Image Analysis & Visual Grounding`, `Foundation Model Hardware Availability`, `System Date & Time Tool`, `ModelAvailabilityNotice`, `.loadPrompt`, `Multi-Query Search Sources Tool`, `ContentView`, `Search Relevance Match Score Badge`, `Token Budget Slider Controls`, `DroppedFileStore`, `Model Loading & Inference Engine`, `WebSearchService.swift`?**
+- **Why does `ModelLanguage` connect `Dual Web Search & Tests` to `RAG Retrieval & Chunking`, `SwiftData Conversation Persistence`, `String`, `AIService`, `SearchResponse`, `AppSettings`, `Image Analysis & Visual Grounding`, `Foundation Model Hardware Availability`, `System Date & Time Tool`, `.loadPrompt`, `Multi-Query Search Sources Tool`, `ContentView`, `Search Relevance Match Score Badge`, `TokenBudgetSliderView`, `DroppedFileStore`, `Model Loading & Inference Engine`, `WebSearchService.swift`, `ModelAvailabilityNotice`?**
   _High betweenness centrality (0.133) - this node is a cross-community bridge._
 - **Are the 7 inferred relationships involving `ChatService` (e.g. with `ContentView` and `Search Tool Calling Definition`) actually correct?**
   _`ChatService` has 7 INFERRED edges - model-reasoned connections that need verification._
@@ -350,7 +350,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `RAG Retrieval & Chunking` be split into smaller, more focused modules?**
   _Cohesion score 0.05929919137466307 - nodes in this community are weakly interconnected._
 - **Why does `ChatService` connect `SwiftData Conversation Persistence` to `TokenBudgeting`, `RAG Retrieval & Chunking`, `Dual Web Search & Tests`, `Chat Interface & Streaming`, `Web Content Scraping & Errors`, `Search Assist View & Grounding`, `ModelAnsweringTests`, `Entitlements`, `RAG & PDF Chunking Tests`, `ContentView`, `ReaderHTMLWebViewRepresentable`?**
-  _High betweenness centrality (0.132) - this node is a cross-community bridge._
+  _High betweenness centrality (0.131) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `ChatView` (e.g. with `.body` and `.testMainViewsRenderWithoutCrashing()`) actually correct?**
   _`ChatView` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `SwiftData Conversation Persistence` be split into smaller, more focused modules?**

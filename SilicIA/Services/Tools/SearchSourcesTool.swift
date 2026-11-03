@@ -19,7 +19,7 @@ struct SearchSourcesTool: Tool {
         @Guide(description: "Two distinct web search queries.", .count(2))
         var webQueries: [String] = []
 
-        @Guide(description: "Two distinct Wikipedia encyclopedic article titles (empty strings if not applicable).", .count(2))
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles relevant to the topic.", .count(2))
         var wikiQueries: [String] = []
     }
 
@@ -28,7 +28,7 @@ struct SearchSourcesTool: Tool {
         @Guide(description: "One targeted web search query.")
         var webQuery: String = ""
 
-        @Guide(description: "One targeted Wikipedia encyclopedic article title (empty string if not applicable).")
+        @Guide(description: "One targeted Wikipedia encyclopedic article title relevant to the topic.")
         var wikiQuery: String = ""
     }
 
@@ -75,29 +75,29 @@ struct SearchSourcesTool: Tool {
                 case .french:
                     topicLabel = "Sujet (rédige les requêtes en français)"
                     if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Génère 1 requête de recherche web ciblée et 1 titre d'article Wikipédia pour le sujet, en français (laisser vide pour Wikipédia si non applicable). Reste concis et précis."
+                        conciseInstructions = "Génère 1 requête de recherche web ciblée et 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
                     } else if useDuckDuckGo {
                         conciseInstructions = "Génère 1 requête de recherche web ciblée pour le sujet, en français. Reste concis et précis."
                     } else {
-                        conciseInstructions = "Génère 1 titre d'article Wikipédia pour le sujet, en français (laisser vide si non applicable). Reste concis et précis."
+                        conciseInstructions = "Génère 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
                     }
                 case .spanish:
                     topicLabel = "Tema (redacta las consultas en español)"
                     if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Genera 1 consulta de búsqueda web y 1 título de artículo de Wikipedia para el tema, en español (dejar vacío para Wikipedia si no aplica). Sé conciso y preciso."
+                        conciseInstructions = "Genera 1 consulta de búsqueda web y 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
                     } else if useDuckDuckGo {
                         conciseInstructions = "Genera 1 consulta de búsqueda web para el tema, en español. Sé conciso y preciso."
                     } else {
-                        conciseInstructions = "Genera 1 título de artículo de Wikipedia para el tema, en español (dejar vacío si no aplica). Sé conciso y preciso."
+                        conciseInstructions = "Genera 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
                     }
                 case .english:
                     topicLabel = "Topic (write queries in English)"
                     if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Generate 1 targeted web search query and 1 Wikipedia article title for the topic, in English (leave empty for Wikipedia if not applicable). Be concise and precise."
+                        conciseInstructions = "Generate 1 targeted web search query and 1 Wikipedia article title for the topic, in English. Be concise and precise."
                     } else if useDuckDuckGo {
                         conciseInstructions = "Generate 1 targeted web search query for the topic, in English. Be concise and precise."
                     } else {
-                        conciseInstructions = "Generate 1 Wikipedia article title for the topic, in English (leave empty if not applicable). Be concise and precise."
+                        conciseInstructions = "Generate 1 Wikipedia article title for the topic, in English. Be concise and precise."
                     }
                 }
 
@@ -126,7 +126,7 @@ struct SearchSourcesTool: Tool {
                 let filteredWiki: [String]
                 if useWikipedia {
                     let cleanedWiki = (rawWiki.isEmpty || rawWiki.lowercased() == "n/a" || rawWiki.lowercased() == "none") ? "" : rawWiki
-                    filteredWiki = cleanedWiki.isEmpty ? (useDuckDuckGo ? [] : [userQuery]) : [cleanedWiki]
+                    filteredWiki = cleanedWiki.isEmpty ? [userQuery] : [cleanedWiki]
                 } else {
                     filteredWiki = []
                 }
@@ -147,13 +147,13 @@ struct SearchSourcesTool: Tool {
             switch language {
             case .french:
                 topicLabel = "Sujet (rédige les requêtes en français)"
-                instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français (laisser vide pour Wikipédia si non applicable). Reste concis et précis."
+                instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
             case .spanish:
                 topicLabel = "Tema (redacta las consultas en español)"
-                instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español (dejar vacío para Wikipedia si no aplica). Sé conciso y preciso."
+                instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
             case .english:
                 topicLabel = "Topic (write queries in English)"
-                instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English (leave empty for Wikipedia if not applicable). Be concise and precise."
+                instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Be concise and precise."
             }
 
             let session = await DynamicSessionCoordinator.shared.acquireSession(
@@ -218,7 +218,7 @@ struct SearchSourcesTool: Tool {
             }
 
             let filteredWeb = useDuckDuckGo ? (finalWeb.isEmpty ? [userQuery] : finalWeb) : []
-            let filteredWiki = useWikipedia ? (finalWiki.isEmpty ? (useDuckDuckGo ? [] : [userQuery]) : finalWiki) : []
+            let filteredWiki = useWikipedia ? (finalWiki.isEmpty ? [userQuery] : finalWiki) : []
 
             #if DEBUG
             print("┏━ [SearchSourcesTool] @Generable Query Generation ━━━━━━━━━━")

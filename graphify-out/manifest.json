@@ -204,9 +204,9 @@
     "semantic_hash": "c687ddfc5af92f6685b8b302e20ee209"
   },
   "SilicIA/Services/AIService.swift": {
-    "mtime": 1793729455.8228755,
-    "seen": 1793729485.906404,
-    "ast_hash": "39a33fefe3310431890d28b4986c40b1",
+    "mtime": 1793739319.865232,
+    "seen": 1793739500.262002,
+    "ast_hash": "1bb0098b3160d7e9c76a4e67736f4796",
     "semantic_hash": ""
   },
   "SilicIA/Services/ChatService.swift": {
@@ -336,9 +336,9 @@
     "semantic_hash": "52f5c670ec19166bce7e668c5f9ab2d3"
   },
   "SilicIA/Services/Tools/SearchSourcesTool.swift": {
-    "mtime": 1793729370.2477608,
-    "seen": 1793729485.906421,
-    "ast_hash": "01fbcd8aaf7359dbf482d00a0c0d521e",
+    "mtime": 1793739736.286793,
+    "seen": 1793739843.0160189,
+    "ast_hash": "6141fbf2ec3c1956dd517922d382eb82",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/SourceFunnel.swift": {
@@ -570,9 +570,9 @@
     "semantic_hash": "3686a7c0d522e44a42294e854b55917b"
   },
   "SilicIATests/TokenBudgetingTests.swift": {
-    "mtime": 1793729412.1588035,
-    "seen": 1793729485.906448,
-    "ast_hash": "cc4f833e9f6f7a96d21192c3fe01d15d",
+    "mtime": 1793739807.9719908,
+    "seen": 1793739843.016053,
+    "ast_hash": "3a43a1d0e6bdeb766668f7ca06180541",
     "semantic_hash": ""
   },
   "SilicIATests/ToolCallGovernorTests.swift": {

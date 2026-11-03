@@ -11,7 +11,7 @@
   "32": "TokenBudgeting",
   "33": "String",
   "34": "String",
-  "36": "SearchResult",
+  "36": "SearchResponse",
   "37": "AppSettings",
   "38": "DebugRAGStorage",
   "42": "ModelAnsweringTests",
@@ -22,12 +22,13 @@
   "50": "SourceToggleButtons",
   "52": "bug_report.md",
   "54": "pull_request_template.md",
+  "55": "TokenBudgetSliderView",
   "56": "SilicIAApp",
   "57": "StreamingLaTeXText",
   "58": "feature_request.md",
-  "59": "FilePickerKind",
+  "59": "ChatView.swift",
   "60": "AppDelegate",
   "61": "WebSearchService.swift",
-  "62": "Local Processing Guarantee",
-  "69": "ModelAvailabilityNotice"
+  "62": "ModelAvailabilityNotice",
+  "69": "Local Processing Guarantee"
 }

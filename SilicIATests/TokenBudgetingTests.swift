@@ -372,11 +372,11 @@ final class TokenBudgetingTests: XCTestCase {
     }
 
     func testSummaryContextUtilizationFactorScaling() {
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 250), 0.12)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 399), 0.12)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 400), 0.45)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 750), 0.45)
-        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 1200), 0.80)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 250), 0.8)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 399), 0.8)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 400), 0.9)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 750), 0.9)
+        XCTAssertEqual(AIService.summaryContextUtilizationFactor(forTokens: 1200), 1.0)
     }
 
     func testQueryRequiresTools() {
@@ -418,6 +418,18 @@ final class TokenBudgetingTests: XCTestCase {
             useWikipedia: true
         )
         XCTAssertFalse(conciseResults.webQueries.isEmpty)
+        XCTAssertFalse(conciseResults.wikiQueries.isEmpty)
+
+        // Concise mode for specific question
+        let cobaltResults = await SearchSourcesTool.generateQueries(
+            for: "quel est le premier pays exportateur de Cobalt ?",
+            language: .french,
+            maxResponseTokens: 250,
+            useDuckDuckGo: true,
+            useWikipedia: true
+        )
+        XCTAssertFalse(cobaltResults.webQueries.isEmpty)
+        XCTAssertFalse(cobaltResults.wikiQueries.isEmpty)
 
         // Standard mode (2+2 queries)
         let standardResults = await SearchSourcesTool.generateQueries(
@@ -428,5 +440,6 @@ final class TokenBudgetingTests: XCTestCase {
             useWikipedia: true
         )
         XCTAssertFalse(standardResults.webQueries.isEmpty)
+        XCTAssertFalse(standardResults.wikiQueries.isEmpty)
     }
 }
