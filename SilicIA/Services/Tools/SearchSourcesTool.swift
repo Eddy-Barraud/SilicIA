@@ -24,11 +24,29 @@ struct SearchSourcesTool: Tool {
     }
 
     @Generable
+    struct WikiFastArguments {
+        @Guide(description: "Two distinct web search queries written strictly in the same language as the user's prompt.", .count(2))
+        var webQueries: [String] = []
+
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory).", .count(2))
+        var wikiQueries: [String] = []
+    }
+
+    @Generable
     struct SingleQueryArguments {
         @Guide(description: "One targeted web search query.")
         var webQuery: String = ""
 
         @Guide(description: "One targeted Wikipedia encyclopedic article title relevant to the topic.")
+        var wikiQuery: String = ""
+    }
+
+    @Generable
+    struct WikiFastSingleQueryArguments {
+        @Guide(description: "One targeted web search query written strictly in the same language as the user's prompt.")
+        var webQuery: String = ""
+
+        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory).")
         var wikiQuery: String = ""
     }
 
@@ -52,7 +70,8 @@ struct SearchSourcesTool: Tool {
         language: ModelLanguage = .english,
         maxResponseTokens: Int = 500,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async -> (webQueries: [String], wikiQueries: [String]) {
         guard useDuckDuckGo || useWikipedia else {
             return ([], [])
@@ -65,6 +84,7 @@ struct SearchSourcesTool: Tool {
             )
         }
 
+        let isWikiFast = (wikipediaSource == .wikiFast)
         let start = Date()
         do {
             let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxResponseTokens).kind == .concise
@@ -73,22 +93,40 @@ struct SearchSourcesTool: Tool {
                 let topicLabel: String
                 switch language {
                 case .french:
-                    topicLabel = "Sujet (rédige les requêtes en français)"
-                    if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Génère 1 requête de recherche web ciblée et 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
-                    } else if useDuckDuckGo {
-                        conciseInstructions = "Génère 1 requête de recherche web ciblée pour le sujet, en français. Reste concis et précis."
+                    if isWikiFast && useWikipedia {
+                        topicLabel = "Sujet (webQuery en français, wikiQuery en anglais)"
+                        if useDuckDuckGo {
+                            conciseInstructions = "Génère 1 requête de recherche web ciblée rédigée en français (webQuery) et 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery)."
+                        } else {
+                            conciseInstructions = "Génère 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery) pour le sujet."
+                        }
                     } else {
-                        conciseInstructions = "Génère 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
+                        topicLabel = "Sujet (rédige les requêtes en français)"
+                        if useDuckDuckGo && useWikipedia {
+                            conciseInstructions = "Génère 1 requête de recherche web ciblée et 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
+                        } else if useDuckDuckGo {
+                            conciseInstructions = "Génère 1 requête de recherche web ciblée pour le sujet, en français. Reste concis et précis."
+                        } else {
+                            conciseInstructions = "Génère 1 titre d'article Wikipédia pour le sujet, en français. Reste concis et précis."
+                        }
                     }
                 case .spanish:
-                    topicLabel = "Tema (redacta las consultas en español)"
-                    if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Genera 1 consulta de búsqueda web y 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
-                    } else if useDuckDuckGo {
-                        conciseInstructions = "Genera 1 consulta de búsqueda web para el tema, en español. Sé conciso y preciso."
+                    if isWikiFast && useWikipedia {
+                        topicLabel = "Tema (webQuery en español, wikiQuery en inglés)"
+                        if useDuckDuckGo {
+                            conciseInstructions = "Genera 1 consulta de búsqueda web redactada en español (webQuery) y 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery)."
+                        } else {
+                            conciseInstructions = "Genera 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery) para el tema."
+                        }
                     } else {
-                        conciseInstructions = "Genera 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
+                        topicLabel = "Tema (redacta las consultas en español)"
+                        if useDuckDuckGo && useWikipedia {
+                            conciseInstructions = "Genera 1 consulta de búsqueda web y 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
+                        } else if useDuckDuckGo {
+                            conciseInstructions = "Genera 1 consulta de búsqueda web para el tema, en español. Sé conciso y preciso."
+                        } else {
+                            conciseInstructions = "Genera 1 título de artículo de Wikipedia para el tema, en español. Sé conciso y preciso."
+                        }
                     }
                 case .english:
                     topicLabel = "Topic (write queries in English)"
@@ -109,12 +147,18 @@ struct SearchSourcesTool: Tool {
                     reasoningLevelOverride: .light
                 )
                 let prompt = "\(topicLabel) : \(userQuery)"
-                let response = try await session.respond(to: prompt, generating: SingleQueryArguments.self)
+                let rawWeb: String
+                let rawWiki: String
+                if isWikiFast {
+                    let response = try await session.respond(to: prompt, generating: WikiFastSingleQueryArguments.self)
+                    rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    let response = try await session.respond(to: prompt, generating: SingleQueryArguments.self)
+                    rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
                 let elapsed = Date().timeIntervalSince(start)
-                let raw = response.content
-
-                let rawWeb = raw.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                let rawWiki = raw.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
                 let filteredWeb: [String]
                 if useDuckDuckGo {
@@ -132,7 +176,7 @@ struct SearchSourcesTool: Tool {
                 }
 
                 #if DEBUG
-                print("┏━ [SearchSourcesTool] @Generable Query Generation (Concise 1+1) ━━")
+                print("┏━ [SearchSourcesTool] @Generable Query Generation (Concise 1+1, wikiSource=\(wikipediaSource.rawValue)) ━━")
                 print("┃ User Query: \"\(userQuery)\" (elapsed: \(String(format: "%.3f s", elapsed)))")
                 print("┃ Dispatched Web Query: \(filteredWeb)")
                 print("┃ Dispatched Wiki Query: \(filteredWiki)")
@@ -146,11 +190,21 @@ struct SearchSourcesTool: Tool {
             let topicLabel: String
             switch language {
             case .french:
-                topicLabel = "Sujet (rédige les requêtes en français)"
-                instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
+                if isWikiFast && useWikipedia {
+                    topicLabel = "Sujet (webQueries en français, wikiQueries en anglais)"
+                    instructions = "Génère 2 requêtes de recherche web rédigées en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries)."
+                } else {
+                    topicLabel = "Sujet (rédige les requêtes en français)"
+                    instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
+                }
             case .spanish:
-                topicLabel = "Tema (redacta las consultas en español)"
-                instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
+                if isWikiFast && useWikipedia {
+                    topicLabel = "Tema (webQueries en español, wikiQueries en inglés)"
+                    instructions = "Genera 2 consultas de búsqueda web redactadas en español (webQueries) y 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries)."
+                } else {
+                    topicLabel = "Tema (redacta las consultas en español)"
+                    instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
+                }
             case .english:
                 topicLabel = "Topic (write queries in English)"
                 instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Be concise and precise."
@@ -164,14 +218,23 @@ struct SearchSourcesTool: Tool {
                 reasoningLevelOverride: .light
             )
             let prompt = "\(topicLabel) : \(userQuery)"
-            let response = try await session.respond(to: prompt, generating: Arguments.self)
+            let rawWebList: [String]
+            let rawWikiList: [String]
+            if isWikiFast {
+                let response = try await session.respond(to: prompt, generating: WikiFastArguments.self)
+                rawWebList = response.content.webQueries
+                rawWikiList = response.content.wikiQueries
+            } else {
+                let response = try await session.respond(to: prompt, generating: Arguments.self)
+                rawWebList = response.content.webQueries
+                rawWikiList = response.content.wikiQueries
+            }
             let elapsed = Date().timeIntervalSince(start)
-            let raw = response.content
 
-            let rawWeb = raw.webQueries
+            let rawWeb = rawWebList
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
-            let rawWiki = raw.wikiQueries
+            let rawWiki = rawWikiList
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty && $0.lowercased() != "n/a" && $0.lowercased() != "none" }
 
@@ -182,6 +245,8 @@ struct SearchSourcesTool: Tool {
             case .english: nlLang = .english
             }
             let embedding = NLEmbedding.sentenceEmbedding(for: nlLang) ?? NLEmbedding.wordEmbedding(for: nlLang)
+            let wikiLang: NLLanguage = isWikiFast ? .english : nlLang
+            let wikiEmbedding = NLEmbedding.sentenceEmbedding(for: wikiLang) ?? NLEmbedding.wordEmbedding(for: wikiLang)
 
             // Deduplicate web queries
             var finalWeb: [String] = []
@@ -206,7 +271,7 @@ struct SearchSourcesTool: Tool {
             if rawWiki.count >= 2 {
                 let w1 = rawWiki[0]
                 let w2 = rawWiki[1]
-                let dist = embedding?.distance(between: w1, and: w2) ?? 1.0
+                let dist = wikiEmbedding?.distance(between: w1, and: w2) ?? 1.0
                 wikiDist = dist
                 if isSimilarQuery(w1, w2, distance: dist) {
                     finalWiki = [w1]
@@ -221,7 +286,7 @@ struct SearchSourcesTool: Tool {
             let filteredWiki = useWikipedia ? (finalWiki.isEmpty ? [userQuery] : finalWiki) : []
 
             #if DEBUG
-            print("┏━ [SearchSourcesTool] @Generable Query Generation ━━━━━━━━━━")
+            print("┏━ [SearchSourcesTool] @Generable Query Generation (wikiSource=\(wikipediaSource.rawValue)) ━━")
             print("┃ User Query: \"\(userQuery)\" (elapsed: \(String(format: "%.3f s", elapsed)))")
             print("┃ Raw Web Queries: \(rawWeb)")
             print("┃ Raw Wiki Queries: \(rawWiki)")

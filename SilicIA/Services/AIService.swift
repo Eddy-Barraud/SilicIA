@@ -174,7 +174,7 @@ class AIService: ObservableObject {
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, subQueries: [String]? = nil, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
@@ -302,6 +302,7 @@ class AIService: ObservableObject {
             query: query,
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor,
+            queries: subQueries,
             language: language
         )
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
@@ -764,16 +765,6 @@ class AIService: ObservableObject {
             @unknown default:
                 return (label, true)
             }
-        }
-        if let genError = error as? LanguageModelSession.GenerationError {
-            let full = String(describing: genError)
-            let caseName = String(full.prefix(while: { $0 != "(" }))
-            let lower = caseName.lowercased()
-            let permanent = lower.contains("guardrail")
-                || lower.contains("unsupportedlanguage")
-                || lower.contains("unsupportedlocale")
-                || lower.contains("unsupportedguide")
-            return ("GenerationError.\(caseName)", !permanent)
         }
         if error is CancellationError {
             return ("cancelled", false)

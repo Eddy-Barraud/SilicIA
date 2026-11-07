@@ -41,6 +41,12 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Source backend used when Wikipedia search is enabled.
+nonisolated enum WikipediaSource: String, CaseIterable, Codable, Sendable {
+    case online = "online"
+    case wikiFast = "wiki_fast"
+}
+
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 4
@@ -66,6 +72,7 @@ struct AppSettings: Codable, Equatable {
     }
     var useDuckDuckGo: Bool = true
     var useWikipedia: Bool = true
+    var wikipediaSource: WikipediaSource = .online
     var language: ModelLanguage = .systemPreferred()
 
     /// Combined per-search result cap exposed for callers that still need a single number
@@ -86,6 +93,7 @@ struct AppSettings: Codable, Equatable {
         case isWebSummariesEnabled
         case useDuckDuckGo
         case useWikipedia
+        case wikipediaSource
         case language
     }
 
@@ -142,6 +150,8 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.useDuckDuckGo
         useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
             ?? Self.defaultSettings.useWikipedia
+        wikipediaSource = try container.decodeIfPresent(WikipediaSource.self, forKey: .wikipediaSource)
+            ?? Self.defaultSettings.wikipediaSource
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
 
@@ -169,6 +179,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
+        try container.encode(wikipediaSource, forKey: .wikipediaSource)
         try container.encode(language, forKey: .language)
     }
 

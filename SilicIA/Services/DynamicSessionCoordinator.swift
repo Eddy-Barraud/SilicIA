@@ -384,6 +384,7 @@ final class DynamicSessionCoordinator {
                     maxWikipediaResults: settings.maxWikipediaResults,
                     useDuckDuckGo: settings.useDuckDuckGo,
                     useWikipedia: settings.useWikipedia,
+                    wikipediaSource: settings.wikipediaSource,
                     contextUtilizationFactor: nil
                 ),
                 responseTokens: effectiveMaxTokens

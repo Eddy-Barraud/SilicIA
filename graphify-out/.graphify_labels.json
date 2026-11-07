@@ -1,7 +1,6 @@
 {
   "0": "RAG Retrieval & Chunking",
   "1": "SwiftData Conversation Persistence",
-  "3": "Dual Web Search & Tests",
   "4": "Chat Interface & Streaming",
   "5": "Web Content Scraping & Errors",
   "6": "Image Analysis & Visual Grounding",
@@ -23,10 +22,8 @@
   "24": "Markdown Rendering & Code Blocks",
   "27": "Model Loading & Inference Engine",
   "35": "RAG Relevance Scoring Engine",
-  "39": "Settings Serialization & Coding Keys",
   "40": "System Date & Time Tool",
   "41": "Tool Call Transcript Recorder",
-  "45": "Wikipedia Query Normalizer",
   "48": "Tool Budgeting & Execution Assembly",
   "49": "RAG & PDF Chunking Tests",
   "51": "Search Relevance Match Score Badge",

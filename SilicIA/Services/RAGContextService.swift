@@ -939,6 +939,38 @@ actor RAGContextService {
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(topCosineCandidates.count)
 
+        // When cross-lingual English Wikipedia / WikiFast chunks are present alongside non-English user queries,
+        // prepare an English NLEmbedding scorer against the English sub-queries so English chunks receive
+        // accurate semantic relevance and matching percentages.
+        let primaryLang = Self.detectQueryLanguage(for: query, fallback: language)
+        let hasEnglishWikiCandidate = primaryLang != .english && topCosineCandidates.contains {
+            $0.chunk.url?.lowercased().contains("en.wikipedia.org") == true
+        }
+        let englishQueryForWiki: String? = {
+            guard hasEnglishWikiCandidate else { return nil }
+            if let queries, queries.count > 1 {
+                if let enQ = queries.dropFirst().first(where: { Self.detectQueryLanguage(for: $0, fallback: .english) == .english }) {
+                    return enQ
+                }
+                return queries.last
+            }
+            return query
+        }()
+        let englishSentenceEmbedding: NLEmbedding? = hasEnglishWikiCandidate
+            ? (embeddingCache[.english] ?? NLEmbedding.sentenceEmbedding(for: .english))
+            : nil
+        let englishWordEmbedding: NLEmbedding? = hasEnglishWikiCandidate
+            ? (wordEmbeddingCache[.english] ?? NLEmbedding.wordEmbedding(for: .english))
+            : nil
+        let englishUnitQueryVector: [Double]? = {
+            guard let enQuery = englishQueryForWiki,
+                  let enEmb = englishSentenceEmbedding,
+                  let rawVec = enEmb.vector(for: enQuery) else { return nil }
+            let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
+            guard norm > 0 else { return nil }
+            return rawVec.map { $0 / norm }
+        }()
+
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
         if let qInfo = queryEmbeddingInfo {
             for candidate in topCosineCandidates {
@@ -956,6 +988,26 @@ actor RAGContextService {
                         wordEmbedding: wordEmbedding
                     )
                     semanticScore = semanticScore * 0.75 + wordScore * 0.25
+                }
+                if candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true,
+                   let enQuery = englishQueryForWiki,
+                   let enEmb = englishSentenceEmbedding {
+                    var enSemantic = nlEmbeddingRelevanceScore(
+                        chunk: candidate.chunk,
+                        query: enQuery,
+                        unitQueryVector: englishUnitQueryVector,
+                        embedding: enEmb,
+                        options: options
+                    )
+                    if let enWordEmb = englishWordEmbedding {
+                        let enWord = wordEmbeddingSemanticScore(
+                            chunk: candidate.chunk,
+                            query: enQuery,
+                            wordEmbedding: enWordEmb
+                        )
+                        enSemantic = enSemantic * 0.75 + enWord * 0.25
+                    }
+                    semanticScore = max(semanticScore, enSemantic)
                 }
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
@@ -976,6 +1028,26 @@ actor RAGContextService {
                         wordEmbedding: wordEmbedding
                     )
                     semanticScore = semanticScore * 0.75 + wordScore * 0.25
+                }
+                if candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true,
+                   let enQuery = englishQueryForWiki,
+                   let enEmb = englishSentenceEmbedding {
+                    var enSemantic = nlEmbeddingRelevanceScore(
+                        chunk: candidate.chunk,
+                        query: enQuery,
+                        unitQueryVector: englishUnitQueryVector,
+                        embedding: enEmb,
+                        options: options
+                    )
+                    if let enWordEmb = englishWordEmbedding {
+                        let enWord = wordEmbeddingSemanticScore(
+                            chunk: candidate.chunk,
+                            query: enQuery,
+                            wordEmbedding: enWordEmb
+                        )
+                        enSemantic = enSemantic * 0.75 + enWord * 0.25
+                    }
+                    semanticScore = max(semanticScore, enSemantic)
                 }
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))

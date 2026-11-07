@@ -364,6 +364,22 @@ struct ChatView: View {
                 }
                 if settings.useWikipedia {
                     HStack {
+                        Text(L.t("chat.settings.wikiSource", language: settings.language))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Picker("", selection: $settingsStore.settings.wikipediaSource) {
+                            Text(L.t("chat.settings.wikiSource.online", language: settings.language))
+                                .tag(WikipediaSource.online)
+                            Text(L.t("chat.settings.wikiSource.wikiFast", language: settings.language))
+                                .tag(WikipediaSource.wikiFast)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 200)
+                    }
+
+                    HStack {
                         Text(L.t("chat.settings.maxWiki", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -858,7 +874,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                wikipediaSource: settings.wikipediaSource
             )
         }
     }
@@ -926,7 +943,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                wikipediaSource: settings.wikipediaSource
             )
         }
     }

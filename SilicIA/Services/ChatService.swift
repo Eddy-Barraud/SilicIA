@@ -102,7 +102,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -256,6 +257,7 @@ final class ChatService: ObservableObject {
                     maxWikipediaResults: effectiveMaxWikiResults,
                     useDuckDuckGo: useDuckDuckGo,
                     useWikipedia: useWikipedia,
+                    wikipediaSource: wikipediaSource,
                     contextUtilizationFactor: nil
                 ),
                 responseTokens: effectiveMaxOutputTokens
@@ -650,7 +652,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async {
         guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
             return
@@ -684,7 +687,8 @@ final class ChatService: ObservableObject {
             maxResponseTokens: maxResponseTokens,
             maxContextTokens: maxContextTokens,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            wikipediaSource: wikipediaSource
         )
     }
 

@@ -447,7 +447,7 @@ struct SearchView: View {
             // Action row: Chat left-aligned, send arrow right.
             HStack(spacing: 8) {
                 Button(action: handleChatButtonTap) {
-                    Label(chatButtonTitle, systemImage: "bubble.left.and.bubble.right")
+                    Label(chatButtonTitle, systemImage: "network.slash")
                         .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
@@ -858,6 +858,22 @@ struct SearchView: View {
                 }
                 if settings.useWikipedia {
                     HStack {
+                        Text(L.t("search.settings.wikiSource", language: settings.language))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Picker("", selection: $settingsStore.settings.wikipediaSource) {
+                            Text(L.t("search.settings.wikiSource.online", language: settings.language))
+                                .tag(WikipediaSource.online)
+                            Text(L.t("search.settings.wikiSource.wikiFast", language: settings.language))
+                                .tag(WikipediaSource.wikiFast)
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 200)
+                    }
+
+                    HStack {
                         Text(L.t("search.settings.maxWiki", language: settings.language))
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -1066,7 +1082,18 @@ struct SearchView: View {
 
         Task {
             var preExtractedPlainText: String? = nil
-            if let targetURL = URL(string: result.url) {
+            if let wikiFastTitle = result.wikiFastTitle {
+                // Fast Wiki mode: fetch Markdown directly from /articles/{page_title}
+                // (falling back to already retrieved Markdown from /top_n_articles) and render via MarkdownContentView.
+                let fetchedArticle = try? await searchService.fetchWikiFastArticle(title: wikiFastTitle)
+                guard activeWebPageSummaryRequestID == requestID else { return }
+                let articleMarkdown = (fetchedArticle?.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? fetchedArticle!.text
+                    : (result.retrievedContent ?? result.snippet)
+                webPageReaderHTML = ""
+                webPageMarkdownText = articleMarkdown
+                preExtractedPlainText = articleMarkdown
+            } else if let targetURL = URL(string: result.url) {
                 if let readerContent = try? await WebScrapingService().extractReaderHTML(from: targetURL) {
                     guard activeWebPageSummaryRequestID == requestID else { return }
                     webPageReaderHTML = readerContent.styledHTML
@@ -1088,7 +1115,7 @@ struct SearchView: View {
             guard activeWebPageSummaryRequestID == requestID else { return }
             isGeneratingWebPageSummary = false
 
-            if webPageReaderHTML.isEmpty && !markdown.isEmpty {
+            if webPageReaderHTML.isEmpty && webPageMarkdownText.isEmpty && !markdown.isEmpty {
                 webPageMarkdownText = markdown
             }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1299,6 +1326,7 @@ struct SearchView: View {
         Task {
             do {
                 let fetchedResults: [SearchResult]
+                var generatedSubQueries: [String]? = nil
                 if !noAIOnly && isModelAvailable {
                     let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
                     let generated = await SearchSourcesTool.generateQueries(
@@ -1306,8 +1334,14 @@ struct SearchView: View {
                         language: settings.language,
                         maxResponseTokens: settings.maxResponseTokens,
                         useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
+                        useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource
                     )
+                    var subQs = [trimmedQuery]
+                    for q in generated.webQueries + generated.wikiQueries where !subQs.contains(q) {
+                        subQs.append(q)
+                    }
+                    generatedSubQueries = subQs
 
                     // Re-prewarm the active searchSummary session on the Neural Engine / GPU
                     // concurrently while DuckDuckGo and Wikipedia network requests are in flight.
@@ -1326,6 +1360,7 @@ struct SearchView: View {
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource,
                         userQuery: trimmedQuery
                     )
                 } else {
@@ -1335,7 +1370,8 @@ struct SearchView: View {
                         maxWikipediaResults: settings.maxWikipediaResults,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
+                        useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource
                     )
                 }
 
@@ -1359,7 +1395,8 @@ struct SearchView: View {
                     await generateSummary(
                         maxScrapingResults: targetScrapeResults,
                         maxScrapingChars: targetScrapeChars,
-                        summaryResults: fetchedResults
+                        summaryResults: fetchedResults,
+                        subQueries: generatedSubQueries
                     )
                 } else {
                     searchService.isSearching = false
@@ -1401,7 +1438,7 @@ struct SearchView: View {
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, subQueries: [String]? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
@@ -1420,6 +1457,7 @@ struct SearchView: View {
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
+            subQueries: subQueries,
             generateAnswer: isModelAvailable,
             onSummaryPartialUpdate: { _ in
                 if summaryElapsedSeconds == nil, let start = summaryStartTime {
@@ -1575,18 +1613,8 @@ struct SearchView: View {
     }
 
     private func loadDroppedFileURL(from provider: NSItemProvider) {
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            let fileURL: URL?
-            if let data = item as? Data {
-                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-            } else if let url = item as? URL {
-                fileURL = url
-            } else if let nsURL = item as? NSURL {
-                fileURL = nsURL as URL
-            } else {
-                fileURL = nil
-            }
-            guard let fileURL else { return }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let fileURL = url else { return }
             let ext = fileURL.pathExtension.lowercased()
             if ext == "pdf" {
                 guard let persisted = DroppedPDFStore.persist(fileURL) else { return }

@@ -309,11 +309,12 @@ class WebSearchService: ObservableObject {
         maxWikipediaResults: Int = defaultWikipediaLimit,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
-        debugLog("single-query search start: query=\(query), ddgLimit=\(maxDuckDuckGoResults), wikiLimit=\(maxWikipediaResults), language=\(language.rawValue), ddg=\(useDuckDuckGo), wiki=\(useWikipedia)")
+        debugLog("single-query search start: query=\(query), ddgLimit=\(maxDuckDuckGoResults), wikiLimit=\(maxWikipediaResults), language=\(language.rawValue), ddg=\(useDuckDuckGo), wiki=\(useWikipedia), wikiSource=\(wikipediaSource.rawValue)")
 
         isSearching = true
         defer { isSearching = false }
@@ -324,7 +325,8 @@ class WebSearchService: ObservableObject {
             maxWikipediaResults: maxWikipediaResults,
             language: language,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            wikipediaSource: wikipediaSource
         )
 
         debugLog("single-query search done with query: \"\(query)\" and result count=\(results.count)")
@@ -340,7 +342,8 @@ class WebSearchService: ObservableObject {
         mergedLimit: Int = 10,
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async throws -> [SearchResult] {
         let normalizedQueries = queries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -366,7 +369,7 @@ class WebSearchService: ObservableObject {
         }
 
         debugLog(
-            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), ddgPerQuery=\(maxDuckDuckGoResultsPerQuery), wikiPerQuery=\(maxWikipediaResultsPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
+            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), ddgPerQuery=\(maxDuckDuckGoResultsPerQuery), wikiPerQuery=\(maxWikipediaResultsPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue), wikiSource=\(wikipediaSource.rawValue)"
         )
 
         var perQueryResults: [[SearchResult]] = []
@@ -381,7 +384,8 @@ class WebSearchService: ObservableObject {
                     maxWikipediaResults: maxWikipediaResultsPerQuery,
                     language: language,
                     useDuckDuckGo: useDuckDuckGo,
-                    useWikipedia: useWikipedia
+                    useWikipedia: useWikipedia,
+                    wikipediaSource: wikipediaSource
                 )
                 perQueryResults.append(results)
                 debugLog("query ok: \(query) => \(results.count) results")
@@ -416,6 +420,7 @@ class WebSearchService: ObservableObject {
         language: ModelLanguage = .english,
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online,
         userQuery: String? = nil
     ) async throws -> [SearchResult] {
         let cleanWeb = useDuckDuckGo ? webQueries
@@ -438,7 +443,7 @@ class WebSearchService: ObservableObject {
         let wikiLimitPerQuery = max(1, maxWikipediaResults / max(1, cleanWiki.count))
 
         debugLog(
-            "multi-source search start: webQueries=\(cleanWeb), wikiQueries=\(cleanWiki), webLimitPerQuery=\(webLimitPerQuery), wikiLimitPerQuery=\(wikiLimitPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
+            "multi-source search start: webQueries=\(cleanWeb), wikiQueries=\(cleanWiki), webLimitPerQuery=\(webLimitPerQuery), wikiLimitPerQuery=\(wikiLimitPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue), wikiSource=\(wikipediaSource.rawValue)"
         )
 
         var perQueryResults: [[SearchResult]] = []
@@ -467,7 +472,8 @@ class WebSearchService: ObservableObject {
                             query: query,
                             language: language,
                             limit: wikiLimitPerQuery,
-                            userQuery: userQuery
+                            userQuery: userQuery,
+                            wikipediaSource: wikipediaSource
                         )
                         return (query, true, .success(res))
                     } catch {
@@ -505,7 +511,8 @@ class WebSearchService: ObservableObject {
         maxWikipediaResults: Int,
         language: ModelLanguage,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
         guard useDuckDuckGo || useWikipedia else { return [] }
@@ -532,7 +539,8 @@ class WebSearchService: ObservableObject {
                     query: query,
                     language: language,
                     limit: maxWikipediaResults,
-                    userQuery: query
+                    userQuery: query,
+                    wikipediaSource: wikipediaSource
                 )
                 return (results, nil)
             } catch {
@@ -643,19 +651,116 @@ class WebSearchService: ObservableObject {
         )
     }
 
-    /// Executes a search on Wikipedia using the REST API and converts article HTML to Markdown.
+    /// Executes a search on Wikipedia using the REST API or WikiFast API and converts article content to Markdown.
     func searchWikipedia(
         query: String,
         language: ModelLanguage = .english,
         limit: Int = defaultWikipediaLimit,
-        userQuery: String? = nil
+        userQuery: String? = nil,
+        wikipediaSource: WikipediaSource = .online
     ) async throws -> [SearchResult] {
         try await executeWikipediaSearch(
             query: query,
             language: language,
             limit: limit,
-            userQuery: userQuery
+            userQuery: userQuery,
+            wikipediaSource: wikipediaSource
         )
+    }
+
+    nonisolated static let wikiFastBaseURL = "https://wikifast.trevalim.fr"
+
+    /// Builds the canonical online English Wikipedia URL for a `wiki_fast` article title.
+    nonisolated static func onlineWikipediaURL(forTitle title: String) -> String {
+        let key = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: " ", with: "_")
+        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: wikipediaPagePathAllowed) ?? key
+        return "https://en.wikipedia.org/wiki/\(encodedKey)"
+    }
+
+    /// Extracts the first non-heading paragraph from a Markdown string to serve as a search card snippet.
+    nonisolated static func extractLeadSnippet(fromMarkdown text: String, fallback: String) -> String {
+        let paragraphs = text.components(separatedBy: "\n\n")
+        for paragraph in paragraphs {
+            let trimmed = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            return trimmed
+        }
+        return fallback
+    }
+
+    /// Queries the `wiki_fast` API (`GET https://wikifast.trevalim.fr/top_n_articles`) and maps the
+    /// returned Markdown articles into `SearchResult` items without touching DuckDuckGo.
+    func fetchWikiFastTopArticles(
+        prompt: String,
+        limit: Int,
+        percentile: Double = 0.5,
+        numResults: Int = 20
+    ) async throws -> [SearchResult] {
+        let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPrompt.isEmpty else { return [] }
+
+        let targetLimit = max(1, limit)
+        guard var components = URLComponents(string: "\(Self.wikiFastBaseURL)/top_n_articles") else {
+            throw SearchError.invalidURL
+        }
+        components.queryItems = [
+            URLQueryItem(name: "prompt", value: trimmedPrompt),
+            URLQueryItem(name: "percentile", value: String(percentile)),
+            URLQueryItem(name: "num_results", value: String(numResults)),
+            URLQueryItem(name: "num_top_articles", value: String(targetLimit))
+        ]
+        guard let url = components.url else {
+            throw SearchError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw SearchError.invalidResponse
+        }
+
+        let articles = try Self.jsonDecoder.decode([WikiFastArticle].self, from: data)
+        return articles.prefix(targetLimit).compactMap { article -> SearchResult? in
+            let cleanTitle = article.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cleanText = article.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleanTitle.isEmpty, !cleanText.isEmpty else { return nil }
+            let onlineURL = Self.onlineWikipediaURL(forTitle: cleanTitle)
+            let snippet = Self.extractLeadSnippet(fromMarkdown: cleanText, fallback: cleanTitle)
+            return SearchResult(
+                title: cleanTitle,
+                url: onlineURL,
+                snippet: snippet,
+                retrievedContent: cleanText,
+                snippetSimilarity: nil,
+                isBelowRelevanceThreshold: false,
+                wikiFastTitle: cleanTitle
+            )
+        }
+    }
+
+    /// Fetches a single Markdown article from the `wiki_fast` API (`GET https://wikifast.trevalim.fr/articles/{page_title}`).
+    func fetchWikiFastArticle(title: String) async throws -> WikiFastArticle {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty,
+              let encodedTitle = trimmedTitle.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed),
+              let url = URL(string: "\(Self.wikiFastBaseURL)/articles/\(encodedTitle)") else {
+            throw SearchError.invalidURL
+        }
+
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await session.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw SearchError.invalidResponse
+        }
+
+        return try Self.jsonDecoder.decode(WikiFastArticle.self, from: data)
     }
 
     /// Extracts the language and article key from a Wikipedia URL, filtering out non-article namespaces and URL fragments.
@@ -732,12 +837,20 @@ class WebSearchService: ObservableObject {
         query: String,
         language: ModelLanguage,
         limit: Int,
-        userQuery: String? = nil
+        userQuery: String? = nil,
+        wikipediaSource: WikipediaSource = .online
     ) async throws -> [SearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
 
         let targetLimit = max(1, limit)
+        if wikipediaSource == .wikiFast {
+            debugLog("WikiFast search start: prompt=\(trimmedQuery), limit=\(targetLimit)")
+            let results = try await fetchWikiFastTopArticles(prompt: trimmedQuery, limit: targetLimit)
+            debugLog("WikiFast search completed: found \(results.count) article(s)")
+            return results
+        }
+
         let ddgWikiQuery = "site:wikipedia.org \(trimmedQuery)"
         var articleCandidates: [(language: ModelLanguage, key: String, ddgTitle: String, ddgSnippet: String, snippetSimilarity: Double?, isBelowThreshold: Bool)] = []
         var seenKeys = Set<String>()
@@ -1139,6 +1252,12 @@ class WebSearchService: ObservableObject {
         case .english: return "en.wikipedia.org"
         }
     }
+}
+
+/// Represents a curated Markdown Wikipedia article returned by `https://wikifast.trevalim.fr/`.
+nonisolated struct WikiFastArticle: Codable, Sendable, Equatable {
+    let title: String
+    let text: String
 }
 
 private struct WikipediaWithHTMLResponse: Decodable {

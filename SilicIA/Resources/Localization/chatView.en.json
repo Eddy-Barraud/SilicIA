@@ -25,6 +25,9 @@
   "chat.settings.searchSources": "Search sources",
   "chat.settings.maxDDG": "Max results (DDG)",
   "chat.settings.maxWiki": "Max results (Wikipedia)",
+  "chat.settings.wikiSource": "Wikipedia source",
+  "chat.settings.wikiSource.online": "Online",
+  "chat.settings.wikiSource.wikiFast": "Wiki Fast",
   "chat.settings.modelLanguage": "Model Language",
   "chat.settings.offlineMode": "Offline mode: web sources disabled."
 }

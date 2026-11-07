@@ -441,5 +441,78 @@ final class TokenBudgetingTests: XCTestCase {
         )
         XCTAssertFalse(standardResults.webQueries.isEmpty)
         XCTAssertFalse(standardResults.wikiQueries.isEmpty)
+
+        // WikiFast mode (English mandatory for wikiQueries)
+        let wikiFastResults = await SearchSourcesTool.generateQueries(
+            for: "interpolation de Lagrange",
+            language: .french,
+            maxResponseTokens: 250,
+            useDuckDuckGo: true,
+            useWikipedia: true,
+            wikipediaSource: .wikiFast
+        )
+        XCTAssertFalse(wikiFastResults.webQueries.isEmpty)
+        XCTAssertFalse(wikiFastResults.wikiQueries.isEmpty)
+    }
+
+    func testWikipediaSourceSettingsPersistenceAndBackwardCompatibility() throws {
+        var settings = AppSettings()
+        XCTAssertEqual(settings.wikipediaSource, .online)
+
+        settings.wikipediaSource = .wikiFast
+        let encoded = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
+        XCTAssertEqual(decoded.wikipediaSource, .wikiFast)
+
+        // Backward compatibility: JSON payload without wikipediaSource must default to .online
+        let legacyJSON = """
+        {
+            "maxDuckDuckGoResults": 5,
+            "maxWikipediaResults": 3,
+            "totalTokensBudget": 2500,
+            "maxResponseTokens": 500,
+            "temperature": 0.7,
+            "maxContextTokens": 2000,
+            "useDuckDuckGo": true,
+            "useWikipedia": true,
+            "language": "French"
+        }
+        """.data(using: .utf8)!
+        let legacyDecoded = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
+        XCTAssertEqual(legacyDecoded.wikipediaSource, .online)
+    }
+
+    func testWikiFastArticleDecodingAndURLFormatting() throws {
+        let topNJSON = """
+        [
+            {
+                "title": "Hermite interpolation",
+                "text": "# Hermite interpolation\\n\\nIn numerical analysis, Hermite interpolation is a method of interpolating data points."
+            },
+            {
+                "title": "Lagrange polynomial",
+                "text": "# Lagrange polynomial\\n\\nIn numerical analysis, the Lagrange interpolating polynomial is the unique polynomial of lowest degree."
+            }
+        ]
+        """.data(using: .utf8)!
+
+        let articles = try JSONDecoder().decode([WikiFastArticle].self, from: topNJSON)
+        XCTAssertEqual(articles.count, 2)
+        XCTAssertEqual(articles[0].title, "Hermite interpolation")
+
+        let url = WebSearchService.onlineWikipediaURL(forTitle: articles[0].title)
+        XCTAssertEqual(url, "https://en.wikipedia.org/wiki/Hermite_interpolation")
+
+        let snippet = WebSearchService.extractLeadSnippet(fromMarkdown: articles[0].text, fallback: articles[0].title)
+        XCTAssertEqual(snippet, "In numerical analysis, Hermite interpolation is a method of interpolating data points.")
+
+        let singleJSON = """
+        {
+            "title": "Hermite interpolation",
+            "text": "# Hermite interpolation\\n\\nIn numerical analysis, Hermite interpolation is a method of interpolating data points."
+        }
+        """.data(using: .utf8)!
+        let singleArticle = try JSONDecoder().decode(WikiFastArticle.self, from: singleJSON)
+        XCTAssertEqual(singleArticle, articles[0])
     }
 }

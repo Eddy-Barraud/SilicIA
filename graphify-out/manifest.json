@@ -84,10 +84,10 @@
     "semantic_hash": ""
   },
   "SilicIA/Models/AppSettings.swift": {
-    "mtime": 1792678232.1233816,
-    "seen": 1793266945.461527,
-    "ast_hash": "8116368e180ef9a9c350ec31c618cb4e",
-    "semantic_hash": "8116368e180ef9a9c350ec31c618cb4e"
+    "mtime": 1794080067.405773,
+    "seen": 1794080717.792901,
+    "ast_hash": "1c50ec65d6d78097ef4adb81b285dfa3",
+    "semantic_hash": ""
   },
   "SilicIA/Models/AppSettingsStore.swift": {
     "mtime": 1793724455.833637,
@@ -108,28 +108,28 @@
     "semantic_hash": "650c77763f13863d3f7da73f3e99fa43"
   },
   "SilicIA/Models/SearchResult.swift": {
-    "mtime": 1792840663.9428368,
-    "seen": 1793266945.4615302,
-    "ast_hash": "c51f4e673c43181e9f03d630bc4cbc1e",
-    "semantic_hash": "c51f4e673c43181e9f03d630bc4cbc1e"
+    "mtime": 1794080068.7018077,
+    "seen": 1794080717.7929049,
+    "ast_hash": "3eafd90a259a51e1033f66023c52bb08",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/chatView.en.json": {
-    "mtime": 1792343839.9506145,
-    "seen": 1793266945.4615302,
-    "ast_hash": "b9f8d52682fce438e5a6e1dd4780fc68",
-    "semantic_hash": "b9f8d52682fce438e5a6e1dd4780fc68"
+    "mtime": 1794080109.3949506,
+    "seen": 1794080717.792906,
+    "ast_hash": "b0ed8184e755a0bc664095ef1e94cb60",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/chatView.es.json": {
-    "mtime": 1792343839.9507186,
-    "seen": 1793266945.461531,
-    "ast_hash": "1b881f7829e88559dbaf8e9cf0d1e68a",
-    "semantic_hash": "1b881f7829e88559dbaf8e9cf0d1e68a"
+    "mtime": 1794080110.5315323,
+    "seen": 1794080717.792907,
+    "ast_hash": "f356234c34efb58e770e35bef6d50c13",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/chatView.fr.json": {
-    "mtime": 1792343839.9508247,
-    "seen": 1793266945.4615319,
-    "ast_hash": "1a733c195e412f778e74285be08522b1",
-    "semantic_hash": "1a733c195e412f778e74285be08522b1"
+    "mtime": 1794080108.2241228,
+    "seen": 1794080717.792907,
+    "ast_hash": "0632459fb6b8764afb04b3a98fc83207",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/common.en.json": {
     "mtime": 1792509987.4477255,
@@ -186,33 +186,33 @@
     "semantic_hash": "d2c8b78a5191cf8532f3f46a28c4f4d9"
   },
   "SilicIA/Resources/Localization/searchView.en.json": {
-    "mtime": 1792520007.0161772,
-    "seen": 1793266945.461538,
-    "ast_hash": "fda890bc657fc67144ffc7e2dba5a0ef",
-    "semantic_hash": "fda890bc657fc67144ffc7e2dba5a0ef"
+    "mtime": 1794080106.4881613,
+    "seen": 1794080717.7929149,
+    "ast_hash": "415245f0cfefc599eab01d73ffa67b9d",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/searchView.es.json": {
-    "mtime": 1792520014.0218935,
-    "seen": 1793266945.461538,
-    "ast_hash": "5ca0a58d3f9031c1e007dd866064297d",
-    "semantic_hash": "5ca0a58d3f9031c1e007dd866064297d"
+    "mtime": 1794080107.4169278,
+    "seen": 1794080717.792916,
+    "ast_hash": "f3cf96d56ccab1fa5a95af2ff375bf74",
+    "semantic_hash": ""
   },
   "SilicIA/Resources/Localization/searchView.fr.json": {
-    "mtime": 1792520018.938589,
-    "seen": 1793266945.461539,
-    "ast_hash": "c687ddfc5af92f6685b8b302e20ee209",
-    "semantic_hash": "c687ddfc5af92f6685b8b302e20ee209"
+    "mtime": 1794080105.1396453,
+    "seen": 1794080717.792917,
+    "ast_hash": "7c48c8e3e7bc79f617a5350ed8c7161d",
+    "semantic_hash": ""
   },
   "SilicIA/Services/AIService.swift": {
-    "mtime": 1793739319.865232,
-    "seen": 1793739500.262002,
-    "ast_hash": "1bb0098b3160d7e9c76a4e67736f4796",
+    "mtime": 1794080472.5222208,
+    "seen": 1794080717.792917,
+    "ast_hash": "8f2c8e355f226faaf63e733c7eb14071",
     "semantic_hash": ""
   },
   "SilicIA/Services/ChatService.swift": {
-    "mtime": 1793725410.8887377,
-    "seen": 1793725677.644147,
-    "ast_hash": "aeb1f94d07189ff8b709ba053328a07e",
+    "mtime": 1794080405.2589562,
+    "seen": 1794080717.792918,
+    "ast_hash": "81fcfda555c7cd866d5ddb36116abc6e",
     "semantic_hash": ""
   },
   "SilicIA/Services/DebugRAGStorage.swift": {
@@ -300,10 +300,10 @@
     "semantic_hash": "08154300d48ded3fd4e0043acc76caea"
   },
   "SilicIA/Services/RAGContextService.swift": {
-    "mtime": 1792681426.979062,
-    "seen": 1793266945.461549,
-    "ast_hash": "aa3d98742cc7c2588728cc5b4048cbb7",
-    "semantic_hash": "aa3d98742cc7c2588728cc5b4048cbb7"
+    "mtime": 1794080470.4535859,
+    "seen": 1794080717.792931,
+    "ast_hash": "feb4e0437ea2fc226ee94956e7388f91",
+    "semantic_hash": ""
   },
   "SilicIA/Services/Sanitizer.swift": {
     "mtime": 1792143696.2132218,
@@ -336,16 +336,16 @@
     "semantic_hash": "52f5c670ec19166bce7e668c5f9ab2d3"
   },
   "SilicIA/Services/Tools/SearchSourcesTool.swift": {
-    "mtime": 1793739736.286793,
-    "seen": 1793739843.0160189,
-    "ast_hash": "6141fbf2ec3c1956dd517922d382eb82",
+    "mtime": 1794080684.9384236,
+    "seen": 1794080717.792935,
+    "ast_hash": "f4aedc7ddc9f01bd198ae1d9255a0d64",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/SourceFunnel.swift": {
-    "mtime": 1792840868.0827272,
-    "seen": 1793266945.4615529,
-    "ast_hash": "3b78ba57e1b175bc804032301c409932",
-    "semantic_hash": "3b78ba57e1b175bc804032301c409932"
+    "mtime": 1794080367.2008526,
+    "seen": 1794080717.7929358,
+    "ast_hash": "657db4707889b1b0e8f06fec6f2f7909",
+    "semantic_hash": ""
   },
   "SilicIA/Services/Tools/ToolCallGovernor.swift": {
     "mtime": 1792353975.116312,
@@ -354,10 +354,10 @@
     "semantic_hash": "596caf6b0a21b4ef0c44a8544e52547b"
   },
   "SilicIA/Services/Tools/ToolKit.swift": {
-    "mtime": 1792511319.1630192,
-    "seen": 1793266945.4615538,
-    "ast_hash": "7474292fbb4016f08e12e9174b744826",
-    "semantic_hash": "7474292fbb4016f08e12e9174b744826"
+    "mtime": 1794080369.2664268,
+    "seen": 1794080717.792937,
+    "ast_hash": "dc50e974e85c33f72db34bba326c155b",
+    "semantic_hash": ""
   },
   "SilicIA/Services/Tools/ToolTranscriptRecorder.swift": {
     "mtime": 1792143696.2137747,
@@ -372,10 +372,10 @@
     "semantic_hash": ""
   },
   "SilicIA/Services/WebSearchService.swift": {
-    "mtime": 1792844003.3129544,
-    "seen": 1793266945.461556,
-    "ast_hash": "51ce1683489863d01141e84bc142b11a",
-    "semantic_hash": "51ce1683489863d01141e84bc142b11a"
+    "mtime": 1794080341.4684482,
+    "seen": 1794080717.7929401,
+    "ast_hash": "4b8770951f3095326c38d8fed3e04cbb",
+    "semantic_hash": ""
   },
   "SilicIA/Services/WikipediaQueryCleaner.swift": {
     "mtime": 1792143696.2141044,
@@ -402,10 +402,10 @@
     "semantic_hash": "f2860ff33971679e9f93d6c4ff1ee73f"
   },
   "SilicIA/Views/ChatView.swift": {
-    "mtime": 1792680661.8012164,
-    "seen": 1793266945.461559,
-    "ast_hash": "98f728cef27258f653844e2683a39c69",
-    "semantic_hash": "98f728cef27258f653844e2683a39c69"
+    "mtime": 1794080568.337288,
+    "seen": 1794080717.792943,
+    "ast_hash": "53e4833130554199f42313d59ca3c9a3",
+    "semantic_hash": ""
   },
   "SilicIA/Views/ConversationsListView.swift": {
     "mtime": 1792143696.2146957,
@@ -450,9 +450,9 @@
     "semantic_hash": "9e1dba20eec0deaea5629f94981b0675"
   },
   "SilicIA/Views/SearchView.swift": {
-    "mtime": 1793729401.8241525,
-    "seen": 1793729485.906434,
-    "ast_hash": "82cca56f51ab9212058130d4bbc41d19",
+    "mtime": 1794080565.6335094,
+    "seen": 1794080717.79295,
+    "ast_hash": "dabc206d62066405d0a78a4377753fab",
     "semantic_hash": ""
   },
   "SilicIA/Views/SourceToggleButtons.swift": {
@@ -570,9 +570,9 @@
     "semantic_hash": "3686a7c0d522e44a42294e854b55917b"
   },
   "SilicIATests/TokenBudgetingTests.swift": {
-    "mtime": 1793739807.9719908,
-    "seen": 1793739843.016053,
-    "ast_hash": "3a43a1d0e6bdeb766668f7ca06180541",
+    "mtime": 1794080597.2648418,
+    "seen": 1794080717.7929652,
+    "ast_hash": "c303de57928d9c739bed4e51f2bb9bfc",
     "semantic_hash": ""
   },
   "SilicIATests/ToolCallGovernorTests.swift": {
@@ -768,9 +768,9 @@
     "semantic_hash": "6d77aef166720d2639a76af873d4db71"
   },
   "SilicIA/Services/DynamicSessionCoordinator.swift": {
-    "mtime": 1793729348.382108,
-    "seen": 1793729485.906409,
-    "ast_hash": "e970399a1f81a1c3a629ffbbeb22c755",
+    "mtime": 1794080406.519321,
+    "seen": 1794080717.792922,
+    "ast_hash": "2ad632f2b9a0fe5aef6d777df69e1465",
     "semantic_hash": ""
   },
   ".github/ISSUE_TEMPLATE/bug_report.md": {
