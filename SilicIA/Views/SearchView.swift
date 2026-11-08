@@ -275,7 +275,7 @@ struct SearchView: View {
         }
         .background(Color.platformWindowBackground)
         .contentShape(Rectangle())
-        .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+        .onDrop(of: [.pdf, .plainText, .text, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers)
         }
         // Mirror the AIService's tool-call accumulator into the local
@@ -1575,12 +1575,18 @@ struct SearchView: View {
 
     // MARK: - Drag-and-drop
 
-    /// Persists dropped PDFs and images, then hands them to the host view
+    private static let textFileExtensions: Set<String> = [
+        "txt", "md", "markdown", "text"
+    ]
+
+    /// Persists dropped documents (PDF, Markdown, text) and images, then hands them to the host view
     /// (typically `ContentView`) via `onAttachmentsDropped`. That callback is
     /// responsible for switching to the Chat tab and seeding shared inputs.
     private func handleAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {
         let accepted = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.text.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
@@ -1589,6 +1595,11 @@ struct SearchView: View {
         for provider in accepted {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                 loadDroppedPDF(from: provider)
+                continue
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                || provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
+                loadDroppedTextFile(from: provider)
                 continue
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
@@ -1605,6 +1616,21 @@ struct SearchView: View {
         provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
             guard let url,
                   let persisted = DroppedPDFStore.persist(url, preferredFileName: provider.suggestedName) else {
+                return
+            }
+            Task { @MainActor in
+                onAttachmentsDropped?([persisted], [])
+            }
+        }
+    }
+
+    private func loadDroppedTextFile(from provider: NSItemProvider) {
+        let typeIdentifier = provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            ? UTType.plainText.identifier
+            : UTType.text.identifier
+        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+            guard let url,
+                  let persisted = DroppedTextFileStore.persist(url, preferredFileName: provider.suggestedName) else {
                 return
             }
             Task { @MainActor in
@@ -1634,6 +1660,11 @@ struct SearchView: View {
             let ext = fileURL.pathExtension.lowercased()
             if ext == "pdf" {
                 guard let persisted = DroppedPDFStore.persist(fileURL) else { return }
+                Task { @MainActor in
+                    onAttachmentsDropped?([persisted], [])
+                }
+            } else if Self.textFileExtensions.contains(ext) {
+                guard let persisted = DroppedTextFileStore.persist(fileURL) else { return }
                 Task { @MainActor in
                     onAttachmentsDropped?([persisted], [])
                 }

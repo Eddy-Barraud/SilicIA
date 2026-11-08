@@ -311,6 +311,42 @@ nonisolated enum TokenBudgeting {
         outputProfile(forResponseTokens: tokens).reasoningLevel
     }
 
+    /// Token reservation allocated to internal reasoning (chain-of-thought) by reasoning level.
+    static func reasoningTokens(for level: ContextOptions.ReasoningLevel) -> Int {
+        switch level {
+        case .light: return 200
+        case .moderate: return 400
+        case .deep: return 800
+        @unknown default: return 400
+        }
+    }
+
+    /// Hard cap on total combined tokens (input context + output response) when using PDF as source.
+    static let maxTotalTokensLimit = 4000
+
+    /// Calculates the maximum input context token budget when PDF is a source,
+    /// filling as much of the 4000-token total window as possible after accounting
+    /// for expected output tokens, reasoning level reservation, and instruction/prompt overhead.
+    static func maxPDFInputContextTokens(
+        maxOutputTokens: Int,
+        reasoningLevel: ContextOptions.ReasoningLevel = .moderate,
+        instructionTokens: Int = instructionTokens,
+        promptOverheadTokens: Int = promptOverheadTokens
+    ) -> Int {
+        let reasoning = reasoningTokens(for: reasoningLevel)
+        let effectiveOutput = clampedToolResponseTokens(requestedMaxTokens: maxOutputTokens)
+        let overhead = instructionTokens + promptOverheadTokens + reasoning + effectiveOutput
+        return max(minContextTokens, maxTotalTokensLimit - overhead)
+    }
+
+    /// Returns `maxPDFInputContextTokens` converted into approximate characters.
+    static func maxPDFInputContextCharacters(
+        maxOutputTokens: Int,
+        reasoningLevel: ContextOptions.ReasoningLevel = .moderate
+    ) -> Int {
+        maxPDFInputContextTokens(maxOutputTokens: maxOutputTokens, reasoningLevel: reasoningLevel) * avgCharsPerToken
+    }
+
     /// Smallest tool reply we'll allow. Below this a tool call returns so
     /// little it's not worth the round-trip (a single search result with
     /// no room for surrounding context).

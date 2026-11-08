@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import FoundationModels
 import NaturalLanguage
 import Accelerate
 
@@ -1090,6 +1091,8 @@ actor RAGContextService {
     /// - Parameter webQueries: Optional web-targeted search queries from @Generable.
     /// - Parameter wikiQueries: Optional Wikipedia-targeted search queries from @Generable (English).
     /// - Parameter language: Optional fallback language if the query language cannot be determined.
+    /// - Parameter isPDFSource: When true, bypasses the conservative profile cap and maximizes context for PDF page summaries.
+    /// - Parameter reasoningLevel: Optional reasoning level to deduct reasoning tokens from the 4000-token total ceiling.
     func selectContext(
         chunks: [RAGChunk],
         query: String,
@@ -1100,7 +1103,9 @@ actor RAGContextService {
         webQueries: [String]? = nil,
         wikiQueries: [String]? = nil,
         language: ModelLanguage? = nil,
-        options: RAGSelectionOptions = .default
+        options: RAGSelectionOptions = .default,
+        isPDFSource: Bool = false,
+        reasoningLevel: ContextOptions.ReasoningLevel? = nil
     ) async -> RAGSelectionResult {
         guard !chunks.isEmpty else {
             return RAGSelectionResult(
@@ -1112,13 +1117,16 @@ actor RAGContextService {
 
         let chunks = RAGChunker.mergeShortConsecutiveChunks(chunks)
 
-        let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
-        let maxContextChars = calculate4096BudgetedContextCharacters(
+        let utilization = contextUtilizationFactor ?? (isPDFSource ? 1.0 : options.contextUtilizationFactor)
+        let resolvedReasoning = reasoningLevel ?? TokenBudgeting.reasoningLevel(forResponseTokens: maxOutputTokens)
+        let maxContextChars = Self.calculate4096BudgetedContextCharacters(
             query: query,
             historyTokens: historyTokens,
             maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: utilization,
-            options: options
+            options: options,
+            isPDFSource: isPDFSource,
+            reasoningLevel: resolvedReasoning
         )
 
         // Identify primary lead chunk (first chunk) and lead-section chunks (sectionIndex == 0) per source
@@ -1405,13 +1413,24 @@ actor RAGContextService {
         return sums.mapValues { ($0 / total) * 100 }
     }
 
-    private func calculate4096BudgetedContextCharacters(
-        query: String,
-        historyTokens: Int,
+    static func calculate4096BudgetedContextCharacters(
+        query: String = "",
+        historyTokens: Int = 0,
         maxOutputTokens: Int,
-        contextUtilizationFactor: Double,
-        options: RAGSelectionOptions
+        contextUtilizationFactor: Double = 0.8,
+        options: RAGSelectionOptions = .default,
+        isPDFSource: Bool = false,
+        reasoningLevel: ContextOptions.ReasoningLevel = .moderate
     ) -> Int {
+        if isPDFSource {
+            let maxPDFTokens = TokenBudgeting.maxPDFInputContextTokens(
+                maxOutputTokens: maxOutputTokens,
+                reasoningLevel: reasoningLevel,
+                instructionTokens: options.instructionTokens,
+                promptOverheadTokens: options.promptOverheadTokens
+            )
+            return maxPDFTokens * options.avgCharsPerToken
+        }
         let queryTokens = TokenBudgeting.estimatedTokens(forApproxCharacters: query.count)
         let effectiveOutputTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxOutputTokens,
