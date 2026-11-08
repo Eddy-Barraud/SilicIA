@@ -257,11 +257,8 @@ final class DynamicSessionCoordinator {
         // Ephemeral subtasks (like query generation or webpage summary) must not
         // clobber or invalidate the persistent session prewarmed for the active view.
         if mode == activeViewMode && !session.isResponding {
-            let key = PrewarmKey(snapshot: snapshot)
-            if lastPrewarmedKey != key {
-                stateStore.update(snapshot)
-                lastPrewarmedKey = key
-            }
+            stateStore.update(snapshot)
+            lastPrewarmedKey = PrewarmKey(snapshot: snapshot)
             if !session.transcript.history.isEmpty {
                 session.transcript.history = []
             }

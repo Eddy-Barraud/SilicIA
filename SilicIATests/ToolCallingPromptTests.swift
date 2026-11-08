@@ -188,4 +188,109 @@ final class ToolCallingPromptTests: XCTestCase {
         XCTAssertTrue(promptFR.contains("à partir de tes connaissances"))
         XCTAssertFalse(promptFR.contains("searchSources"))
     }
+
+    func testPromptAssemblyWithLastExchangeLocalization() {
+        let exchange = ChatService.PriorExchange(
+            userQuestion: "What is an embedding?",
+            assistantAnswer: "An embedding maps high-dimensional data to vector space."
+        )
+
+        // English
+        let promptEN = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "How is it used for words?",
+            lastExchange: exchange,
+            language: .english
+        )
+        XCTAssertTrue(promptEN.contains("Last exchange:"))
+        XCTAssertTrue(promptEN.contains("User: What is an embedding?"))
+        XCTAssertTrue(promptEN.contains("Assistant: An embedding maps high-dimensional data to vector space."))
+        XCTAssertTrue(promptEN.hasSuffix("How is it used for words?"))
+
+        // French
+        let promptFR = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Comment l'utiliser pour les mots ?",
+            lastExchange: ChatService.PriorExchange(
+                userQuestion: "C'est quoi un embedding vectoriel ?",
+                assistantAnswer: "L'embedding vectoriel est une méthode de représentation de données."
+            ),
+            language: .french
+        )
+        XCTAssertTrue(promptFR.contains("Dernier échange :"))
+        XCTAssertTrue(promptFR.contains("Utilisateur : C'est quoi un embedding vectoriel ?"))
+        XCTAssertTrue(promptFR.contains("Assistant : L'embedding vectoriel est une méthode de représentation de données."))
+        XCTAssertTrue(promptFR.hasSuffix("Comment l'utiliser pour les mots ?"))
+
+        // Spanish
+        let promptES = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "¿Cómo se usa para palabras?",
+            lastExchange: ChatService.PriorExchange(
+                userQuestion: "¿Qué es un embedding?",
+                assistantAnswer: "Un embedding mapea datos a un espacio vectorial."
+            ),
+            language: .spanish
+        )
+        XCTAssertTrue(promptES.contains("Último intercambio:"))
+        XCTAssertTrue(promptES.contains("Usuario: ¿Qué es un embedding?"))
+        XCTAssertTrue(promptES.contains("Asistente: Un embedding mapea datos a un espacio vectorial."))
+        XCTAssertTrue(promptES.hasSuffix("¿Cómo se usa para palabras?"))
+    }
+
+    func testPromptAssemblyWithBothEarlierQuestionsAndLastExchange() {
+        let prompt = ChatService.assembleToolCallingPrompt(
+            currentQuestion: "Comment faire une recherche ?",
+            priorUserQuestions: ["c'est quoi l'embeding vectoriel", "comment l'utiliser pour les mots"],
+            lastExchange: ChatService.PriorExchange(
+                userQuestion: "c'est quoi un index d'embeding vectoriel",
+                assistantAnswer: "Un index d'embedding vectoriel accélère la recherche du plus proche voisin."
+            ),
+            language: .french
+        )
+
+        XCTAssertTrue(prompt.contains("Questions précédentes de l'utilisateur :"))
+        XCTAssertTrue(prompt.contains("- c'est quoi l'embeding vectoriel"))
+        XCTAssertTrue(prompt.contains("- comment l'utiliser pour les mots"))
+        XCTAssertTrue(prompt.contains("Dernier échange :"))
+        XCTAssertTrue(prompt.contains("Utilisateur : c'est quoi un index d'embeding vectoriel"))
+        XCTAssertTrue(prompt.contains("Assistant : Un index d'embedding vectoriel accélère la recherche du plus proche voisin."))
+
+        // Ordering check: earlier questions appear before last exchange
+        let earlierPos = prompt.range(of: "Questions précédentes de l'utilisateur :")!.lowerBound
+        let lastExchangePos = prompt.range(of: "Dernier échange :")!.lowerBound
+        let currentPos = prompt.range(of: "Comment faire une recherche ?", options: .backwards)!.lowerBound
+        XCTAssertTrue(earlierPos < lastExchangePos)
+        XCTAssertTrue(lastExchangePos < currentPos)
+    }
+
+    func testCapPriorAssistantAnswer() {
+        let shortAnswer = "This is a brief answer."
+        XCTAssertEqual(ChatService.capPriorAssistantAnswer(shortAnswer, maxChars: 1600), shortAnswer)
+
+        // Long answer over budget
+        let sentence = "Vector embeddings encode high-dimensional semantic relationships into vector spaces. "
+        let longAnswer = String(repeating: sentence, count: 30) // ~2550 chars
+        let capped = ChatService.capPriorAssistantAnswer(longAnswer, maxChars: 1600)
+        XCTAssertLessThanOrEqual(capped.count, 1605)
+        XCTAssertTrue(capped.hasSuffix(".") || capped.hasSuffix("…"))
+    }
+
+    func testToolTranscriptRecoveryPromptWithLastExchange() {
+        let prompt = ChatService.assembleToolTranscriptRecoveryPrompt(
+            currentQuestion: "How to query it?",
+            priorUserQuestions: ["Intro topic"],
+            lastExchange: ChatService.PriorExchange(
+                userQuestion: "What is an index?",
+                assistantAnswer: "An index is a data structure for ANN search."
+            ),
+            language: .english,
+            toolTranscript: "Tool: searchSources\nResult: HNSW is used."
+        )
+
+        XCTAssertTrue(prompt.contains("Tool results already gathered:"))
+        XCTAssertTrue(prompt.contains("Earlier user questions (context):"))
+        XCTAssertTrue(prompt.contains("- Intro topic"))
+        XCTAssertTrue(prompt.contains("Last exchange:"))
+        XCTAssertTrue(prompt.contains("User: What is an index?"))
+        XCTAssertTrue(prompt.contains("Assistant: An index is a data structure for ANN search."))
+        XCTAssertTrue(prompt.hasSuffix("How to query it?"))
+    }
 }

@@ -1298,6 +1298,94 @@ final class ChatService: ObservableObject {
     /// instructions (and `GenerationOptions.maximumResponseTokens`), never
     /// in the user prompt — putting them here is what leaked
     /// "(Max output: …)" into the rendered answer.
+    /// Represents the most recent question-and-answer exchange between the user and assistant.
+    struct PriorExchange: Equatable, Sendable {
+        let userQuestion: String
+        let assistantAnswer: String?
+    }
+
+    /// Caps the previous assistant response so it provides rich context without exceeding token budgets.
+    nonisolated static func capPriorAssistantAnswer(_ text: String, maxChars: Int = 1600) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxChars else { return trimmed }
+
+        let candidate = String(trimmed.prefix(maxChars))
+        // Prefer breaking at a paragraph or sentence boundary near the cutoff
+        if let lastNewline = candidate.lastIndex(of: "\n"),
+           candidate.distance(from: candidate.startIndex, to: lastNewline) >= maxChars - 300 {
+            return String(candidate[..<lastNewline]).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+        }
+        if let lastPeriod = candidate.lastIndex(where: { $0 == "." || $0 == "!" || $0 == "?" }),
+           candidate.distance(from: candidate.startIndex, to: lastPeriod) >= maxChars - 200 {
+            let nextIdx = candidate.index(after: lastPeriod)
+            return String(candidate[..<nextIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return candidate.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    /// Extracts earlier user questions and the most recent user-assistant exchange from `messages`.
+    private func extractConversationHistory(
+        for currentMessage: String
+    ) -> (earlierQuestions: [String], lastExchange: PriorExchange?) {
+        let priorMessages = messages.dropLast()
+        guard !priorMessages.isEmpty else {
+            return ([], nil)
+        }
+
+        // Find the index of the most recent user message before the current one
+        guard let lastUserIdx = priorMessages.lastIndex(where: { $0.role == .user && $0.content != currentMessage }) else {
+            return ([], nil)
+        }
+
+        let lastUserMsg = priorMessages[lastUserIdx]
+        let userQuestion = lastUserMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userQuestion.isEmpty else {
+            return ([], nil)
+        }
+
+        // Find if there is an assistant answer following that last user message
+        let lastAssistantMsg = priorMessages[(lastUserIdx + 1)...].first(where: {
+            $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+
+        // Prior user questions that occurred before `lastUserIdx`
+        let earlierQuestions = priorMessages[..<lastUserIdx]
+            .filter { $0.role == .user && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .suffix(Self.historyMessageLimit - 1)
+            .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        let cappedAnswer: String?
+        if let rawAnswer = lastAssistantMsg?.content {
+            let trimmed = rawAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            cappedAnswer = trimmed.isEmpty ? nil : Self.capPriorAssistantAnswer(trimmed)
+        } else {
+            cappedAnswer = nil
+        }
+
+        // If there was no assistant answer, treat lastUserMsg as an earlier question instead of a full exchange
+        if cappedAnswer == nil {
+            var combinedEarlier = Array(earlierQuestions)
+            combinedEarlier.append(userQuestion)
+            return (combinedEarlier, nil)
+        }
+
+        let exchange = PriorExchange(
+            userQuestion: userQuestion,
+            assistantAnswer: cappedAnswer
+        )
+
+        return (Array(earlierQuestions), exchange)
+    }
+
+    /// Pure assembly of the tool-calling prompt — separated from `messages`
+    /// state so it can be regression-tested directly. Guarantees the
+    /// properties that broke multi-turn PDF chat: no length/tool scaffolding
+    /// appears (that leaked into rendered answers).
+    ///
+    /// `groundingContext`, when supplied, is the pre-selected document
+    /// context placed BEFORE the current question so the question remains
+    /// the final line of the prompt (the model ends on the thing to answer,
+    /// not on continuable context).
     private func buildToolCallingPrompt(
         for userMessage: String,
         language: ModelLanguage,
@@ -1306,15 +1394,11 @@ final class ChatService: ObservableObject {
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) -> String {
-        // Prior user turns only (exclude the just-appended current message
-        // and every assistant answer).
-        let priorQuestions = messages
-            .filter { $0.role == .user && $0.content != userMessage }
-            .suffix(Self.historyMessageLimit)
-            .map(\.content)
+        let (earlierQuestions, lastExchange) = extractConversationHistory(for: userMessage)
         return Self.assembleToolCallingPrompt(
             currentQuestion: userMessage,
-            priorUserQuestions: Array(priorQuestions),
+            priorUserQuestions: earlierQuestions,
+            lastExchange: lastExchange,
             language: language,
             groundingContext: groundingContext,
             webSearchAvailable: webSearchAvailable,
@@ -1330,10 +1414,7 @@ final class ChatService: ObservableObject {
         language: ModelLanguage,
         maxOutputTokens: Int
     ) -> String {
-        let priorQuestions = messages
-            .filter { $0.role == .user && $0.content != userMessage }
-            .suffix(Self.historyMessageLimit)
-            .map(\.content)
+        let (earlierQuestions, lastExchange) = extractConversationHistory(for: userMessage)
         let totalContextCharacters = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: 1.0
@@ -1345,27 +1426,18 @@ final class ChatService: ObservableObject {
 
         return Self.assembleToolTranscriptRecoveryPrompt(
             currentQuestion: userMessage,
-            priorUserQuestions: Array(priorQuestions),
+            priorUserQuestions: earlierQuestions,
+            lastExchange: lastExchange,
             language: language,
             groundingContext: compactSelectedContext,
             toolTranscript: compactToolTranscript
         )
     }
 
-    /// Pure assembly of the tool-calling prompt — separated from `messages`
-    /// state so it can be regression-tested directly. Guarantees the
-    /// properties that broke multi-turn PDF chat: no assistant answers are
-    /// replayed (the model can't echo what it isn't shown) and no
-    /// length/tool scaffolding appears (that leaked into rendered answers).
-    ///
-    /// `groundingContext`, when supplied, is the pre-selected document
-    /// context placed BEFORE the current question so the question remains
-    /// the final line of the prompt (the model ends on the thing to answer,
-    /// not on continuable context). It carries no length/format scaffolding
-    /// — only the passage text — so the leak-prevention contract holds.
     nonisolated static func assembleToolCallingPrompt(
         currentQuestion: String,
-        priorUserQuestions: [String],
+        priorUserQuestions: [String] = [],
+        lastExchange: PriorExchange? = nil,
         language: ModelLanguage,
         groundingContext: String = "",
         webSearchAvailable: Bool = false,
@@ -1377,6 +1449,9 @@ final class ChatService: ObservableObject {
 
         let answerImperative: String
         let earlierLabel: String
+        let lastExchangeHeader: String
+        let userPrefix: String
+        let assistantPrefix: String
         let groundingHeader: String
         switch language {
         case .french:
@@ -1394,6 +1469,9 @@ final class ChatService: ObservableObject {
                 answerImperative = "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
             }
             earlierLabel = "Questions précédentes de l'utilisateur :"
+            lastExchangeHeader = "Dernier échange :"
+            userPrefix = "Utilisateur :"
+            assistantPrefix = "Assistant :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             if hasGrounding {
@@ -1410,6 +1488,9 @@ final class ChatService: ObservableObject {
                 answerImperative = "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
             }
             earlierLabel = "Preguntas anteriores del usuario:"
+            lastExchangeHeader = "Último intercambio:"
+            userPrefix = "Usuario:"
+            assistantPrefix = "Asistente:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             if hasGrounding {
@@ -1426,14 +1507,18 @@ final class ChatService: ObservableObject {
                 answerImperative = "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
             }
             earlierLabel = "Earlier user questions:"
+            lastExchangeHeader = "Last exchange:"
+            userPrefix = "User:"
+            assistantPrefix = "Assistant:"
             groundingHeader = "Context from the attached documents:"
         }
 
         // Assemble top-to-bottom for U-shaped attention:
         // 1. Initial instruction + current user question at the start (when grounding is present)
         // 2. Grounding context (ordered least -> most relevant, with #1 at the end)
-        // 3. Prior user questions
-        // 4. Answer imperative + repeated current user question at the very end.
+        // 3. Prior user questions (if any exist before the last exchange)
+        // 4. Last exchange (last user question + last model answer)
+        // 5. Answer imperative + repeated current user question at the very end.
         var sections: [String] = []
         if hasGrounding {
             sections.append("\(answerImperative)\n\(currentQuestion)")
@@ -1443,13 +1528,23 @@ final class ChatService: ObservableObject {
             let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
             sections.append("\(earlierLabel)\n\(contextBlock)")
         }
+        if let lastExchange {
+            var exchangeLines: [String] = []
+            exchangeLines.append(lastExchangeHeader)
+            exchangeLines.append("\(userPrefix) \(lastExchange.userQuestion)")
+            if let answer = lastExchange.assistantAnswer, !answer.isEmpty {
+                exchangeLines.append("\(assistantPrefix) \(answer)")
+            }
+            sections.append(exchangeLines.joined(separator: "\n"))
+        }
         sections.append("\(answerImperative)\n\(currentQuestion)")
         return sections.joined(separator: "\n\n")
     }
 
     nonisolated static func assembleToolTranscriptRecoveryPrompt(
         currentQuestion: String,
-        priorUserQuestions: [String],
+        priorUserQuestions: [String] = [],
+        lastExchange: PriorExchange? = nil,
         language: ModelLanguage,
         groundingContext: String = "",
         toolTranscript: String
@@ -1460,22 +1555,34 @@ final class ChatService: ObservableObject {
 
         let answerImperative: String
         let earlierLabel: String
+        let lastExchangeHeader: String
+        let userPrefix: String
+        let assistantPrefix: String
         let groundingHeader: String
         let transcriptHeader: String
         switch language {
         case .french:
             answerImperative = "Les appels d'outils précédents ont déjà fourni le contexte utile. N'appelle plus aucun outil. Réponds maintenant clairement et directement à la question suivante en t'appuyant sur les faits utiles obtenus et en complétant avec tes connaissances si nécessaire, sans t'attarder sur les détails secondaires :"
             earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+            lastExchangeHeader = "Dernier échange :"
+            userPrefix = "Utilisateur :"
+            assistantPrefix = "Assistant :"
             groundingHeader = "Contexte tiré des documents joints :"
             transcriptHeader = "Résultats d'outils déjà obtenus :"
         case .spanish:
             answerImperative = "Las llamadas previas a herramientas ya aportaron el contexto útil. No llames más herramientas. Responde ahora de forma clara y directa a la siguiente pregunta apoyándote en los datos útiles obtenidos y completando con tus conocimientos si hace falta, sin detenerte en detalles secundarios:"
             earlierLabel = "Preguntas anteriores del usuario (contexto):"
+            lastExchangeHeader = "Último intercambio:"
+            userPrefix = "Usuario:"
+            assistantPrefix = "Asistente:"
             groundingHeader = "Contexto de los documentos adjuntos:"
             transcriptHeader = "Resultados de herramientas ya obtenidos:"
         case .english:
             answerImperative = "The previous tool calls already gathered the useful context. Do not call any more tools. Answer the following question clearly and directly now using the gathered facts and supplementing with your knowledge as needed, without dwelling on secondary details:"
             earlierLabel = "Earlier user questions (context):"
+            lastExchangeHeader = "Last exchange:"
+            userPrefix = "User:"
+            assistantPrefix = "Assistant:"
             groundingHeader = "Context from the attached documents:"
             transcriptHeader = "Tool results already gathered:"
         }
@@ -1490,6 +1597,15 @@ final class ChatService: ObservableObject {
         if !priorUserQuestions.isEmpty {
             let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
             sections.append("\(earlierLabel)\n\(contextBlock)")
+        }
+        if let lastExchange {
+            var exchangeLines: [String] = []
+            exchangeLines.append(lastExchangeHeader)
+            exchangeLines.append("\(userPrefix) \(lastExchange.userQuestion)")
+            if let answer = lastExchange.assistantAnswer, !answer.isEmpty {
+                exchangeLines.append("\(assistantPrefix) \(answer)")
+            }
+            sections.append(exchangeLines.joined(separator: "\n"))
         }
         sections.append("\(answerImperative)\n\(currentQuestion)")
         return sections.joined(separator: "\n\n")
