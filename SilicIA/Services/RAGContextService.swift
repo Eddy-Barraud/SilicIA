@@ -16,6 +16,21 @@ struct RAGChunk: Identifiable {
     let text: String
     let url: String?
     let pdfPage: Int?
+    let sectionIndex: Int
+
+    init(
+        source: String,
+        text: String,
+        url: String? = nil,
+        pdfPage: Int? = nil,
+        sectionIndex: Int = 0
+    ) {
+        self.source = source
+        self.text = text
+        self.url = url
+        self.pdfPage = pdfPage
+        self.sectionIndex = sectionIndex
+    }
 }
 
 /// Chunks structured markdown and text into clean retrieval chunks.
@@ -338,103 +353,241 @@ struct RAGChunker {
             tokenizer.setLanguage(lang)
         }
 
+        var currentSectionIndex = 0
+
+        func appendProseLines(_ lines: [String], sectionIndex: Int) {
+            guard !lines.isEmpty else { return }
+            let joined = lines.joined(separator: "\n")
+            let cleanedProse = removeMarkdownFormatting(from: joined)
+            let trimmedProse = cleanedProse.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedProse.isEmpty else { return }
+            tokenizer.string = trimmedProse
+            tokenizer.enumerateTokens(in: trimmedProse.startIndex..<trimmedProse.endIndex) { range, _ in
+                let paragraph = trimmedProse[range].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !paragraph.isEmpty {
+                    chunks.append(
+                        RAGChunk(
+                            source: source,
+                            text: paragraph,
+                            url: url,
+                            pdfPage: pdfPage,
+                            sectionIndex: sectionIndex
+                        )
+                    )
+                }
+                return true
+            }
+        }
+
         for segment in segments {
             switch segment {
             case .table(let tableText):
+                if isWikipediaNavboxTable(tableText) {
+                    continue
+                }
                 let cleanedTable = stripHTMLTags(from: stripMarkdownLinks(from: stripMarkdownImages(from: tableText)))
                 let decodedTable = HTMLSanitizer.decodeEntities(cleanedTable)
                 let trimmedTable = decodedTable.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !trimmedTable.isEmpty {
-                    chunks.append(RAGChunk(source: source, text: trimmedTable, url: url, pdfPage: pdfPage))
+                    chunks.append(
+                        RAGChunk(
+                            source: source,
+                            text: trimmedTable,
+                            url: url,
+                            pdfPage: pdfPage,
+                            sectionIndex: currentSectionIndex
+                        )
+                    )
                 }
             case .prose(let proseText):
-                let cleanedProse = removeMarkdownFormatting(from: proseText)
-                let trimmedProse = cleanedProse.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmedProse.isEmpty else { continue }
-                tokenizer.string = trimmedProse
-                tokenizer.enumerateTokens(in: trimmedProse.startIndex..<trimmedProse.endIndex) { range, _ in
-                    let paragraph = trimmedProse[range].trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !paragraph.isEmpty {
-                        chunks.append(RAGChunk(source: source, text: paragraph, url: url, pdfPage: pdfPage))
+                var sectionLines: [String] = []
+                for line in proseText.components(separatedBy: "\n") {
+                    let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                    if trimmedLine.hasPrefix("##") {
+                        appendProseLines(sectionLines, sectionIndex: currentSectionIndex)
+                        sectionLines.removeAll(keepingCapacity: true)
+                        currentSectionIndex += 1
+                    } else if !trimmedLine.hasPrefix("#") {
+                        sectionLines.append(line)
                     }
-                    return true
                 }
+                appendProseLines(sectionLines, sectionIndex: currentSectionIndex)
             }
         }
 
         return chunks
     }
 
-    /// Merges chunks shorter than `minimumCharacters` with an adjacent consecutive chunk
-    /// before ranking so short bullet items or one-line stubs do not compete as isolated micro-chunks.
-    static func mergeShortConsecutiveChunks(_ chunks: [RAGChunk], minimumCharacters: Int = 60) -> [RAGChunk] {
+    /// Determines if a line or chunk ends with an introductory cue that should be kept
+    /// with the immediately following formula, table, or definition.
+    static func endsWithIntroductoryCue(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasSuffix(":") || trimmed.hasSuffix(",") || trimmed.hasSuffix(";") || trimmed.hasSuffix("=") {
+            return true
+        }
+        let lower = trimmed.lowercased()
+        let cues = ["as follows", "as follows.", "given by", "defined as", "starts as", "written as", "such that", "is the", "is"]
+        return cues.contains { lower.hasSuffix($0) }
+    }
+
+    /// Merges consecutive chunks from the same source into cohesive paragraphs/sections:
+    /// 1. Mandatory continuation merge: chunks ending in ':', ',', ';', '=', or introductory phrases
+    ///    ("as follows", "given by", "is") are always forward-merged with their equation or following block.
+    /// 2. Cohesive section merge: short paragraphs and bullet items (< 450 chars) from the same source
+    ///    and section are merged up to ~850 chars so bullet lists and related facts stay unified without crossing `##` boundaries.
+    /// 3. Lead-section & trailing-stub absorption: short paragraphs (< 240 chars) in the lead section (`sectionIndex == 0`)
+    ///    that cannot merge forward are absorbed into the lead chunk if space permits, or merged backward into the same section.
+    static func mergeShortConsecutiveChunks(
+        _ chunks: [RAGChunk],
+        minimumCharacters: Int = 60,
+        targetCharacters: Int = 450,
+        maxMergedCharacters: Int = 850
+    ) -> [RAGChunk] {
         guard chunks.count > 1 else { return chunks }
         var result: [RAGChunk] = []
         result.reserveCapacity(chunks.count)
-        var pendingShort: RAGChunk? = nil
 
-        for chunk in chunks {
-            if let pending = pendingShort {
-                if pending.source == chunk.source && pending.url == chunk.url && pending.pdfPage == chunk.pdfPage {
-                    let combined = RAGChunk(
-                        source: chunk.source,
-                        text: pending.text + "\n" + chunk.text,
-                        url: chunk.url,
-                        pdfPage: chunk.pdfPage
-                    )
-                    if combined.text.count < minimumCharacters {
-                        pendingShort = combined
-                    } else {
-                        result.append(combined)
-                        pendingShort = nil
-                    }
-                    continue
+        var i = 0
+        while i < chunks.count {
+            var curr = chunks[i]
+            while i + 1 < chunks.count {
+                let next = chunks[i + 1]
+                guard curr.source == next.source && curr.url == next.url && curr.pdfPage == next.pdfPage else {
+                    break
+                }
+                let sameSection = curr.sectionIndex == next.sectionIndex
+                let combinedLen = curr.text.count + 1 + next.text.count
+                let needsContinuation = endsWithIntroductoryCue(curr.text)
+                let isHeadingStub = curr.text.hasPrefix("[") && curr.text.hasSuffix("]") && curr.text.count < 80
+                let nextStartsSection = next.text.hasPrefix("[") || !sameSection
+
+                let shouldMerge: Bool
+                if isHeadingStub && combinedLen <= maxMergedCharacters + 150 {
+                    shouldMerge = true
+                } else if needsContinuation && combinedLen <= maxMergedCharacters + 200 {
+                    shouldMerge = true
+                } else if sameSection && curr.text.count < max(minimumCharacters, 120) && combinedLen <= maxMergedCharacters {
+                    shouldMerge = true
+                } else if !nextStartsSection && (curr.text.count < targetCharacters || next.text.count < 180) && combinedLen <= maxMergedCharacters {
+                    shouldMerge = true
                 } else {
-                    if let last = result.last,
-                       last.source == pending.source && last.url == pending.url && last.pdfPage == pending.pdfPage {
-                        result[result.count - 1] = RAGChunk(
-                            source: last.source,
-                            text: last.text + "\n" + pending.text,
-                            url: last.url,
-                            pdfPage: last.pdfPage
-                        )
-                    } else {
-                        result.append(pending)
-                    }
-                    pendingShort = nil
+                    shouldMerge = false
+                }
+
+                if shouldMerge {
+                    curr = RAGChunk(
+                        source: curr.source,
+                        text: curr.text + "\n\n" + next.text,
+                        url: curr.url,
+                        pdfPage: curr.pdfPage,
+                        sectionIndex: curr.sectionIndex
+                    )
+                    i += 1
+                } else {
+                    break
                 }
             }
 
-            if chunk.text.count < minimumCharacters {
-                pendingShort = chunk
-            } else {
-                result.append(chunk)
+            // If a short paragraph in the article's lead section (sectionIndex == 0) could not merge forward
+            // (e.g. "The current president is Volodymyr Zelenskyy..." right before `## Overview`),
+            // merge it into an earlier lead-section chunk from the same source if within maxMergedCharacters.
+            if curr.text.count < 240 && curr.sectionIndex == 0,
+               let leadIdx = result.firstIndex(where: {
+                   $0.source == curr.source
+                       && $0.url == curr.url
+                       && $0.pdfPage == curr.pdfPage
+                       && $0.sectionIndex == 0
+                       && ($0.text.count + 2 + curr.text.count) <= maxMergedCharacters
+               }) {
+                let target = result[leadIdx]
+                result[leadIdx] = RAGChunk(
+                    source: target.source,
+                    text: target.text + "\n\n" + curr.text,
+                    url: target.url,
+                    pdfPage: target.pdfPage,
+                    sectionIndex: target.sectionIndex
+                )
+                i += 1
+                continue
             }
-        }
 
-        if let pending = pendingShort {
-            if let last = result.last,
-               last.source == pending.source && last.url == pending.url && last.pdfPage == pending.pdfPage {
-                result[result.count - 1] = RAGChunk(
-                    source: last.source,
-                    text: last.text + "\n" + pending.text,
-                    url: last.url,
-                    pdfPage: last.pdfPage
+            // Otherwise, if a short trailing stub at the end of a section could not merge forward,
+            // merge it backward into the preceding chunk of the same section if within a 1200-char ceiling.
+            if curr.text.count < 220,
+               let lastIdx = result.indices.last,
+               result[lastIdx].source == curr.source,
+               result[lastIdx].url == curr.url,
+               result[lastIdx].pdfPage == curr.pdfPage,
+               result[lastIdx].sectionIndex == curr.sectionIndex,
+               (result[lastIdx].text.count + 2 + curr.text.count) <= maxMergedCharacters + 350 {
+                let prev = result[lastIdx]
+                result[lastIdx] = RAGChunk(
+                    source: prev.source,
+                    text: prev.text + "\n\n" + curr.text,
+                    url: prev.url,
+                    pdfPage: prev.pdfPage,
+                    sectionIndex: prev.sectionIndex
                 )
-            } else if !result.isEmpty {
-                let last = result[result.count - 1]
-                result[result.count - 1] = RAGChunk(
-                    source: last.source,
-                    text: last.text + "\n" + pending.text,
-                    url: last.url,
-                    pdfPage: last.pdfPage
-                )
-            } else {
-                result.append(pending)
+                i += 1
+                continue
             }
+
+            result.append(curr)
+            i += 1
         }
 
         return result
+    }
+
+    /// Strips Wikipedia sidebar/navigation box tables (e.g. `* v * t * e` or `| Part of a series on`)
+    /// from raw markdown while preserving all prose, headings, and legitimate data tables.
+    static func stripWikipediaNavboxes(from markdown: String) -> String {
+        let lines = markdown.components(separatedBy: "\n")
+        var keptLines: [String] = []
+        keptLines.reserveCapacity(lines.count)
+        var currentTable: [String] = []
+
+        func flushTable() {
+            guard !currentTable.isEmpty else { return }
+            let hasSep = currentTable.contains(where: { isMarkdownTableSeparator($0) })
+            if hasSep && currentTable.count >= 2 {
+                let tableText = currentTable.joined(separator: "\n")
+                if !isWikipediaNavboxTable(tableText) {
+                    keptLines.append(contentsOf: currentTable)
+                }
+            } else {
+                keptLines.append(contentsOf: currentTable)
+            }
+            currentTable.removeAll(keepingCapacity: true)
+        }
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if isMarkdownTableRow(trimmed) {
+                currentTable.append(line)
+            } else {
+                flushTable()
+                keptLines.append(line)
+            }
+        }
+        flushTable()
+        return keptLines.joined(separator: "\n")
+    }
+
+    /// Identifies whether a markdown table is a Wikipedia sidebar/navigation box template
+    /// (e.g. contains '* v * t * e' or starts with '| Part of a series on').
+    static func isWikipediaNavboxTable(_ tableText: String) -> Bool {
+        let lower = tableText.lowercased()
+        if lower.contains("* v * t * e") || lower.contains("v * t * e") || lower.contains("*v *t *e") {
+            return true
+        }
+        if lower.contains("| part of a series on") || lower.contains("| this article is part of a series on") {
+            return true
+        }
+        if lower.contains("|part of a series on") || lower.contains("|this article is part of a series on") {
+            return true
+        }
+        return false
     }
 
     private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
@@ -447,11 +600,16 @@ struct RAGChunker {
             guard !currentTable.isEmpty else { return }
             let hasSep = currentTable.contains(where: { isMarkdownTableSeparator($0) })
             if hasSep && currentTable.count >= 2 {
+                let tableText = currentTable.joined(separator: "\n")
+                if isWikipediaNavboxTable(tableText) {
+                    currentTable.removeAll(keepingCapacity: true)
+                    return
+                }
                 if !currentProse.isEmpty {
                     segments.append(.prose(currentProse.joined(separator: "\n")))
                     currentProse.removeAll(keepingCapacity: true)
                 }
-                segments.append(.table(currentTable.joined(separator: "\n")))
+                segments.append(.table(tableText))
             } else {
                 currentProse.append(contentsOf: currentTable)
             }
@@ -663,6 +821,7 @@ struct RAGSelectionOptions {
     let minimumFallbackContextCharacters: Int
     let longChunkCharacterThreshold: Int
     let longChunkBonusScore: Double
+    let leadChunkBonusScore: Double
     /// Score added per numeric/unit token shared between the query and the
     /// chunk. Numbers carry concrete factual weight — when the query asks
     /// about "5km" or "1990", a chunk containing that exact token is far
@@ -702,28 +861,53 @@ struct RAGSelectionOptions {
     /// Character length prefix used for fast cosine pre-filtering
     let cosinePreFilterSampleLength: Int
 
-    nonisolated static let `default` = RAGSelectionOptions(
-        avgCharsPerToken: TokenBudgeting.avgCharsPerToken,
-        instructionTokens: TokenBudgeting.instructionTokens,
-        promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
-        minContextTokens: TokenBudgeting.minContextTokens,
-        contextUtilizationFactor: 0.8,
-        minimumFallbackContextCharacters: 200,
-        longChunkCharacterThreshold: 300,
-        longChunkBonusScore: 0.2,
-        numericTokenMatchBonus: 0.6,
-        numericPresenceBonus: 0.3,
-        equationReferenceMatchBonus: 2.5,
-        equationFormulaBonus: 0.5,
-        equationPresenceBonus: 0.2,
-        figureReferenceMatchBonus: 2.5,
-        figureCaptionBonus: 0.5,
-        figurePageMatchBonus: 2.0,
-        figurePresenceBonus: 0.2,
-        cosinePreFilterThreshold: 0.9,
-        minimumFilterCandidates: 8,
-        cosinePreFilterSampleLength: 350
-    )
+    init(
+        avgCharsPerToken: Int = TokenBudgeting.avgCharsPerToken,
+        instructionTokens: Int = TokenBudgeting.instructionTokens,
+        promptOverheadTokens: Int = TokenBudgeting.promptOverheadTokens,
+        minContextTokens: Int = TokenBudgeting.minContextTokens,
+        contextUtilizationFactor: Double = 0.8,
+        minimumFallbackContextCharacters: Int = 200,
+        longChunkCharacterThreshold: Int = 150,
+        longChunkBonusScore: Double = 0.15,
+        leadChunkBonusScore: Double = 0.15,
+        numericTokenMatchBonus: Double = 0.6,
+        numericPresenceBonus: Double = 0.3,
+        equationReferenceMatchBonus: Double = 2.5,
+        equationFormulaBonus: Double = 0.5,
+        equationPresenceBonus: Double = 0.2,
+        figureReferenceMatchBonus: Double = 2.5,
+        figureCaptionBonus: Double = 0.5,
+        figurePageMatchBonus: Double = 2.0,
+        figurePresenceBonus: Double = 0.2,
+        cosinePreFilterThreshold: Double = 0.9,
+        minimumFilterCandidates: Int = 8,
+        cosinePreFilterSampleLength: Int = 350
+    ) {
+        self.avgCharsPerToken = avgCharsPerToken
+        self.instructionTokens = instructionTokens
+        self.promptOverheadTokens = promptOverheadTokens
+        self.minContextTokens = minContextTokens
+        self.contextUtilizationFactor = contextUtilizationFactor
+        self.minimumFallbackContextCharacters = minimumFallbackContextCharacters
+        self.longChunkCharacterThreshold = longChunkCharacterThreshold
+        self.longChunkBonusScore = longChunkBonusScore
+        self.leadChunkBonusScore = leadChunkBonusScore
+        self.numericTokenMatchBonus = numericTokenMatchBonus
+        self.numericPresenceBonus = numericPresenceBonus
+        self.equationReferenceMatchBonus = equationReferenceMatchBonus
+        self.equationFormulaBonus = equationFormulaBonus
+        self.equationPresenceBonus = equationPresenceBonus
+        self.figureReferenceMatchBonus = figureReferenceMatchBonus
+        self.figureCaptionBonus = figureCaptionBonus
+        self.figurePageMatchBonus = figurePageMatchBonus
+        self.figurePresenceBonus = figurePresenceBonus
+        self.cosinePreFilterThreshold = cosinePreFilterThreshold
+        self.minimumFilterCandidates = minimumFilterCandidates
+        self.cosinePreFilterSampleLength = cosinePreFilterSampleLength
+    }
+
+    nonisolated static let `default` = RAGSelectionOptions()
 }
 
 /// One ranked chunk returned by relevance scoring.
@@ -903,6 +1087,8 @@ actor RAGContextService {
     ///   When nil, `options.contextUtilizationFactor` is used.
     /// - Parameter queries: When provided (Deep search), chunks are ranked by cosine similarity
     ///   against a combined TF vector built from every query (user + derived queries).
+    /// - Parameter webQueries: Optional web-targeted search queries from @Generable.
+    /// - Parameter wikiQueries: Optional Wikipedia-targeted search queries from @Generable (English).
     /// - Parameter language: Optional fallback language if the query language cannot be determined.
     func selectContext(
         chunks: [RAGChunk],
@@ -911,6 +1097,8 @@ actor RAGContextService {
         maxOutputTokens: Int,
         contextUtilizationFactor: Double? = nil,
         queries: [String]? = nil,
+        webQueries: [String]? = nil,
+        wikiQueries: [String]? = nil,
         language: ModelLanguage? = nil,
         options: RAGSelectionOptions = .default
     ) async -> RAGSelectionResult {
@@ -933,6 +1121,26 @@ actor RAGContextService {
             options: options
         )
 
+        // Identify primary lead chunk (first chunk) and lead-section chunks (sectionIndex == 0) per source
+        var seenSources: Set<String> = []
+        var maxSectionBySource: [String: Int] = [:]
+        for chunk in chunks {
+            let key = "\(chunk.source)|\(chunk.url ?? "")"
+            if chunk.sectionIndex > (maxSectionBySource[key] ?? 0) {
+                maxSectionBySource[key] = chunk.sectionIndex
+            }
+        }
+        var leadBonusByIndex: [Double] = [Double](repeating: 0.0, count: chunks.count)
+        for (idx, chunk) in chunks.enumerated() {
+            let key = "\(chunk.source)|\(chunk.url ?? "")"
+            if !seenSources.contains(key) {
+                seenSources.insert(key)
+                leadBonusByIndex[idx] = options.leadChunkBonusScore
+            } else if chunk.sectionIndex == 0 && (maxSectionBySource[key] ?? 0) > 0 {
+                leadBonusByIndex[idx] = options.leadChunkBonusScore * 0.6
+            }
+        }
+
         let combinedQueryVector: [String: Double]?
         if let queries, queries.count > 1 {
             combinedQueryVector = combinedTermVector(from: queries)
@@ -940,33 +1148,39 @@ actor RAGContextService {
             combinedQueryVector = nil
         }
 
-        // Combined query string used by the numeric-aware boost — for deep
-        // search we concatenate every derived query so the boost catches
-        // numeric tokens introduced by query expansion, not just the user's
-        // original wording.
+        // Distinct Stage 1 vectors: English for Wikipedia chunks, primary language for web chunks
+        let effectiveWikiQueries = (wikiQueries?.isEmpty == false) ? wikiQueries! : (queries?.filter { Self.detectQueryLanguage(for: $0, fallback: .english) == .english } ?? [])
+        let effectiveWebQueries = (webQueries?.isEmpty == false) ? webQueries! : (queries?.isEmpty == false ? queries! : [query])
+        let primaryWebQuery = effectiveWebQueries.first ?? query
+
+        let wikiStage1QueryVector = !effectiveWikiQueries.isEmpty ? combinedTermVector(from: effectiveWikiQueries) : (combinedQueryVector ?? combinedTermVector(from: [query]))
+        let webStage1QueryVector = !effectiveWebQueries.isEmpty ? combinedTermVector(from: effectiveWebQueries) : (combinedQueryVector ?? combinedTermVector(from: [query]))
+
         let numericQueryString = (queries?.joined(separator: " ")).map { $0.isEmpty ? query : $0 } ?? query
-        let embedding = resolveEmbedding(for: query, language: language)
-        let wordEmbedding = resolveWordEmbedding(for: query, language: language)
+        let wikiNumericQueryString = effectiveWikiQueries.joined(separator: " ")
+        let stage1QueryDCT = dctUnitVector(for: numericQueryString)
+        let wikiStage1QueryDCT = !wikiNumericQueryString.isEmpty ? dctUnitVector(for: wikiNumericQueryString) : stage1QueryDCT
+
+        let embedding = resolveEmbedding(for: primaryWebQuery, language: language)
+        let wordEmbedding = resolveWordEmbedding(for: primaryWebQuery, language: language)
         let queryEmbeddingInfo: (unitVector: [Double], query: String, embedding: NLEmbedding)? = {
-            guard let embedding, let rawVec = embedding.vector(for: query) else { return nil }
+            guard let embedding, let rawVec = embedding.vector(for: primaryWebQuery) else { return nil }
             let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
             guard norm > 0 else { return nil }
-            return (rawVec.map { $0 / norm }, query, embedding)
+            return (rawVec.map { $0 / norm }, primaryWebQuery, embedding)
         }()
 
         #if DEBUG
         let rankingStart = Date()
         #endif
 
-        let allQueries = (queries?.isEmpty == false) ? queries! : [query]
-        let stage1QueryVector = combinedQueryVector ?? combinedTermVector(from: allQueries)
-        let stage1QueryDCT = dctUnitVector(for: numericQueryString)
-        let maxStage2Chars = maxContextChars * 2
+        let maxStage2Chars = Int(Double(maxContextChars) * 1.6)
 
         struct ChunkCandidate {
             let index: Int
             let chunk: RAGChunk
             let baseScore: Double
+            let leadBonus: Double
         }
 
         // Stage 1: Fast Discrete Cosine Transform (DCT) & Lexical Cosine Ranking
@@ -974,14 +1188,18 @@ actor RAGContextService {
         candidates.reserveCapacity(chunks.count)
 
         for (idx, chunk) in chunks.enumerated() {
-            let baseScore = dctCosineRelevanceScore(
+            let lowerURL = chunk.url?.lowercased() ?? ""
+            let isEnglishWiki = lowerURL.contains("en.wikipedia.org") || (lowerURL.contains("wikipedia.org") && !lowerURL.contains("fr.wikipedia.org") && !lowerURL.contains("es.wikipedia.org"))
+            let leadBonus = leadBonusByIndex[idx]
+            var baseScore = dctCosineRelevanceScore(
                 chunk: chunk,
-                queryVector: stage1QueryVector,
-                queryDCTVector: stage1QueryDCT,
-                numericQueryString: numericQueryString,
+                queryVector: isEnglishWiki ? wikiStage1QueryVector : webStage1QueryVector,
+                queryDCTVector: isEnglishWiki ? wikiStage1QueryDCT : stage1QueryDCT,
+                numericQueryString: isEnglishWiki && !wikiNumericQueryString.isEmpty ? wikiNumericQueryString : numericQueryString,
                 options: options
             )
-            candidates.append(ChunkCandidate(index: idx, chunk: chunk, baseScore: baseScore))
+            baseScore += leadBonus
+            candidates.append(ChunkCandidate(index: idx, chunk: chunk, baseScore: baseScore, leadBonus: leadBonus))
         }
 
         // Sort chunks by Stage 1 DCT/cosine score descending
@@ -992,10 +1210,9 @@ actor RAGContextService {
             return lhs.baseScore > rhs.baseScore
         }
 
-        // Keep only the top portion of sorted chunks such that cumulative chunk size
-        // does not exceed 2x the token budget (2 * maxContextChars).
+        // Keep only top candidates up to 1.6x token budget for Stage 2
         var topCosineCandidates: [ChunkCandidate] = []
-        topCosineCandidates.reserveCapacity(min(candidates.count, 32))
+        topCosineCandidates.reserveCapacity(min(candidates.count, 24))
         var accumulatedStage2Chars = 0
         for candidate in candidates {
             let chunkChars = candidate.chunk.text.count
@@ -1007,148 +1224,113 @@ actor RAGContextService {
         }
 
         #if DEBUG
-        print("[RAGContextService] Stage 1 (DCT/Cosine): \(chunks.count) chunks -> \(topCosineCandidates.count) candidates kept (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 2x token budget)")
+        print("[RAGContextService] Stage 1 (DCT/Cosine): \(chunks.count) chunks -> \(topCosineCandidates.count) candidates kept (\(accumulatedStage2Chars)/\(maxStage2Chars) chars, <= 1.6x token budget)")
         #endif
 
         var ranked: [RankedRAGChunk] = []
         ranked.reserveCapacity(topCosineCandidates.count)
 
-        // When cross-lingual English Wikipedia / WikiFast chunks are present alongside non-English user queries,
-        // prepare an English NLEmbedding scorer against the English sub-queries so English chunks receive
-        // accurate semantic relevance and matching percentages.
-        let primaryLang = Self.detectQueryLanguage(for: query, fallback: language)
-        let hasEnglishWikiCandidate = primaryLang != .english && topCosineCandidates.contains {
-            $0.chunk.url?.lowercased().contains("en.wikipedia.org") == true
-        }
-        let englishQueryForWiki: String? = {
-            guard hasEnglishWikiCandidate else { return nil }
+        // Language-matched Stage 2 preparation (English fast-path for en.wikipedia.org, NLLanguageRecognizer for other chunks)
+        let primaryLang = Self.detectQueryLanguage(for: primaryWebQuery, fallback: language)
+        let englishQueryForWiki: String = {
+            if let firstWiki = effectiveWikiQueries.first, !firstWiki.isEmpty {
+                return firstWiki
+            }
             if let queries, queries.count > 1 {
                 if let enQ = queries.dropFirst().first(where: { Self.detectQueryLanguage(for: $0, fallback: .english) == .english }) {
                     return enQ
                 }
-                return queries.last
             }
-            return query
+            return primaryWebQuery
         }()
-        let englishSentenceEmbedding: NLEmbedding? = hasEnglishWikiCandidate
-            ? (embeddingCache[.english] ?? NLEmbedding.sentenceEmbedding(for: .english))
-            : nil
-        let englishWordEmbedding: NLEmbedding? = hasEnglishWikiCandidate
-            ? (wordEmbeddingCache[.english] ?? NLEmbedding.wordEmbedding(for: .english))
-            : nil
+        let englishSentenceEmbedding: NLEmbedding? = embeddingCache[.english] ?? NLEmbedding.sentenceEmbedding(for: .english)
+        let englishWordEmbedding: NLEmbedding? = wordEmbeddingCache[.english] ?? NLEmbedding.wordEmbedding(for: .english)
         let englishUnitQueryVector: [Double]? = {
-            guard let enQuery = englishQueryForWiki,
-                  let enEmb = englishSentenceEmbedding,
-                  let rawVec = enEmb.vector(for: enQuery) else { return nil }
+            guard let enEmb = englishSentenceEmbedding,
+                  let rawVec = enEmb.vector(for: englishQueryForWiki) else { return nil }
             let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
             guard norm > 0 else { return nil }
             return rawVec.map { $0 / norm }
         }()
 
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
-        if let qInfo = queryEmbeddingInfo {
-            for candidate in topCosineCandidates {
-                let isEnglishWikiChunk = candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true
-                let semanticScore: Double
-                if isEnglishWikiChunk,
-                   let enQuery = englishQueryForWiki,
-                   let enEmb = englishSentenceEmbedding {
-                    var enSemantic = nlEmbeddingRelevanceScore(
-                        chunk: candidate.chunk,
-                        query: enQuery,
-                        unitQueryVector: englishUnitQueryVector,
-                        embedding: enEmb,
-                        options: options
-                    )
-                    if let enWordEmb = englishWordEmbedding {
-                        let enWord = wordEmbeddingSemanticScore(
-                            chunk: candidate.chunk,
-                            query: enQuery,
-                            wordEmbedding: enWordEmb
-                        )
-                        enSemantic = enSemantic * 0.75 + enWord * 0.25
-                    }
-                    semanticScore = enSemantic
-                } else {
-                    var primarySemantic = nlEmbeddingRelevanceScore(
-                        chunk: candidate.chunk,
-                        query: qInfo.query,
-                        unitQueryVector: qInfo.unitVector,
-                        embedding: qInfo.embedding,
-                        options: options
-                    )
-                    if let wordEmbedding {
-                        let wordScore = wordEmbeddingSemanticScore(
-                            chunk: candidate.chunk,
-                            query: query,
-                            wordEmbedding: wordEmbedding
-                        )
-                        primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
-                    }
-                    semanticScore = primarySemantic
-                }
-                let combinedScore = semanticScore + candidate.baseScore * 0.35
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
+        for candidate in topCosineCandidates {
+            let lowerURL = candidate.chunk.url?.lowercased() ?? ""
+            let isEnglishChunk: Bool
+            if lowerURL.contains("en.wikipedia.org") {
+                isEnglishChunk = true
+            } else if lowerURL.contains("fr.wikipedia.org") || lowerURL.contains("es.wikipedia.org") {
+                isEnglishChunk = false
+            } else {
+                let detectedChunkLang = Self.detectQueryLanguage(for: String(candidate.chunk.text.prefix(240)), fallback: language)
+                isEnglishChunk = (detectedChunkLang == .english && primaryLang != .english && !effectiveWikiQueries.isEmpty)
             }
-        } else if let embedding {
-            for candidate in topCosineCandidates {
-                let isEnglishWikiChunk = candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true
-                let semanticScore: Double
-                if isEnglishWikiChunk,
-                   let enQuery = englishQueryForWiki,
-                   let enEmb = englishSentenceEmbedding {
-                    var enSemantic = nlEmbeddingRelevanceScore(
+            var semanticScore: Double = 0.0
+
+            if isEnglishChunk,
+               let enEmb = englishSentenceEmbedding {
+                var enSemantic = nlEmbeddingRelevanceScore(
+                    chunk: candidate.chunk,
+                    query: englishQueryForWiki,
+                    unitQueryVector: englishUnitQueryVector,
+                    embedding: enEmb,
+                    options: options
+                )
+                if let enWordEmb = englishWordEmbedding {
+                    let enWord = wordEmbeddingSemanticScore(
                         chunk: candidate.chunk,
-                        query: enQuery,
-                        unitQueryVector: englishUnitQueryVector,
-                        embedding: enEmb,
-                        options: options
+                        query: englishQueryForWiki,
+                        wordEmbedding: enWordEmb
                     )
-                    if let enWordEmb = englishWordEmbedding {
-                        let enWord = wordEmbeddingSemanticScore(
-                            chunk: candidate.chunk,
-                            query: enQuery,
-                            wordEmbedding: enWordEmb
-                        )
-                        enSemantic = enSemantic * 0.75 + enWord * 0.25
-                    }
-                    semanticScore = enSemantic
-                } else {
-                    var primarySemantic = nlEmbeddingRelevanceScore(
-                        chunk: candidate.chunk,
-                        query: query,
-                        unitQueryVector: nil,
-                        embedding: embedding,
-                        options: options
-                    )
-                    if let wordEmbedding {
-                        let wordScore = wordEmbeddingSemanticScore(
-                            chunk: candidate.chunk,
-                            query: query,
-                            wordEmbedding: wordEmbedding
-                        )
-                        primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
-                    }
-                    semanticScore = primarySemantic
+                    enSemantic = enSemantic * 0.75 + enWord * 0.25
                 }
-                let combinedScore = semanticScore + candidate.baseScore * 0.35
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
-            }
-        } else if let wordEmbedding {
-            for candidate in topCosineCandidates {
+                semanticScore = enSemantic
+            } else if let qInfo = queryEmbeddingInfo {
+                var primarySemantic = nlEmbeddingRelevanceScore(
+                    chunk: candidate.chunk,
+                    query: qInfo.query,
+                    unitQueryVector: qInfo.unitVector,
+                    embedding: qInfo.embedding,
+                    options: options
+                )
+                if let wordEmbedding {
+                    let wordScore = wordEmbeddingSemanticScore(
+                        chunk: candidate.chunk,
+                        query: primaryWebQuery,
+                        wordEmbedding: wordEmbedding
+                    )
+                    primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
+                }
+                semanticScore = primarySemantic
+            } else if let embedding {
+                var primarySemantic = nlEmbeddingRelevanceScore(
+                    chunk: candidate.chunk,
+                    query: primaryWebQuery,
+                    unitQueryVector: nil,
+                    embedding: embedding,
+                    options: options
+                )
+                if let wordEmbedding {
+                    let wordScore = wordEmbeddingSemanticScore(
+                        chunk: candidate.chunk,
+                        query: primaryWebQuery,
+                        wordEmbedding: wordEmbedding
+                    )
+                    primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
+                }
+                semanticScore = primarySemantic
+            } else if let wordEmbedding {
                 let wordScore = wordEmbeddingSemanticScore(
                     chunk: candidate.chunk,
-                    query: query,
+                    query: primaryWebQuery,
                     wordEmbedding: wordEmbedding,
                     includeBoostsWithOptions: options
                 )
-                let combinedScore = wordScore + candidate.baseScore * 0.45
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
+                semanticScore = wordScore
             }
-        } else {
-            for candidate in topCosineCandidates {
-                ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: candidate.baseScore))
-            }
+
+            let combinedScore = semanticScore + candidate.baseScore * 0.35 + candidate.leadBonus
+            ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
         }
 
         ranked.sort { lhs, rhs in
@@ -1240,7 +1422,9 @@ actor RAGContextService {
         let nonContextTokens = queryTokens + historyTokens + options.instructionTokens + options.promptOverheadTokens + effectiveOutputTokens
         let availableTokens = max(0, TokenBudgeting.contextWindowLimit - nonContextTokens)
         let budgetedTokens = Int(Double(availableTokens) * min(max(contextUtilizationFactor, 0.1), 1.0))
-        return max(options.minContextTokens * options.avgCharsPerToken, budgetedTokens * options.avgCharsPerToken)
+        let implicitProfileCap = TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens).kind.implicitContextCharacters
+        let budgetedChars = budgetedTokens * options.avgCharsPerToken
+        return min(implicitProfileCap, max(options.minContextTokens * options.avgCharsPerToken, budgetedChars))
     }
 
     /// Resolves the `NLEmbedding` sentence embedding matching the detected user query language.
@@ -1296,15 +1480,17 @@ actor RAGContextService {
         let uniqueChunkTerms = Array(Set(chunkTerms).prefix(64))
         for qTerm in Set(queryTerms) {
             let qStem = Self.stemStatic(qTerm)
+            let qRoot = Self.morphologicalRootStatic(qTerm)
             var bestTermSim = 0.0
+            var bestContextSim = 0.0
             let hasQVector = wordEmbedding.contains(qTerm) || wordEmbedding.contains(qStem)
             let qLookup = wordEmbedding.contains(qTerm) ? qTerm : qStem
 
             for cTerm in uniqueChunkTerms {
                 let cStem = Self.stemStatic(cTerm)
-                if qStem == cStem {
+                if qStem == cStem || qRoot == Self.morphologicalRootStatic(cTerm) {
                     bestTermSim = 1.0
-                    break
+                    continue
                 }
                 if hasQVector {
                     let cLookup = wordEmbedding.contains(cTerm) ? cTerm : (wordEmbedding.contains(cStem) ? cStem : nil)
@@ -1315,11 +1501,14 @@ actor RAGContextService {
                             if sim > bestTermSim {
                                 bestTermSim = sim
                             }
+                            if sim > bestContextSim {
+                                bestContextSim = sim
+                            }
                         }
                     }
                 }
             }
-            totalSimilarity += bestTermSim
+            totalSimilarity += bestTermSim + bestContextSim * 0.25
             evaluatedQueryTerms += 1
         }
 
@@ -1342,7 +1531,7 @@ actor RAGContextService {
         embedding: NLEmbedding,
         options: RAGSelectionOptions
     ) -> Double {
-        let sampleText = chunk.text.count > 600 ? String(chunk.text.prefix(600)) : chunk.text
+        let sampleText = chunk.text.count > 850 ? String(chunk.text.prefix(850)) : chunk.text
         let distance: Double
         if let unitQueryVector, let chunkVector = embedding.vector(for: sampleText) {
             let chunkNorm = sqrt(chunkVector.map { $0 * $0 }.reduce(0, +))
@@ -1398,7 +1587,7 @@ actor RAGContextService {
         var vector: [String: Double] = [:]
         for query in queries {
             for term in contentTokens(from: query) {
-                let stem = Self.stemStatic(term)
+                let stem = Self.morphologicalRootStatic(term)
                 vector[stem, default: 0] += 1
             }
         }
@@ -1418,7 +1607,7 @@ actor RAGContextService {
         let text = chunk.text
         var textVector: [String: Double] = [:]
         for term in contentTokens(from: "\(chunk.source) \(text)") {
-            let stem = Self.stemStatic(term)
+            let stem = Self.morphologicalRootStatic(term)
             textVector[stem, default: 0] += 1
         }
         guard !textVector.isEmpty else { return 0 }
@@ -1858,6 +2047,23 @@ actor RAGContextService {
             return str
         }
         if (str.hasSuffix("s") && !str.hasSuffix("ss")) || str.hasSuffix("x") {
+            str.removeLast()
+        }
+        return str
+    }
+
+    /// Normalizes a token to its morphological root so country/demonym variants
+    /// (e.g. "ukraine" / "ukrainian", "germany" / "german", "italy" / "italian") match identically.
+    nonisolated static func morphologicalRootStatic(_ token: String) -> String {
+        var str = stemStatic(token)
+        guard str.count > 4 else { return str }
+        if str.hasSuffix("ian") && str.count > 5 {
+            str.removeLast(3)
+        } else if str.hasSuffix("ienne") && str.count > 7 {
+            str.removeLast(5)
+        } else if str.hasSuffix("ien") && str.count > 5 {
+            str.removeLast(3)
+        } else if (str.hasSuffix("e") || str.hasSuffix("y")) && str.count >= 6 {
             str.removeLast()
         }
         return str

@@ -1327,6 +1327,8 @@ struct SearchView: View {
             do {
                 let fetchedResults: [SearchResult]
                 var generatedSubQueries: [String]? = nil
+                var generatedWebQueries: [String]? = nil
+                var generatedWikiQueries: [String]? = nil
                 if !noAIOnly && isModelAvailable {
                     let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
                     let generated = await SearchSourcesTool.generateQueries(
@@ -1337,6 +1339,8 @@ struct SearchView: View {
                         useWikipedia: settings.useWikipedia,
                         wikipediaSource: settings.wikipediaSource
                     )
+                    generatedWebQueries = generated.webQueries
+                    generatedWikiQueries = generated.wikiQueries
                     var subQs = [trimmedQuery]
                     for q in generated.webQueries + generated.wikiQueries where !subQs.contains(q) {
                         subQs.append(q)
@@ -1396,7 +1400,9 @@ struct SearchView: View {
                         maxScrapingResults: targetScrapeResults,
                         maxScrapingChars: targetScrapeChars,
                         summaryResults: fetchedResults,
-                        subQueries: generatedSubQueries
+                        subQueries: generatedSubQueries,
+                        webQueries: generatedWebQueries,
+                        wikiQueries: generatedWikiQueries
                     )
                 } else {
                     searchService.isSearching = false
@@ -1438,7 +1444,14 @@ struct SearchView: View {
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil, subQueries: [String]? = nil) async {
+    private func generateSummary(
+        maxScrapingResults: Int? = nil,
+        maxScrapingChars: Int? = nil,
+        summaryResults: [SearchResult]? = nil,
+        subQueries: [String]? = nil,
+        webQueries: [String]? = nil,
+        wikiQueries: [String]? = nil
+    ) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
@@ -1458,6 +1471,8 @@ struct SearchView: View {
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
             subQueries: subQueries,
+            webQueries: webQueries,
+            wikiQueries: wikiQueries,
             generateAnswer: isModelAvailable,
             onSummaryPartialUpdate: { _ in
                 if summaryElapsedSeconds == nil, let start = summaryStartTime {

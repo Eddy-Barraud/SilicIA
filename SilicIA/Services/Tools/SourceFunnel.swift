@@ -246,6 +246,8 @@ struct SourceFunnel {
             maxOutputTokens: responseTokens,
             contextUtilizationFactor: contextUtilizationFactor,
             queries: allSubQueries,
+            webQueries: cleanWeb,
+            wikiQueries: cleanWiki,
             language: language
         )
         let rankElapsed = Date().timeIntervalSince(rankStart)

@@ -101,7 +101,8 @@ class AIService: ObservableObject {
         if pageMarkdown.isEmpty {
             pageMarkdown = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters) ?? ""
         }
-        let trimmedContent = pageMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedContent = RAGChunker.stripWikipediaNavboxes(from: pageMarkdown)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else { return ("", "") }
 
         guard let instructions = PromptLoader.loadPrompt(
@@ -174,7 +175,7 @@ class AIService: ObservableObject {
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, subQueries: [String]? = nil, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, subQueries: [String]? = nil, webQueries: [String]? = nil, wikiQueries: [String]? = nil, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
@@ -253,7 +254,8 @@ class AIService: ObservableObject {
             } else if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
                 validResults.append(result)
-                let boundedText = effectiveScrapingChars > 0 ? String(retrievedContent.prefix(effectiveScrapingChars)) : retrievedContent
+                let maxRetrievedContentChars = 100_000
+                let boundedText = String(retrievedContent.prefix(maxRetrievedContentChars))
                 let chunked = RAGChunker.chunkParagraphs(
                     text: boundedText,
                     source: result.title,
@@ -303,6 +305,8 @@ class AIService: ObservableObject {
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor,
             queries: subQueries,
+            webQueries: webQueries,
+            wikiQueries: wikiQueries,
             language: language
         )
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
@@ -774,14 +778,35 @@ class AIService: ObservableObject {
         return ("\(ns.domain) code=\(ns.code): \(error.localizedDescription)", true)
     }
 
+    private nonisolated static let arithmeticRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\d\s*[\+\-\*\/\^]\s*\d|\d\s*%"#,
+        options: []
+    )
+    private nonisolated static let mathVerbsRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\b(?:calcul|calcule|calculer|calculez|combien font|somme de|multiplier|diviser|multiply|divide|square root|racine carrée)\b"#,
+        options: [.caseInsensitive]
+    )
+    private nonisolated static let dateRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\b(?:date|dates|aujourd'hui|heure|heures|quel jour|today|current time|what day|what time)\b"#,
+        options: [.caseInsensitive]
+    )
+
     /// Fast heuristic check to see if a factual query needs calculation or current date/time tools.
     /// Used in concise mode to bypass tool schemas and appendix, saving ~500 tokens of prefill
     /// and eliminating tool-routing passes to accelerate Time-To-First-Token.
     static func queryRequiresTools(_ query: String) -> Bool {
         let lower = query.lowercased()
-        let mathIndicators = ["+", "-", "*", "/", "%", "calcul", "combien font", "somme de", "multiplier", "diviser"]
-        let dateIndicators = ["date", "aujourd'hui", "heure", "quel jour", "today", "current time", "what day"]
-        return mathIndicators.contains { lower.contains($0) } || dateIndicators.contains { lower.contains($0) }
+        let nsRange = NSRange(lower.startIndex..., in: lower)
+        if let arithmetic = arithmeticRegex, arithmetic.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        if let math = mathVerbsRegex, math.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        if let date = dateRegex, date.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        return false
     }
 
     /// Single generation attempt. Throws on failure so the orchestrator
@@ -889,7 +914,7 @@ class AIService: ObservableObject {
                     keptReversed.append(chunk)
                     runningChars += sepChars + chunk.count
                 } else {
-                    break
+                    continue
                 }
             }
 
@@ -929,7 +954,7 @@ class AIService: ObservableObject {
                         keptReversed.append(chunk)
                         runningChars += sepChars + chunk.count
                     } else {
-                        break
+                        continue
                     }
                 }
                 if keptReversed.isEmpty, let mostRelevant = summaryChunks.last {

@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "SilicIA/Services/AIService.swift": {
-    "mtime": 1794096082.3920994,
-    "seen": 1794096423.60214,
-    "ast_hash": "2c170e0ee7f1075b316e6a8e3ce8c324",
+    "mtime": 1794138851.059075,
+    "seen": 1794138922.66395,
+    "ast_hash": "2ed2fdfb11a94f3e74aa520a9d0ca36b",
     "semantic_hash": ""
   },
   "SilicIA/Services/ChatService.swift": {
@@ -300,9 +300,9 @@
     "semantic_hash": "08154300d48ded3fd4e0043acc76caea"
   },
   "SilicIA/Services/RAGContextService.swift": {
-    "mtime": 1794096131.6437747,
-    "seen": 1794096423.6021519,
-    "ast_hash": "ef6d04cb78d9ef5475c3e3531133de39",
+    "mtime": 1794139164.9062414,
+    "seen": 1794139179.6076531,
+    "ast_hash": "d55beda8e69f1d65bb4793f4481be456",
     "semantic_hash": ""
   },
   "SilicIA/Services/Sanitizer.swift": {
@@ -336,15 +336,15 @@
     "semantic_hash": "52f5c670ec19166bce7e668c5f9ab2d3"
   },
   "SilicIA/Services/Tools/SearchSourcesTool.swift": {
-    "mtime": 1794096279.731368,
-    "seen": 1794096423.602156,
-    "ast_hash": "f94928fddc3dab6cf13aecbb104b671c",
+    "mtime": 1794139011.1789742,
+    "seen": 1794139037.5295382,
+    "ast_hash": "976fa169d8aa8f983fc92b2b04524aa4",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/SourceFunnel.swift": {
-    "mtime": 1794080367.2008526,
-    "seen": 1794080717.7929358,
-    "ast_hash": "657db4707889b1b0e8f06fec6f2f7909",
+    "mtime": 1794137455.8273363,
+    "seen": 1794137684.682985,
+    "ast_hash": "e820e1769094d3de8156ede66d49f407",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/ToolCallGovernor.swift": {
@@ -450,9 +450,9 @@
     "semantic_hash": "9e1dba20eec0deaea5629f94981b0675"
   },
   "SilicIA/Views/SearchView.swift": {
-    "mtime": 1794080565.6335094,
-    "seen": 1794080717.79295,
-    "ast_hash": "dabc206d62066405d0a78a4377753fab",
+    "mtime": 1794137548.1033487,
+    "seen": 1794137684.6829991,
+    "ast_hash": "9592914d26f4f8ba26d40c69101f66e4",
     "semantic_hash": ""
   },
   "SilicIA/Views/SourceToggleButtons.swift": {
@@ -546,9 +546,9 @@
     "semantic_hash": ""
   },
   "SilicIATests/RAGChunkerTests.swift": {
-    "mtime": 1794096317.282795,
-    "seen": 1794096423.602182,
-    "ast_hash": "16e52a94eedd3422850924ee2d4d2c0b",
+    "mtime": 1794138890.783989,
+    "seen": 1794138922.663998,
+    "ast_hash": "3e49d06a8a3ef135d79fb474a075b675",
     "semantic_hash": ""
   },
   "SilicIATests/RAGPDFRankingTests.swift": {

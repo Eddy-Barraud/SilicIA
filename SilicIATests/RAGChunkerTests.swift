@@ -530,6 +530,141 @@ final class RAGChunkerTests: XCTestCase {
         }
     }
 
+    func testWikipediaNavboxTablesAreFilteredOut() {
+        let markdownWithNavbox = """
+        | Part of a series on | Politics of Germany |
+        | --- | --- |
+        | President | Frank-Walter Steinmeier |
+        | * v * t * e | |
+
+        The President of Germany is the head of state of the Federal Republic of Germany.
+        The current officeholder is Frank-Walter Steinmeier.
+
+        | Real Data Table | Metric |
+        | --- | --- |
+        | Surface Area | 357,022 km2 |
+        """
+
+        let chunks = RAGChunker.chunkParagraphs(text: markdownWithNavbox, source: "Germany", url: "https://en.wikipedia.org/wiki/President_of_Germany")
+        XCTAssertFalse(chunks.contains { $0.text.contains("* v * t * e") })
+        XCTAssertFalse(chunks.contains { $0.text.contains("Part of a series on") })
+        XCTAssertTrue(chunks.contains { $0.text.contains("Frank-Walter Steinmeier") })
+        XCTAssertTrue(chunks.contains { $0.text.contains("Real Data Table") })
+    }
+
+    func testContinuationCuesAndCohesiveMerging() {
+        let chunk1 = RAGChunk(
+            source: "Math",
+            text: "The double factorial of an even integer n is defined as:",
+            url: "https://example.com/math",
+            pdfPage: nil
+        )
+        let chunk2 = RAGChunk(
+            source: "Math",
+            text: "n!! = n * (n - 2) * ... * 2",
+            url: "https://example.com/math",
+            pdfPage: nil
+        )
+        let merged = RAGChunker.mergeShortConsecutiveChunks([chunk1, chunk2])
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertTrue(merged[0].text.contains("defined as:"))
+        XCTAssertTrue(merged[0].text.contains("n!! ="))
+    }
+
+    func testQueryRequiresToolsHeuristic() {
+        // Hyphenated French words or questions without math should NOT trigger tools
+        XCTAssertFalse(AIService.queryRequiresTools("est-ce que la morille est un champignon toxique"))
+        XCTAssertFalse(AIService.queryRequiresTools("peut-on congeler le fromage ?"))
+        XCTAssertFalse(AIService.queryRequiresTools("quelle est la demi-vie du carbone 14 ?"))
+        XCTAssertFalse(AIService.queryRequiresTools("explique la chaleur de réaction"))
+        XCTAssertFalse(AIService.queryRequiresTools("quelle est la meilleure solution ?"))
+        XCTAssertFalse(AIService.queryRequiresTools("compare la superficie en %"))
+
+        // Legitimate arithmetic and date requests SHOULD trigger tools
+        XCTAssertTrue(AIService.queryRequiresTools("15 * 24"))
+        XCTAssertTrue(AIService.queryRequiresTools("50% de 200"))
+        XCTAssertTrue(AIService.queryRequiresTools("combien font 12 + 14 ?"))
+        XCTAssertTrue(AIService.queryRequiresTools("calcule la surface d'un cercle"))
+        XCTAssertTrue(AIService.queryRequiresTools("quelle est la date d'aujourd'hui ?"))
+        XCTAssertTrue(AIService.queryRequiresTools("quelle heure est-il ?"))
+    }
+
+    func testUkraineLeadSectionAbsorptionAndQueryDeduplication() async {
+        // 1. Morphological variants ("President of Ukraine" vs "Ukrainian President") should deduplicate
+        XCTAssertTrue(
+            SearchSourcesTool.isSimilarQuery(
+                "President of Ukraine",
+                "Ukrainian President",
+                distance: 0.819
+            ),
+            "Morphological variants ('Ukraine' / 'Ukrainian') must be recognized as duplicate queries"
+        )
+
+        // 2. Strip Wikipedia navboxes from raw markdown for WebPageSummary while keeping prose and headings
+        let ukraineMarkdown = """
+        # President of Ukraine
+
+        The **president of Ukraine** (Ukrainian: Президент України, romanized: *Prezydent Ukrainy*) is the head of state of Ukraine. The president represents the nation in international relations, administers the foreign political activity of the state, conducts negotiations and concludes international treaties. The president is directly elected by the citizens of Ukraine for a five-year term of office (whether the presidential election is early or scheduled), limited to two terms consecutively.
+
+        The president's official residence is the Mariinskyi Palace, located in the Pechersk district of the capital Kyiv. Other official residences include the House with Chimaeras and the House of the Weeping Widow, which are used for official visits by foreign representatives. The Office of the President of Ukraine, unofficially known as "Bankova" in reference to the street it is located on, serves as the presidential office, advising the president in the domestic, foreign and legal matters.
+
+        Since the office's establishment on 5 December 1991, there have been six presidents of Ukraine. Leonid Kravchuk was the inaugural president, serving three years from 1991 until his resignation in 1994. Leonid Kuchma was the only president to have served two consecutive terms in office. Viktor Yushchenko, Petro Poroshenko, and Viktor Yanukovych served one term, with the latter being replaced by acting president Oleksandr Turchynov, who then also served as Chairman of the Ukrainian Parliament, on 21 February 2014. Oleksandr Turchynov was the only acting president in Ukraine's modern history. The powers of an acting president are severely limited. On 18 June 2015, Yanukovych was officially deprived of the title of president of Ukraine. The Government of Ukraine utilizes a semi-presidential system in which the roles of the head of state and head of government are separate, thus the president of Ukraine is not the nation's head of government. The prime minister serves as the head of government, a role currently filled by Denys Shmyhal who took office in March 2020.
+
+        The current president is Volodymyr Zelenskyy, who took the oath of office on 20 May 2019. Due to martial law, elections in the country have been suspended.
+
+        | Politics of Ukraine |
+        | --- |
+        | Presidency * President + Volodymyr Zelenskyy |
+        | * v * t * e |
+
+        ## Overview
+
+        The president is also the supreme commander-in-chief of the Ukrainian Armed Forces, and heads the National Security and Defence Council, which advises the president, co-ordinates and controls executive power in the sphere of national security and defence.
+        """
+
+        let strippedForWebPage = RAGChunker.stripWikipediaNavboxes(from: ukraineMarkdown)
+        XCTAssertFalse(strippedForWebPage.contains("* v * t * e"))
+        XCTAssertTrue(strippedForWebPage.contains("## Overview"))
+        XCTAssertTrue(strippedForWebPage.contains("Volodymyr Zelenskyy"))
+
+        // 3. Verify lead-section paragraph ("The current president is Volodymyr Zelenskyy...") is merged into Lead[0]
+        // rather than crossing `## Overview` into sectionIndex == 1
+        let rawChunks = RAGChunker.chunkParagraphs(
+            text: ukraineMarkdown,
+            source: "President of Ukraine",
+            url: "https://en.wikipedia.org/wiki/President_of_Ukraine"
+        )
+        let mergedChunks = RAGChunker.mergeShortConsecutiveChunks(rawChunks)
+        guard let firstLeadChunk = mergedChunks.first else {
+            XCTFail("Expected merged chunks")
+            return
+        }
+        XCTAssertEqual(firstLeadChunk.sectionIndex, 0)
+        XCTAssertTrue(
+            firstLeadChunk.text.contains("The current president is Volodymyr Zelenskyy"),
+            "Short trailing lead paragraph should merge into the primary lead chunk of section 0"
+        )
+        XCTAssertFalse(
+            firstLeadChunk.text.contains("supreme commander-in-chief"),
+            "Lead section paragraphs must not merge across ## Overview boundary"
+        )
+
+        // 4. Verify RAGContextService ranks the Zelenskyy lead chunk #1 (at the end of selectedChunks)
+        let service = RAGContextService()
+        let selection = await service.selectContext(
+            chunks: rawChunks,
+            query: "qui est le président de l'Ukraine ?",
+            historyTokens: 0,
+            maxOutputTokens: 500,
+            queries: ["qui est le président de l'Ukraine ?", "President of Ukraine"],
+            webQueries: [],
+            wikiQueries: ["President of Ukraine"],
+            language: .french
+        )
+        XCTAssertTrue(selection.selectedContext.contains("The current president is Volodymyr Zelenskyy"))
+        XCTAssertEqual(selection.selectedChunks.last?.chunk.text.contains("Volodymyr Zelenskyy"), true)
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size

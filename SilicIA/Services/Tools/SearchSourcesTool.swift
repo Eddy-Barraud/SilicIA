@@ -28,7 +28,7 @@ struct SearchSourcesTool: Tool {
         @Guide(description: "Two distinct web search queries written strictly in the same language as the user's prompt.", .count(2))
         var webQueries: [String] = []
 
-        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory).", .count(2))
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory). Expand any acronyms into full English technical names (e.g. RMN -> Nuclear magnetic resonance). Never write questions.", .count(2))
         var wikiQueries: [String] = []
     }
 
@@ -46,7 +46,7 @@ struct SearchSourcesTool: Tool {
         @Guide(description: "One targeted web search query written strictly in the same language as the user's prompt.")
         var webQuery: String = ""
 
-        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory).")
+        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory). Expand any acronyms into full English technical names. Never write questions.")
         var wikiQuery: String = ""
     }
 
@@ -64,7 +64,7 @@ struct SearchSourcesTool: Tool {
 
     @Generable
     struct WikiFastOnlyArguments {
-        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory).", .count(2))
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory). Expand any acronyms into full English technical names. Never write questions.", .count(2))
         var wikiQueries: [String] = []
     }
 
@@ -82,7 +82,7 @@ struct SearchSourcesTool: Tool {
 
     @Generable
     struct WikiFastOnlySingleQueryArguments {
-        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory).")
+        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory). Expand any acronyms into full English technical names. Never write questions.")
         var wikiQuery: String = ""
     }
 
@@ -132,9 +132,9 @@ struct SearchSourcesTool: Tool {
                     if isWikiFast && useWikipedia {
                         topicLabel = "Sujet (webQuery en français, wikiQuery en anglais)"
                         if useDuckDuckGo {
-                            conciseInstructions = "Génère 1 requête de recherche web ciblée rédigée en français (webQuery) et 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery)."
+                            conciseInstructions = "Génère 1 requête web en français (webQuery) et 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de question."
                         } else {
-                            conciseInstructions = "Génère 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery) pour le sujet."
+                            conciseInstructions = "Génère 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de question."
                         }
                     } else {
                         topicLabel = "Sujet (rédige les requêtes en français)"
@@ -150,9 +150,9 @@ struct SearchSourcesTool: Tool {
                     if isWikiFast && useWikipedia {
                         topicLabel = "Tema (webQuery en español, wikiQuery en inglés)"
                         if useDuckDuckGo {
-                            conciseInstructions = "Genera 1 consulta de búsqueda web redactada en español (webQuery) y 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery)."
+                            conciseInstructions = "Genera 1 consulta web en español (webQuery) y 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery). Desarrolla siglas y acrónimos a su nombre técnico en inglés. Nunca formules preguntas."
                         } else {
-                            conciseInstructions = "Genera 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery) para el tema."
+                            conciseInstructions = "Genera 1 título de artículo de Wikipedia traducido OBLIGATORIAMENTE al inglés (wikiQuery). Desarrolla siglas y acrónimos a su nombre técnico en inglés. Nunca formules preguntas."
                         }
                     } else {
                         topicLabel = "Tema (redacta las consultas en español)"
@@ -167,11 +167,11 @@ struct SearchSourcesTool: Tool {
                 case .english:
                     topicLabel = "Topic (write queries in English)"
                     if useDuckDuckGo && useWikipedia {
-                        conciseInstructions = "Generate 1 targeted web search query and 1 Wikipedia article title for the topic, in English. Be concise and precise."
+                        conciseInstructions = "Generate 1 targeted web search query and 1 Wikipedia article title for the topic, in English. Expand any acronyms to their full technical name. Never write questions."
                     } else if useDuckDuckGo {
                         conciseInstructions = "Generate 1 targeted web search query for the topic, in English. Be concise and precise."
                     } else {
-                        conciseInstructions = "Generate 1 Wikipedia article title for the topic, in English. Be concise and precise."
+                        conciseInstructions = "Generate 1 Wikipedia article title for the topic, in English. Expand any acronyms to their full technical name. Never write questions."
                     }
                 }
 
@@ -245,10 +245,10 @@ struct SearchSourcesTool: Tool {
                 if isWikiFast && useWikipedia {
                     if useDuckDuckGo {
                         topicLabel = "Sujet (webQueries en français, wikiQueries en anglais)"
-                        instructions = "Génère 2 requêtes de recherche web rédigées en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries)."
+                        instructions = "Génère 2 requêtes web en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de questions."
                     } else {
                         topicLabel = "Sujet (wikiQueries en anglais)"
-                        instructions = "Génère 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries) pour le sujet."
+                        instructions = "Génère 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de questions."
                     }
                 } else {
                     topicLabel = "Sujet (rédige les requêtes en français)"
@@ -264,10 +264,10 @@ struct SearchSourcesTool: Tool {
                 if isWikiFast && useWikipedia {
                     if useDuckDuckGo {
                         topicLabel = "Tema (webQueries en español, wikiQueries en inglés)"
-                        instructions = "Genera 2 consultas de búsqueda web redactadas en español (webQueries) y 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries)."
+                        instructions = "Genera 2 consultas web en español (webQueries) y 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries). Desarrolla siglas y acrónimos a su nombre técnico en inglés. Nunca formules preguntas."
                     } else {
                         topicLabel = "Tema (wikiQueries en inglés)"
-                        instructions = "Genera 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries) para el tema."
+                        instructions = "Genera 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries) para el tema. Desarrolla siglas y acrónimos a su nombre técnico en inglés. Nunca formules preguntas."
                     }
                 } else {
                     topicLabel = "Tema (redacta las consultas en español)"
@@ -282,11 +282,11 @@ struct SearchSourcesTool: Tool {
             case .english:
                 topicLabel = "Topic (write queries in English)"
                 if useDuckDuckGo && useWikipedia {
-                    instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Be concise and precise."
+                    instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Expand any acronyms to their full technical name. Never write questions."
                 } else if useDuckDuckGo {
                     instructions = "Generate 2 web search queries for the topic, in English. Be concise and precise."
                 } else {
-                    instructions = "Generate 2 Wikipedia article titles for the topic, in English. Be concise and precise."
+                    instructions = "Generate 2 Wikipedia article titles for the topic, in English. Expand any acronyms to their full technical name. Never write questions."
                 }
             }
 
@@ -409,13 +409,21 @@ struct SearchSourcesTool: Tool {
         }
     }
 
-    private static func isSimilarQuery(_ a: String, _ b: String, distance: Double) -> Bool {
+    internal static func isSimilarQuery(_ a: String, _ b: String, distance: Double) -> Bool {
         let lowerA = a.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         let lowerB = b.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         if lowerA == lowerB { return true }
         if lowerA.contains(lowerB) || lowerB.contains(lowerA) { return true }
-        let wordsA = Set(lowerA.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 })
-        let wordsB = Set(lowerB.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { $0.count > 2 })
+        let wordsA = Set(
+            lowerA.components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 2 }
+                .map { RAGContextService.morphologicalRootStatic($0) }
+        )
+        let wordsB = Set(
+            lowerB.components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { $0.count > 2 }
+                .map { RAGContextService.morphologicalRootStatic($0) }
+        )
         let intersection = wordsA.intersection(wordsB)
         let union = wordsA.union(wordsB)
         let jaccard = union.isEmpty ? 0.0 : Double(intersection.count) / Double(union.count)
