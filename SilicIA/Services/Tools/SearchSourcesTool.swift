@@ -28,7 +28,7 @@ struct SearchSourcesTool: Tool {
         @Guide(description: "Two distinct web search queries written strictly in the same language as the user's prompt.", .count(2))
         var webQueries: [String] = []
 
-        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory). Expand any acronyms into full English technical names (e.g. RMN -> Nuclear magnetic resonance). Never write questions.", .count(2))
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory). Expand any acronyms into full English technical names. Never write questions.", .count(2))
         var wikiQueries: [String] = []
     }
 
@@ -132,9 +132,9 @@ struct SearchSourcesTool: Tool {
                     if isWikiFast && useWikipedia {
                         topicLabel = "Sujet (webQuery en français, wikiQuery en anglais)"
                         if useDuckDuckGo {
-                            conciseInstructions = "Génère 1 requête web en français (webQuery) et 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de question."
+                            conciseInstructions = "Génère 1 requête web en français (webQuery) et 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais. Ne formule jamais de question."
                         } else {
-                            conciseInstructions = "Génère 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de question."
+                            conciseInstructions = "Génère 1 titre d'article Wikipédia traduit OBLIGATOIREMENT en anglais (wikiQuery) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais. Ne formule jamais de question."
                         }
                     } else {
                         topicLabel = "Sujet (rédige les requêtes en français)"
@@ -245,10 +245,10 @@ struct SearchSourcesTool: Tool {
                 if isWikiFast && useWikipedia {
                     if useDuckDuckGo {
                         topicLabel = "Sujet (webQueries en français, wikiQueries en anglais)"
-                        instructions = "Génère 2 requêtes web en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de questions."
+                        instructions = "Génère 2 requêtes web en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries). Développe impérativement les sigles/acronymes en leur nom technique complet en anglais. Ne formule jamais de questions."
                     } else {
                         topicLabel = "Sujet (wikiQueries en anglais)"
-                        instructions = "Génère 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais (ex. RMN -> Nuclear magnetic resonance). Ne formule jamais de questions."
+                        instructions = "Génère 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries) pour le sujet. Développe impérativement les sigles/acronymes en leur nom technique complet en anglais. Ne formule jamais de questions."
                     }
                 } else {
                     topicLabel = "Sujet (rédige les requêtes en français)"

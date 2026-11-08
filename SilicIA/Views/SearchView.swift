@@ -1087,9 +1087,10 @@ struct SearchView: View {
                 // (falling back to already retrieved Markdown from /top_n_articles) and render via MarkdownContentView.
                 let fetchedArticle = try? await searchService.fetchWikiFastArticle(title: wikiFastTitle)
                 guard activeWebPageSummaryRequestID == requestID else { return }
-                let articleMarkdown = (fetchedArticle?.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                let rawMarkdown = (fetchedArticle?.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
                     ? fetchedArticle!.text
                     : (result.retrievedContent ?? result.snippet)
+                let articleMarkdown = ModelOutputLaTeXSanitizer.formatWikiFastMath(rawMarkdown)
                 webPageReaderHTML = ""
                 webPageMarkdownText = articleMarkdown
                 preExtractedPlainText = articleMarkdown
@@ -1116,7 +1117,7 @@ struct SearchView: View {
             isGeneratingWebPageSummary = false
 
             if webPageReaderHTML.isEmpty && webPageMarkdownText.isEmpty && !markdown.isEmpty {
-                webPageMarkdownText = markdown
+                webPageMarkdownText = ModelOutputLaTeXSanitizer.formatWikiFastMath(markdown)
             }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty && webPageSummaryText.isEmpty {

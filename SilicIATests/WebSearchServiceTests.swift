@@ -606,7 +606,7 @@ final class WebSearchServiceTests: XCTestCase {
     @MainActor
     func testDuckDuckGoRequestPacerStaggersConcurrentRequests() async throws {
         XCTAssertEqual(WebSearchService.duckDuckGoRequestJitterRange.lowerBound, 0.0)
-        XCTAssertEqual(WebSearchService.duckDuckGoRequestJitterRange.upperBound, 0.5)
+        XCTAssertEqual(WebSearchService.duckDuckGoRequestJitterRange.upperBound, 1.5)
 
         let service = WebSearchService()
         let start = Date()
@@ -623,13 +623,13 @@ final class WebSearchServiceTests: XCTestCase {
             }
             timestamps.sort()
             XCTAssertEqual(timestamps.count, 4)
-            // First slot fires immediately; 4 concurrent requests have 3 gaps of [0.0, 0.5]s -> total <= ~1.6s
+            // First slot fires immediately; 4 concurrent requests have 3 gaps of [0.0, 1.5]s -> total <= ~4.6s
             let totalElapsed = Date().timeIntervalSince(start)
-            XCTAssertLessThan(totalElapsed, 2.0, "4 staggered requests with 0...0.5s gaps should finish within 2.0s")
+            XCTAssertLessThan(totalElapsed, 5.0, "4 staggered requests with 0...1.5s gaps should finish within 5.0s")
             for i in 1..<timestamps.count {
                 let gap = timestamps[i].timeIntervalSince(timestamps[i - 1])
                 XCTAssertGreaterThanOrEqual(gap, -0.02, "Slots must be non-decreasing")
-                XCTAssertLessThanOrEqual(gap, 0.65, "Each gap between consecutive requests must be within 0...0.5s (+ scheduler tolerance)")
+                XCTAssertLessThanOrEqual(gap, 1.65, "Each gap between consecutive requests must be within 0...1.5s (+ scheduler tolerance)")
             }
         }
     }

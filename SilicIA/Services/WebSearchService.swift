@@ -728,13 +728,14 @@ class WebSearchService: ObservableObject {
             let cleanTitle = article.title.trimmingCharacters(in: .whitespacesAndNewlines)
             let cleanText = article.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !cleanTitle.isEmpty, !cleanText.isEmpty else { return nil }
+            let formattedText = ModelOutputLaTeXSanitizer.formatWikiFastMath(cleanText)
             let onlineURL = Self.onlineWikipediaURL(forTitle: cleanTitle)
-            let snippet = Self.extractLeadSnippet(fromMarkdown: cleanText, fallback: cleanTitle)
+            let snippet = Self.extractLeadSnippet(fromMarkdown: formattedText, fallback: cleanTitle)
             return SearchResult(
                 title: cleanTitle,
                 url: onlineURL,
                 snippet: snippet,
-                retrievedContent: cleanText,
+                retrievedContent: formattedText,
                 snippetSimilarity: nil,
                 isBelowRelevanceThreshold: false,
                 wikiFastTitle: cleanTitle
@@ -760,7 +761,9 @@ class WebSearchService: ObservableObject {
             throw SearchError.invalidResponse
         }
 
-        return try Self.jsonDecoder.decode(WikiFastArticle.self, from: data)
+        let rawArticle = try Self.jsonDecoder.decode(WikiFastArticle.self, from: data)
+        let formattedText = ModelOutputLaTeXSanitizer.formatWikiFastMath(rawArticle.text)
+        return WikiFastArticle(title: rawArticle.title, text: formattedText)
     }
 
     /// Extracts the language and article key from a Wikipedia URL, filtering out non-article namespaces and URL fragments.

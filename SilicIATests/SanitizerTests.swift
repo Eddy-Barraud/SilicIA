@@ -97,4 +97,93 @@ final class SanitizerTests: XCTestCase {
         XCTAssertTrue(sanitized.contains("- Create Core Data-like structures using @NSManaged and custom properties."))
         XCTAssertTrue(sanitized.contains("- Configure persistence with NSPersistentContainer and context management."))
     }
+
+    func testFormatWikiFastMathUserExample() {
+        let input = """
+        This equation is derived from
+
+        * Boyle's law: {\\displaystyle V\\propto {\\frac {1}{P}}};
+
+        * Charles's law: {\\displaystyle V\\propto T};
+
+        * Avogadro's law: {\\displaystyle V\\propto n}.
+        """
+
+        let output = ModelOutputLaTeXSanitizer.formatWikiFastMath(input)
+
+        XCTAssertFalse(output.contains("{\\displaystyle"))
+        XCTAssertTrue(output.contains("* Boyle's law: $\\displaystyle V\\propto {\\frac {1}{P}}$;"))
+        XCTAssertTrue(output.contains("* Charles's law: $\\displaystyle V\\propto T$;"))
+        XCTAssertTrue(output.contains("* Avogadro's law: $\\displaystyle V\\propto n$."))
+    }
+
+    func testFormatWikiFastMathNestedBracesAndEscapes() {
+        // Nested braces
+        let nested = "Set theory {\\displaystyle {\\mathsf {IZF}}} and fraction {\\displaystyle {\\frac {1 + {\\frac {a}{b}}}{2}}}."
+        let nestedOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(nested)
+        XCTAssertFalse(nestedOutput.contains("{\\displaystyle"))
+        XCTAssertTrue(nestedOutput.contains("$\\displaystyle {\\mathsf {IZF}}$"))
+        XCTAssertTrue(nestedOutput.contains(#"$\displaystyle {\frac {1 + {\frac {a}{b}}}{2}}$"#))
+
+        // Escaped braces in sets \{ ... \}
+        let set = #"{\displaystyle \{x \in \mathbb{R} \mid x > 0\}}"#
+        let setOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(set)
+        XCTAssertFalse(setOutput.contains("{\\displaystyle"))
+        XCTAssertTrue(setOutput.contains(#"$$\displaystyle \{x \in \mathbb{R} \mid x > 0\}$$"#))
+
+        // Markdown-escaped underscores \_ -> _
+        let subscriptEscaped = #"{\displaystyle V\_{\mathrm {T} }={kT \over q}}"#
+        let subscriptOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(subscriptEscaped)
+        XCTAssertFalse(subscriptOutput.contains("{\\displaystyle"))
+        XCTAssertFalse(subscriptOutput.contains(#"V\_"#))
+        XCTAssertTrue(subscriptOutput.contains(#"V_{\mathrm {T} }"#))
+    }
+
+    func testFormatWikiFastMathStandaloneDisplayAndInline() {
+        // Standalone equation on its own line
+        let standalone = """
+        Here is the equation:
+
+        {\\displaystyle PV = nRT}
+
+        where P is pressure.
+        """
+        let standaloneOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(standalone)
+        XCTAssertFalse(standaloneOutput.contains("{\\displaystyle"))
+        XCTAssertTrue(standaloneOutput.contains("$$\\displaystyle PV = nRT$$"))
+
+        // Multiple inline equations on a single line
+        let multipleInline = "Constants {\\displaystyle \\pi } and {\\displaystyle e} are transcendental."
+        let multipleOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(multipleInline)
+        XCTAssertFalse(multipleOutput.contains("{\\displaystyle"))
+        XCTAssertTrue(multipleOutput.contains("$\\displaystyle \\pi$"))
+        XCTAssertTrue(multipleOutput.contains("$\\displaystyle e$"))
+
+        // MediaWiki colon-indented display equation
+        let colonIndented = ":{\\displaystyle E = mc^2}"
+        let colonOutput = ModelOutputLaTeXSanitizer.formatWikiFastMath(colonIndented)
+        XCTAssertFalse(colonOutput.contains("{\\displaystyle"))
+        XCTAssertTrue(colonOutput.contains("$$\\displaystyle E = mc^2$$"))
+    }
+
+    func testMarkdownBlockParserLooseLists() {
+        let looseListMarkdown = """
+        * Item 1
+
+        * Item 2
+
+        * Item 3
+        """
+
+        let blocks = MarkdownBlockParser.parse(markdown: looseListMarkdown)
+        XCTAssertEqual(blocks.count, 1)
+        if case .unorderedList(let items) = blocks.first {
+            XCTAssertEqual(items.count, 3)
+            XCTAssertEqual(items[0], "Item 1")
+            XCTAssertEqual(items[1], "Item 2")
+            XCTAssertEqual(items[2], "Item 3")
+        } else {
+            XCTFail("Expected a single unorderedList block")
+        }
+    }
 }

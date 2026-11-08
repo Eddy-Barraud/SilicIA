@@ -300,9 +300,9 @@
     "semantic_hash": "08154300d48ded3fd4e0043acc76caea"
   },
   "SilicIA/Services/RAGContextService.swift": {
-    "mtime": 1794139009.6386428,
-    "seen": 1794139037.529533,
-    "ast_hash": "459c411da148929f25333f48107693e0",
+    "mtime": 1794139164.9062414,
+    "seen": 1794139179.6076531,
+    "ast_hash": "d55beda8e69f1d65bb4793f4481be456",
     "semantic_hash": ""
   },
   "SilicIA/Services/Sanitizer.swift": {
