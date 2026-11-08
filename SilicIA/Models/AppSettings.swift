@@ -75,6 +75,24 @@ struct AppSettings: Codable, Equatable {
     var wikipediaSource: WikipediaSource = .online
     var language: ModelLanguage = .systemPreferred()
 
+    /// Active reasoning / output profile level (`Concise`, `Standard`, `Detailed`).
+    /// Setting this updates `maxResponseTokens`, `maxContextTokens`, and `totalTokensBudget`
+    /// to the level's implicit input/output token budgets.
+    var outputProfileKind: TokenBudgeting.OutputProfileKind {
+        get {
+            TokenBudgeting.outputProfile(forResponseTokens: maxResponseTokens).kind
+        }
+        set {
+            applyOutputProfile(newValue)
+        }
+    }
+
+    mutating func applyOutputProfile(_ kind: TokenBudgeting.OutputProfileKind) {
+        maxResponseTokens = kind.implicitResponseTokens
+        maxContextTokens = kind.implicitContextTokens
+        totalTokensBudget = kind.implicitTotalTokensBudget
+    }
+
     /// Combined per-search result cap exposed for callers that still need a single number
     /// (e.g. results display limit, scraping cap).
     var maxSearchResults: Int { maxDuckDuckGoResults + maxWikipediaResults }

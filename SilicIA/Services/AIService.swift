@@ -334,10 +334,11 @@ class AIService: ObservableObject {
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
+        // Note: selected.selectedChunks are ordered from least relevant to most relevant (#1 at the end).
         let contextToSend: String
         let corpusChunksToSend: [RAGChunk]
         if isConcise && selected.selectedChunks.count > 3 {
-            let cappedChunks = Array(selected.selectedChunks.prefix(3))
+            let cappedChunks = Array(selected.selectedChunks.suffix(3))
             corpusChunksToSend = cappedChunks.map(\.chunk)
             contextToSend = cappedChunks.map { "Source: \($0.chunk.source)\n\($0.chunk.text)" }.joined(separator: "\n\n---\n\n")
         } else {
@@ -802,8 +803,8 @@ class AIService: ObservableObject {
         contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async throws -> String {
-        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
-        let allowTools = !isConcise || Self.queryRequiresTools(query)
+        let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
+        let allowTools = Self.queryRequiresTools(query)
 
         // In SearchView summary generation, searchSources is NOT allowed as a tool.
         // Web results are pre-fetched and grounded directly; the model only uses
@@ -865,58 +866,78 @@ class AIService: ObservableObject {
             effectiveMaxOutputTokens: effectiveMaxTokens,
             reasoningLevelOverride: reasoningLevel
         )
-        let maxContextChars = TokenBudgeting.maxContextCharacters(
-            maxOutputTokens: effectiveMaxTokens,
-            contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)
+        let maxContextChars = min(
+            TokenBudgeting.maxContextCharacters(
+                maxOutputTokens: effectiveMaxTokens,
+                contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)
+            ),
+            profile.kind.implicitContextCharacters
         )
-        
-        // If context fits, use it all; otherwise intelligently select summaries
+
+        // If context fits, use it all; otherwise preserve the tail (most relevant chunks are at the end)
         var selectedContext: String
         if context.count <= maxContextChars {
             selectedContext = context
         } else {
-            // Split summaries and include as many as fit within the context window
             let summaryChunks = context.components(separatedBy: "\n\n---\n\n")
-            selectedContext = ""
-            for chunk in summaryChunks {
-                if (selectedContext + chunk).count <= maxContextChars {
-                    if selectedContext.isEmpty {
-                        selectedContext = chunk
-                    } else {
-                        selectedContext += "\n\n---\n\n" + chunk
-                    }
+            var keptReversed: [String] = []
+            var runningChars = 0
+            let separator = "\n\n---\n\n"
+            for chunk in summaryChunks.reversed() {
+                let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                if runningChars + sepChars + chunk.count <= maxContextChars {
+                    keptReversed.append(chunk)
+                    runningChars += sepChars + chunk.count
                 } else {
                     break
                 }
             }
-            
-            // If no summaries fit, use at least the first one
-            if selectedContext.isEmpty && !summaryChunks.isEmpty {
-                selectedContext = String(summaryChunks[0].prefix(maxContextChars))
+
+            if keptReversed.isEmpty, let mostRelevant = summaryChunks.last {
+                selectedContext = String(mostRelevant.prefix(maxContextChars))
+            } else {
+                selectedContext = keptReversed.reversed().joined(separator: separator)
             }
         }
 
-        // Build the prompt. In tool-calling mode we provide grounding context
-        // if pre-fetched web context is available, capped so that the prompt,
-        // tools, and model answer fit within the context window.
+        // Build the prompt. When tools are not needed, pass selectedContext intact
+        // without mid-sentence word chopping. When tools are attached, drop least-relevant
+        // leading chunks first so the most-relevant chunk at the end remains intact.
         let toolGroundingContext: String
         if selectedContext.isEmpty {
             toolGroundingContext = ""
+        } else if !allowTools {
+            toolGroundingContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
-                maxOutputTokens: effectiveMaxTokens,
-                reservedToolReplyTokens: toolBudget + 120
+            let toolGroundingCharCap = min(
+                maxContextChars,
+                TokenBudgeting.maxHybridToolGroundingCharacters(
+                    maxOutputTokens: effectiveMaxTokens,
+                    reservedToolReplyTokens: toolBudget + 120
+                )
             )
-            let toolGroundingTokenCap = TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
-            let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
-            var grounded = TokenBudgeting.truncateToApproxWordCount(
-                selectedContext,
-                maxWords: toolGroundingWords
-            )
-            if grounded.count > toolGroundingCharCap {
-                grounded = String(grounded.prefix(toolGroundingCharCap))
+            if selectedContext.count <= toolGroundingCharCap {
+                toolGroundingContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let summaryChunks = selectedContext.components(separatedBy: "\n\n---\n\n")
+                var keptReversed: [String] = []
+                var runningChars = 0
+                let separator = "\n\n---\n\n"
+                for chunk in summaryChunks.reversed() {
+                    let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                    if runningChars + sepChars + chunk.count <= toolGroundingCharCap {
+                        keptReversed.append(chunk)
+                        runningChars += sepChars + chunk.count
+                    } else {
+                        break
+                    }
+                }
+                if keptReversed.isEmpty, let mostRelevant = summaryChunks.last {
+                    toolGroundingContext = String(mostRelevant.prefix(toolGroundingCharCap)).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    toolGroundingContext = keptReversed.reversed().joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             }
-            toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         let prompt = Self.toolCallingSearchPrompt(

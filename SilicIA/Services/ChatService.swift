@@ -289,15 +289,31 @@ final class ChatService: ObservableObject {
                     effectiveMaxContextTokens,
                     TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
                 )
-                let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
-                var grounded = TokenBudgeting.truncateToApproxWordCount(
-                    finalSelectedContext,
-                    maxWords: toolGroundingWords
-                )
-                if grounded.count > toolGroundingCharCap {
-                    grounded = String(grounded.prefix(toolGroundingCharCap))
+                let maxChars = min(toolGroundingCharCap, TokenBudgeting.estimatedContextCharacters(forTokens: toolGroundingTokenCap))
+                if finalSelectedContext.count <= maxChars {
+                    toolGroundingContext = finalSelectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    // finalSelectedContext is ordered from least relevant to most relevant (#1 at the end).
+                    // Preserve the tail so the highest-ranked chunks are kept intact.
+                    let chunks = finalSelectedContext.components(separatedBy: "\n\n---\n\n")
+                    var keptReversed: [String] = []
+                    var runningChars = 0
+                    let separator = "\n\n---\n\n"
+                    for chunk in chunks.reversed() {
+                        let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                        if runningChars + sepChars + chunk.count <= maxChars {
+                            keptReversed.append(chunk)
+                            runningChars += sepChars + chunk.count
+                        } else {
+                            break
+                        }
+                    }
+                    if keptReversed.isEmpty, let mostRelevant = chunks.last {
+                        toolGroundingContext = String(mostRelevant.prefix(maxChars)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        toolGroundingContext = keptReversed.reversed().joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
                 }
-                toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             debugContext("sendMessage tool-calling groundingChars=\(toolGroundingContext.count)")
             let prompt = buildToolCallingPrompt(
@@ -1413,11 +1429,14 @@ final class ChatService: ObservableObject {
             groundingHeader = "Context from the attached documents:"
         }
 
-        // Assemble top-to-bottom: grounding context, then prior questions,
-        // then the imperative + current question. The current question is
-        // always the final line regardless of which optional blocks appear.
+        // Assemble top-to-bottom for U-shaped attention:
+        // 1. Initial instruction + current user question at the start (when grounding is present)
+        // 2. Grounding context (ordered least -> most relevant, with #1 at the end)
+        // 3. Prior user questions
+        // 4. Answer imperative + repeated current user question at the very end.
         var sections: [String] = []
         if hasGrounding {
+            sections.append("\(answerImperative)\n\(currentQuestion)")
             sections.append("\(groundingHeader)\n\(trimmedGrounding)")
         }
         if !priorUserQuestions.isEmpty {

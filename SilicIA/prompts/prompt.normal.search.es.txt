@@ -1,3 +1,6 @@
+Instrucciones: Sintetiza el contexto a continuación (ordenado de menor a mayor relevancia) para responder con precisión a la pregunta.
+Tema o pregunta: {{query}}
+
 Contexto web:
 {{context}}
 

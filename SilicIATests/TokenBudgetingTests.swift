@@ -515,4 +515,29 @@ final class TokenBudgetingTests: XCTestCase {
         let singleArticle = try JSONDecoder().decode(WikiFastArticle.self, from: singleJSON)
         XCTAssertEqual(singleArticle, articles[0])
     }
+
+    func testReasoningLevelImplicitTokenSettings() {
+        var settings = AppSettings()
+
+        settings.outputProfileKind = .concise
+        XCTAssertEqual(settings.outputProfileKind, .concise)
+        XCTAssertEqual(settings.maxResponseTokens, 300)
+        XCTAssertEqual(settings.maxContextTokens, 750)
+        XCTAssertEqual(settings.totalTokensBudget, 1050)
+        XCTAssertEqual(settings.outputProfileKind.implicitContextCharacters, 2_200)
+
+        settings.outputProfileKind = .standard
+        XCTAssertEqual(settings.outputProfileKind, .standard)
+        XCTAssertEqual(settings.maxResponseTokens, 500)
+        XCTAssertEqual(settings.maxContextTokens, 1_400)
+        XCTAssertEqual(settings.totalTokensBudget, 1_900)
+        XCTAssertEqual(settings.outputProfileKind.implicitContextCharacters, 4_200)
+
+        settings.outputProfileKind = .detailed
+        XCTAssertEqual(settings.outputProfileKind, .detailed)
+        XCTAssertEqual(settings.maxResponseTokens, 900)
+        XCTAssertEqual(settings.maxContextTokens, 2_000)
+        XCTAssertEqual(settings.totalTokensBudget, 2_900)
+        XCTAssertEqual(settings.outputProfileKind.implicitContextCharacters, 6_000)
+    }
 }

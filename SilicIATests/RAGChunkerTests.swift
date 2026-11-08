@@ -490,6 +490,46 @@ final class RAGChunkerTests: XCTestCase {
         XCTAssertEqual(table1Rows.count, 95)
     }
 
+    func testMergeShortConsecutiveChunksAndReversedPromptOrder() async {
+        let short1 = RAGChunk(source: "France", text: "- Saveurs en Or (Hauts de France)", url: "https://en.wikipedia.org/wiki/France", pdfPage: nil)
+        let short2 = RAGChunk(source: "France", text: "- Produit en Bretagne", url: "https://en.wikipedia.org/wiki/France", pdfPage: nil)
+        let short3 = RAGChunk(source: "France", text: "- Produits de terroir", url: "https://en.wikipedia.org/wiki/France", pdfPage: nil)
+        let merged = RAGChunker.mergeShortConsecutiveChunks([short1, short2, short3], minimumCharacters: 60)
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertTrue(merged[0].text.contains("Saveurs en Or"))
+        XCTAssertTrue(merged[0].text.contains("Produit en Bretagne"))
+        XCTAssertTrue(merged[0].text.contains("Produits de terroir"))
+
+        // Verify reversed selectedChunks order (least relevant -> most relevant at end)
+        let service = RAGContextService()
+        let lowChunk = RAGChunk(
+            source: "Doc Low",
+            text: "General geography notes about mountains and rivers in western Europe.",
+            url: "https://example.com/low",
+            pdfPage: nil
+        )
+        let highChunk = RAGChunk(
+            source: "Doc High",
+            text: "La superficie de la France métropolitaine est de 551 695 km2 et de 643 801 km2 avec les territoires d'outre-mer.",
+            url: "https://example.com/high",
+            pdfPage: nil
+        )
+        let result = await service.selectContext(
+            chunks: [lowChunk, highChunk],
+            query: "quelle est la superficie de la France en km2 ?",
+            maxOutputTokens: 500,
+            language: .french
+        )
+        XCTAssertEqual(result.rankedChunks.first?.chunk.source, "Doc High")
+        XCTAssertEqual(result.topChunks.first?.chunk.source, "Doc High")
+        XCTAssertEqual(result.selectedChunks.last?.chunk.source, "Doc High", "Most relevant chunk must be placed at the end of selectedChunks")
+        let lowRange = result.selectedContext.range(of: "Doc Low")
+        let highRange = result.selectedContext.range(of: "Doc High")
+        if let lowIdx = lowRange?.lowerBound, let highIdx = highRange?.lowerBound {
+            XCTAssertTrue(lowIdx < highIdx, "Most relevant chunk must appear closest to the end of selectedContext")
+        }
+    }
+
     private func renderedTestCGImage(for page: PDFPage) -> CGImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         let pageSize = pageBounds.size

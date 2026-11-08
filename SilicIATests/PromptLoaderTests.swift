@@ -38,6 +38,12 @@ final class PromptLoaderTests: XCTestCase {
             XCTAssertTrue(prompt.contains("Grounding snippet"))
             XCTAssertTrue(prompt.contains("Target length: 8 to 12 sentences."))
             XCTAssertTrue(prompt.contains("1. Direct answer"))
+            // Verify U-shaped layout: user query appears before grounding context and is repeated at the end
+            let firstQueryIdx = prompt.range(of: "Test query")!.lowerBound
+            let groundingIdx = prompt.range(of: "Grounding snippet")!.lowerBound
+            let lastQueryIdx = prompt.range(of: "Test query", options: .backwards)!.lowerBound
+            XCTAssertTrue(firstQueryIdx < groundingIdx)
+            XCTAssertTrue(groundingIdx < lastQueryIdx)
             XCTAssertFalse(prompt.contains("{{query}}"))
             XCTAssertFalse(prompt.contains("{{corpusHint}}"))
             XCTAssertFalse(prompt.contains("{{groundingContext}}"))

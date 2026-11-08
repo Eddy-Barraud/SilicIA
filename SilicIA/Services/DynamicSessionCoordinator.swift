@@ -316,8 +316,7 @@ final class DynamicSessionCoordinator {
 
         switch mode {
         case .searchSummary, .webPageSummary, .searchQueryGeneration:
-            let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
-            let allowTools = !isConcise
+            let allowTools = false
             let instructions = AIService.buildSearchInstructions(
                 for: settings.language,
                 maxOutputTokens: settings.maxResponseTokens,
@@ -327,29 +326,7 @@ final class DynamicSessionCoordinator {
                 useWikipedia: false,
                 includeToolsAppendix: allowTools
             )
-            let tools: [any Tool]
-            if allowTools {
-                let assembled = ToolKit.assemble(
-                    config: ToolKit.Configuration(
-                        language: settings.language,
-                        corpusChunks: [],
-                        userQuery: "",
-                        webSearchAvailable: false,
-                        webSearchService: webSearchService,
-                        webScraper: webScraper,
-                        ragContextService: ragContextService,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
-                        maxWikipediaResults: settings.maxWikipediaResults,
-                        useDuckDuckGo: false,
-                        useWikipedia: false,
-                        contextUtilizationFactor: nil
-                    ),
-                    responseTokens: effectiveMaxTokens
-                )
-                tools = assembled.tools
-            } else {
-                tools = []
-            }
+            let tools: [any Tool] = []
             return DynamicSessionStateStore.Snapshot(
                 mode: .searchSummary,
                 instructionsText: instructions,

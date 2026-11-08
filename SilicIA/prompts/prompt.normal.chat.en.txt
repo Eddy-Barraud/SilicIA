@@ -1,3 +1,7 @@
+Instructions: Answer the user question clearly and directly using the context below (ordered from least relevant to most relevant).
+User question:
+{{question}}
+
 Conversation:
 {{history}}
 

@@ -123,7 +123,7 @@ nonisolated enum TokenBudgeting {
         max(tokens, 0) * avgCharsPerToken
     }
 
-    enum OutputProfileKind: String, Sendable, CaseIterable {
+    enum OutputProfileKind: String, Sendable, CaseIterable, Codable {
         case concise = "Concise"
         case standard = "Standard"
         case detailed = "Detailed"
@@ -139,6 +139,47 @@ nonisolated enum TokenBudgeting {
             case .detailed:
                 return .deep
             }
+        }
+
+        /// Implicit output (response) token budget for this reasoning profile.
+        var implicitResponseTokens: Int {
+            switch self {
+            case .concise:
+                return 300
+            case .standard:
+                return 500
+            case .detailed:
+                return 900
+            }
+        }
+
+        /// Implicit input (context) character cap for fast prompt prefill.
+        var implicitContextCharacters: Int {
+            switch self {
+            case .concise:
+                return 2_200
+            case .standard:
+                return 4_200
+            case .detailed:
+                return 6_000
+            }
+        }
+
+        /// Implicit input (context) token budget derived from `implicitContextCharacters`.
+        var implicitContextTokens: Int {
+            switch self {
+            case .concise:
+                return 750
+            case .standard:
+                return 1_400
+            case .detailed:
+                return 2_000
+            }
+        }
+
+        /// Combined implicit total token budget (`implicitContextTokens + implicitResponseTokens`).
+        var implicitTotalTokensBudget: Int {
+            implicitContextTokens + implicitResponseTokens
         }
     }
 

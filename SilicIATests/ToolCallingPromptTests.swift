@@ -49,12 +49,15 @@ final class ToolCallingPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("Context from the attached documents:"))
         XCTAssertTrue(prompt.lowercased().contains("use the context above for specific facts"))
 
-        // Ordering: grounding precedes prior questions, which precede current question
+        // Ordering (U-shaped attention): initial instruction + current question at start,
+        // followed by grounding, prior questions, and repeated current question at the end.
+        let firstCurrentPos = prompt.range(of: "What is the yield?")!.lowerBound
         let groundingPos = prompt.range(of: grounding)!.lowerBound
         let priorPos = prompt.range(of: "How is the property obtained?")!.lowerBound
-        let currentPos = prompt.range(of: "What is the yield?")!.lowerBound
+        let lastCurrentPos = prompt.range(of: "What is the yield?", options: .backwards)!.lowerBound
+        XCTAssertTrue(firstCurrentPos < groundingPos)
         XCTAssertTrue(groundingPos < priorPos)
-        XCTAssertTrue(priorPos < currentPos)
+        XCTAssertTrue(priorPos < lastCurrentPos)
 
         // Empty grounding is a no-op and uses the direct non-coercive imperative
         let ungrounded = ChatService.assembleToolCallingPrompt(currentQuestion: "Q?", priorUserQuestions: ["A?"], language: .english)

@@ -365,6 +365,78 @@ struct RAGChunker {
         return chunks
     }
 
+    /// Merges chunks shorter than `minimumCharacters` with an adjacent consecutive chunk
+    /// before ranking so short bullet items or one-line stubs do not compete as isolated micro-chunks.
+    static func mergeShortConsecutiveChunks(_ chunks: [RAGChunk], minimumCharacters: Int = 60) -> [RAGChunk] {
+        guard chunks.count > 1 else { return chunks }
+        var result: [RAGChunk] = []
+        result.reserveCapacity(chunks.count)
+        var pendingShort: RAGChunk? = nil
+
+        for chunk in chunks {
+            if let pending = pendingShort {
+                if pending.source == chunk.source && pending.url == chunk.url && pending.pdfPage == chunk.pdfPage {
+                    let combined = RAGChunk(
+                        source: chunk.source,
+                        text: pending.text + "\n" + chunk.text,
+                        url: chunk.url,
+                        pdfPage: chunk.pdfPage
+                    )
+                    if combined.text.count < minimumCharacters {
+                        pendingShort = combined
+                    } else {
+                        result.append(combined)
+                        pendingShort = nil
+                    }
+                    continue
+                } else {
+                    if let last = result.last,
+                       last.source == pending.source && last.url == pending.url && last.pdfPage == pending.pdfPage {
+                        result[result.count - 1] = RAGChunk(
+                            source: last.source,
+                            text: last.text + "\n" + pending.text,
+                            url: last.url,
+                            pdfPage: last.pdfPage
+                        )
+                    } else {
+                        result.append(pending)
+                    }
+                    pendingShort = nil
+                }
+            }
+
+            if chunk.text.count < minimumCharacters {
+                pendingShort = chunk
+            } else {
+                result.append(chunk)
+            }
+        }
+
+        if let pending = pendingShort {
+            if let last = result.last,
+               last.source == pending.source && last.url == pending.url && last.pdfPage == pending.pdfPage {
+                result[result.count - 1] = RAGChunk(
+                    source: last.source,
+                    text: last.text + "\n" + pending.text,
+                    url: last.url,
+                    pdfPage: last.pdfPage
+                )
+            } else if !result.isEmpty {
+                let last = result[result.count - 1]
+                result[result.count - 1] = RAGChunk(
+                    source: last.source,
+                    text: last.text + "\n" + pending.text,
+                    url: last.url,
+                    pdfPage: last.pdfPage
+                )
+            } else {
+                result.append(pending)
+            }
+        }
+
+        return result
+    }
+
     private static func segmentMarkdownTablesAndProse(_ markdown: String) -> [MarkdownSegment] {
         let lines = markdown.components(separatedBy: "\n")
         var segments: [MarkdownSegment] = []
@@ -692,7 +764,7 @@ struct RAGSelectionResult {
     /// without having to grep through the prompt itself.
     func debugDescription(label: String) -> String {
         var lines: [String] = []
-        lines.append("┏━ \(label): \(selectedChunks.count) chunk(s) sent to model ━━")
+        lines.append("┏━ \(label): \(selectedChunks.count) chunk(s) sent to model (least -> most relevant) ━━")
         for (index, ranked) in selectedChunks.enumerated() {
             var provenance = ranked.chunk.source
             if let url = ranked.chunk.url { provenance += " | url=\(url)" }
@@ -850,6 +922,8 @@ actor RAGContextService {
             )
         }
 
+        let chunks = RAGChunker.mergeShortConsecutiveChunks(chunks)
+
         let utilization = contextUtilizationFactor ?? options.contextUtilizationFactor
         let maxContextChars = calculate4096BudgetedContextCharacters(
             query: query,
@@ -974,22 +1048,9 @@ actor RAGContextService {
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
         if let qInfo = queryEmbeddingInfo {
             for candidate in topCosineCandidates {
-                var semanticScore = nlEmbeddingRelevanceScore(
-                    chunk: candidate.chunk,
-                    query: qInfo.query,
-                    unitQueryVector: qInfo.unitVector,
-                    embedding: qInfo.embedding,
-                    options: options
-                )
-                if let wordEmbedding {
-                    let wordScore = wordEmbeddingSemanticScore(
-                        chunk: candidate.chunk,
-                        query: query,
-                        wordEmbedding: wordEmbedding
-                    )
-                    semanticScore = semanticScore * 0.75 + wordScore * 0.25
-                }
-                if candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true,
+                let isEnglishWikiChunk = candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true
+                let semanticScore: Double
+                if isEnglishWikiChunk,
                    let enQuery = englishQueryForWiki,
                    let enEmb = englishSentenceEmbedding {
                     var enSemantic = nlEmbeddingRelevanceScore(
@@ -1007,29 +1068,33 @@ actor RAGContextService {
                         )
                         enSemantic = enSemantic * 0.75 + enWord * 0.25
                     }
-                    semanticScore = max(semanticScore, enSemantic)
+                    semanticScore = enSemantic
+                } else {
+                    var primarySemantic = nlEmbeddingRelevanceScore(
+                        chunk: candidate.chunk,
+                        query: qInfo.query,
+                        unitQueryVector: qInfo.unitVector,
+                        embedding: qInfo.embedding,
+                        options: options
+                    )
+                    if let wordEmbedding {
+                        let wordScore = wordEmbeddingSemanticScore(
+                            chunk: candidate.chunk,
+                            query: query,
+                            wordEmbedding: wordEmbedding
+                        )
+                        primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
+                    }
+                    semanticScore = primarySemantic
                 }
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
             }
         } else if let embedding {
             for candidate in topCosineCandidates {
-                var semanticScore = nlEmbeddingRelevanceScore(
-                    chunk: candidate.chunk,
-                    query: query,
-                    unitQueryVector: nil,
-                    embedding: embedding,
-                    options: options
-                )
-                if let wordEmbedding {
-                    let wordScore = wordEmbeddingSemanticScore(
-                        chunk: candidate.chunk,
-                        query: query,
-                        wordEmbedding: wordEmbedding
-                    )
-                    semanticScore = semanticScore * 0.75 + wordScore * 0.25
-                }
-                if candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true,
+                let isEnglishWikiChunk = candidate.chunk.url?.lowercased().contains("en.wikipedia.org") == true
+                let semanticScore: Double
+                if isEnglishWikiChunk,
                    let enQuery = englishQueryForWiki,
                    let enEmb = englishSentenceEmbedding {
                     var enSemantic = nlEmbeddingRelevanceScore(
@@ -1047,7 +1112,24 @@ actor RAGContextService {
                         )
                         enSemantic = enSemantic * 0.75 + enWord * 0.25
                     }
-                    semanticScore = max(semanticScore, enSemantic)
+                    semanticScore = enSemantic
+                } else {
+                    var primarySemantic = nlEmbeddingRelevanceScore(
+                        chunk: candidate.chunk,
+                        query: query,
+                        unitQueryVector: nil,
+                        embedding: embedding,
+                        options: options
+                    )
+                    if let wordEmbedding {
+                        let wordScore = wordEmbeddingSemanticScore(
+                            chunk: candidate.chunk,
+                            query: query,
+                            wordEmbedding: wordEmbedding
+                        )
+                        primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
+                    }
+                    semanticScore = primarySemantic
                 }
                 let combinedScore = semanticScore + candidate.baseScore * 0.35
                 ranked.append(RankedRAGChunk(chunk: candidate.chunk, relevanceScore: combinedScore))
@@ -1090,6 +1172,11 @@ actor RAGContextService {
             selectedChunks.append(rankedChunk)
             currentChars += separatorChars + chunkEntry.count
         }
+
+        // Reverse selected chunks so they appear from least relevant to most relevant (#1 at the end)
+        // to leverage U-shaped attention in small LLMs.
+        selected.reverse()
+        selectedChunks.reverse()
 
         let finalSelectedChunks = selectedChunks.isEmpty && !ranked.isEmpty ? [ranked[0]] : selectedChunks
 
@@ -1255,8 +1342,9 @@ actor RAGContextService {
         embedding: NLEmbedding,
         options: RAGSelectionOptions
     ) -> Double {
+        let sampleText = chunk.text.count > 600 ? String(chunk.text.prefix(600)) : chunk.text
         let distance: Double
-        if let unitQueryVector, let chunkVector = embedding.vector(for: chunk.text) {
+        if let unitQueryVector, let chunkVector = embedding.vector(for: sampleText) {
             let chunkNorm = sqrt(chunkVector.map { $0 * $0 }.reduce(0, +))
             if chunkNorm > 0 {
                 var diffSq = 0.0
@@ -1267,10 +1355,10 @@ actor RAGContextService {
                 }
                 distance = sqrt(diffSq)
             } else {
-                distance = embedding.distance(between: query, and: chunk.text, distanceType: .cosine)
+                distance = embedding.distance(between: query, and: sampleText, distanceType: .cosine)
             }
         } else {
-            distance = embedding.distance(between: query, and: chunk.text, distanceType: .cosine)
+            distance = embedding.distance(between: query, and: sampleText, distanceType: .cosine)
         }
 
         guard !distance.isNaN else {

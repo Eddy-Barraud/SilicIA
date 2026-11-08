@@ -38,8 +38,8 @@ struct TokenBudgetSliderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // MARK: - Slider 1: Total Token Budget (Global Speed vs Precision)
-            VStack(alignment: .leading, spacing: 4) {
+            // MARK: - Reasoning Level Selector (Concise / Standard / Detailed)
+            VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(L.t("settings.tokenBudget.totalTitle", language: language))
                         .font(.subheadline)
@@ -55,28 +55,20 @@ struct TokenBudgetSliderView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
 
-                Slider(
-                    value: Binding(
-                        get: { Double(settings.totalTokensBudget) },
-                        set: { settings.setTotalTokensBudget(Int($0)) }
-                    ),
-                    in: Double(AppSettings.totalTokensBudgetRange.lowerBound)...Double(AppSettings.totalTokensBudgetRange.upperBound),
-                    step: 100
-                )
+                Picker("", selection: $settings.outputProfileKind) {
+                    ForEach(TokenBudgeting.OutputProfileKind.allCases, id: \.self) { kind in
+                        let profile = TokenBudgeting.outputProfile(forResponseTokens: kind.implicitResponseTokens)
+                        Text(profile.localizedName(for: language)).tag(kind)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
             }
 
             Divider()
 
-            // MARK: - Slider 2: Split (Context vs Response) with Dynamic Profile Badge
+            // MARK: - Implicit Input (Context) & Output (Response) Summary
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(L.t("settings.tokenBudget.splitTitle", language: language))
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
-
                 HStack(alignment: .top) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L.t("settings.tokenBudget.context", language: language))
@@ -115,22 +107,6 @@ struct TokenBudgetSliderView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-
-                Slider(
-                    value: Binding(
-                        get: { Double(settings.maxContextTokens) },
-                        set: { newValue in
-                            let context = Int(newValue)
-                            settings.maxContextTokens = context
-                            settings.maxResponseTokens = max(
-                                AppSettings.maxResponseTokensRange.lowerBound,
-                                settings.totalTokensBudget - context
-                            )
-                        }
-                    ),
-                    in: Double(AppSettings.maxContextTokensRange.lowerBound)...Double(max(AppSettings.maxContextTokensRange.lowerBound, settings.totalTokensBudget - AppSettings.maxResponseTokensRange.lowerBound)),
-                    step: 50
-                )
             }
         }
         .disabled(!FoundationModelAvailability.check().isAvailable)

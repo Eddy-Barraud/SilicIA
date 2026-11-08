@@ -50,6 +50,42 @@ struct SearchSourcesTool: Tool {
         var wikiQuery: String = ""
     }
 
+    @Generable
+    struct WebOnlyArguments {
+        @Guide(description: "Two distinct web search queries.", .count(2))
+        var webQueries: [String] = []
+    }
+
+    @Generable
+    struct WikiOnlyArguments {
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles relevant to the topic.", .count(2))
+        var wikiQueries: [String] = []
+    }
+
+    @Generable
+    struct WikiFastOnlyArguments {
+        @Guide(description: "Two distinct Wikipedia encyclopedic article titles translated into English (mandatory).", .count(2))
+        var wikiQueries: [String] = []
+    }
+
+    @Generable
+    struct WebOnlySingleQueryArguments {
+        @Guide(description: "One targeted web search query.")
+        var webQuery: String = ""
+    }
+
+    @Generable
+    struct WikiOnlySingleQueryArguments {
+        @Guide(description: "One targeted Wikipedia encyclopedic article title relevant to the topic.")
+        var wikiQuery: String = ""
+    }
+
+    @Generable
+    struct WikiFastOnlySingleQueryArguments {
+        @Guide(description: "One targeted Wikipedia encyclopedic article title translated into English (mandatory).")
+        var wikiQuery: String = ""
+    }
+
     let name = "searchSources"
     let description = """
     Search the web and Wikipedia simultaneously for relevant sources. Favor a single focused query; reserve Wikipedia (wikiQueries) strictly for precise data, figures, definitions, or notable facts (pass [] if not needed). Only provide up to 2 queries per source if the topic is difficult or multi-faceted.
@@ -149,14 +185,30 @@ struct SearchSourcesTool: Tool {
                 let prompt = "\(topicLabel) : \(userQuery)"
                 let rawWeb: String
                 let rawWiki: String
-                if isWikiFast {
-                    let response = try await session.respond(to: prompt, generating: WikiFastSingleQueryArguments.self)
+                if useDuckDuckGo && useWikipedia {
+                    if isWikiFast {
+                        let response = try await session.respond(to: prompt, generating: WikiFastSingleQueryArguments.self)
+                        rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                        rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        let response = try await session.respond(to: prompt, generating: SingleQueryArguments.self)
+                        rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                        rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                } else if useDuckDuckGo {
+                    let response = try await session.respond(to: prompt, generating: WebOnlySingleQueryArguments.self)
                     rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                    rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    rawWiki = ""
                 } else {
-                    let response = try await session.respond(to: prompt, generating: SingleQueryArguments.self)
-                    rawWeb = response.content.webQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-                    rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if isWikiFast {
+                        let response = try await session.respond(to: prompt, generating: WikiFastOnlySingleQueryArguments.self)
+                        rawWeb = ""
+                        rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        let response = try await session.respond(to: prompt, generating: WikiOnlySingleQueryArguments.self)
+                        rawWeb = ""
+                        rawWiki = response.content.wikiQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
                 }
                 let elapsed = Date().timeIntervalSince(start)
 
@@ -191,23 +243,51 @@ struct SearchSourcesTool: Tool {
             switch language {
             case .french:
                 if isWikiFast && useWikipedia {
-                    topicLabel = "Sujet (webQueries en français, wikiQueries en anglais)"
-                    instructions = "Génère 2 requêtes de recherche web rédigées en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries)."
+                    if useDuckDuckGo {
+                        topicLabel = "Sujet (webQueries en français, wikiQueries en anglais)"
+                        instructions = "Génère 2 requêtes de recherche web rédigées en français (webQueries) et 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries)."
+                    } else {
+                        topicLabel = "Sujet (wikiQueries en anglais)"
+                        instructions = "Génère 2 titres d'articles Wikipédia traduits OBLIGATOIREMENT en anglais (wikiQueries) pour le sujet."
+                    }
                 } else {
                     topicLabel = "Sujet (rédige les requêtes en français)"
-                    instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
+                    if useDuckDuckGo && useWikipedia {
+                        instructions = "Génère 2 requêtes de recherche web et 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
+                    } else if useDuckDuckGo {
+                        instructions = "Génère 2 requêtes de recherche web pour le sujet, en français. Reste concis et précis."
+                    } else {
+                        instructions = "Génère 2 titres d'articles Wikipédia pour le sujet, en français. Reste concis et précis."
+                    }
                 }
             case .spanish:
                 if isWikiFast && useWikipedia {
-                    topicLabel = "Tema (webQueries en español, wikiQueries en inglés)"
-                    instructions = "Genera 2 consultas de búsqueda web redactadas en español (webQueries) y 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries)."
+                    if useDuckDuckGo {
+                        topicLabel = "Tema (webQueries en español, wikiQueries en inglés)"
+                        instructions = "Genera 2 consultas de búsqueda web redactadas en español (webQueries) y 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries)."
+                    } else {
+                        topicLabel = "Tema (wikiQueries en inglés)"
+                        instructions = "Genera 2 títulos de artículos de Wikipedia traducidos OBLIGATORIAMENTE al inglés (wikiQueries) para el tema."
+                    }
                 } else {
                     topicLabel = "Tema (redacta las consultas en español)"
-                    instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
+                    if useDuckDuckGo && useWikipedia {
+                        instructions = "Genera 2 consultas de búsqueda web y 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
+                    } else if useDuckDuckGo {
+                        instructions = "Genera 2 consultas de búsqueda web para el tema, en español. Sé conciso y preciso."
+                    } else {
+                        instructions = "Genera 2 títulos de artículos de Wikipedia para el tema, en español. Sé conciso y preciso."
+                    }
                 }
             case .english:
                 topicLabel = "Topic (write queries in English)"
-                instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Be concise and precise."
+                if useDuckDuckGo && useWikipedia {
+                    instructions = "Generate 2 web search queries and 2 Wikipedia article titles for the topic, in English. Be concise and precise."
+                } else if useDuckDuckGo {
+                    instructions = "Generate 2 web search queries for the topic, in English. Be concise and precise."
+                } else {
+                    instructions = "Generate 2 Wikipedia article titles for the topic, in English. Be concise and precise."
+                }
             }
 
             let session = await DynamicSessionCoordinator.shared.acquireSession(
@@ -220,14 +300,30 @@ struct SearchSourcesTool: Tool {
             let prompt = "\(topicLabel) : \(userQuery)"
             let rawWebList: [String]
             let rawWikiList: [String]
-            if isWikiFast {
-                let response = try await session.respond(to: prompt, generating: WikiFastArguments.self)
+            if useDuckDuckGo && useWikipedia {
+                if isWikiFast {
+                    let response = try await session.respond(to: prompt, generating: WikiFastArguments.self)
+                    rawWebList = response.content.webQueries
+                    rawWikiList = response.content.wikiQueries
+                } else {
+                    let response = try await session.respond(to: prompt, generating: Arguments.self)
+                    rawWebList = response.content.webQueries
+                    rawWikiList = response.content.wikiQueries
+                }
+            } else if useDuckDuckGo {
+                let response = try await session.respond(to: prompt, generating: WebOnlyArguments.self)
                 rawWebList = response.content.webQueries
-                rawWikiList = response.content.wikiQueries
+                rawWikiList = []
             } else {
-                let response = try await session.respond(to: prompt, generating: Arguments.self)
-                rawWebList = response.content.webQueries
-                rawWikiList = response.content.wikiQueries
+                if isWikiFast {
+                    let response = try await session.respond(to: prompt, generating: WikiFastOnlyArguments.self)
+                    rawWebList = []
+                    rawWikiList = response.content.wikiQueries
+                } else {
+                    let response = try await session.respond(to: prompt, generating: WikiOnlyArguments.self)
+                    rawWebList = []
+                    rawWikiList = response.content.wikiQueries
+                }
             }
             let elapsed = Date().timeIntervalSince(start)
 
