@@ -365,7 +365,7 @@ struct RAGChunker {
             tokenizer.string = trimmedProse
             tokenizer.enumerateTokens(in: trimmedProse.startIndex..<trimmedProse.endIndex) { range, _ in
                 let paragraph = trimmedProse[range].trimmingCharacters(in: .whitespacesAndNewlines)
-                if !paragraph.isEmpty {
+                if !paragraph.isEmpty && !HTMLSanitizer.isCookieConsentText(paragraph) {
                     chunks.append(
                         RAGChunk(
                             source: source,

@@ -193,6 +193,7 @@ class WebScrapingService: ObservableObject {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = blockRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
         }
+        cleaned = HTMLSanitizer.removeCookieConsent(from: cleaned)
         if let wrapperRegex = inlineWrapperTagRegex {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = wrapperRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
@@ -433,6 +434,7 @@ class WebScrapingService: ObservableObject {
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
                 request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.setValue("SOCS=CAESEwgDEgk2ODE4NDk0MTAaAmZyIAEaBgiA_LyaBg; CONSENT=PENDING+999", forHTTPHeaderField: "Cookie")
                 request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
@@ -464,8 +466,8 @@ class WebScrapingService: ObservableObject {
     /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback)
     /// and bounded-stack html-to-markdown-swift conversion with DOM depth/memory limits.
     func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
-        // Pre-validate raw HTML size and DOM nesting depth before running Readability/Mercury or SwiftSoup.
-        _ = try Self.validateAndPrepareHTMLForMarkdown(
+        // Pre-validate raw HTML size and DOM nesting depth, stripping non-content & cookie consent blocks.
+        let preparedHTML = try Self.validateAndPrepareHTMLForMarkdown(
             html,
             maxInputBytes: Self.maxRawHTMLBytes,
             maxElements: Self.maxDOMElementCount * 3
@@ -475,9 +477,9 @@ class WebScrapingService: ObservableObject {
 
         var extracted: ExtractedContent?
         do {
-            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .readability)
+            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: preparedHTML, extractor: .readability)
         } catch {
-            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .mercury)
+            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: preparedHTML, extractor: .mercury)
         }
 
         if let extracted = extracted {
@@ -491,7 +493,7 @@ class WebScrapingService: ObservableObject {
         }
 
         // Only attempt direct conversion if the HTML itself passes strict size, element count, and DOM depth checks.
-        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(html)
+        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(preparedHTML, skipValidation: true)
         return ("", directMarkdown)
     }
 
@@ -578,6 +580,7 @@ class WebScrapingService: ObservableObject {
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
                 request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
                 request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.setValue("SOCS=CAESEwgDEgk2ODE4NDk0MTAaAmZyIAEaBgiA_LyaBg; CONSENT=PENDING+999", forHTTPHeaderField: "Cookie")
                 request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
@@ -604,11 +607,17 @@ class WebScrapingService: ObservableObject {
 
     /// Extracts styled Reader HTML and plain text from raw HTML using Reeeed's ReadableDoc.
     func extractReaderHTML(from html: String, baseURL: URL) async throws -> ReaderWebPageContent {
+        let preparedHTML = (try? Self.validateAndPrepareHTMLForMarkdown(
+            html,
+            maxInputBytes: Self.maxRawHTMLBytes,
+            maxElements: Self.maxDOMElementCount * 3
+        )) ?? HTMLSanitizer.removeCookieConsent(from: html)
+
         var extracted: ExtractedContent?
         do {
-            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .readability)
+            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: preparedHTML, extractor: .readability)
         } catch {
-            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .mercury)
+            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: preparedHTML, extractor: .mercury)
         }
 
         if let extracted, let rawContent = extracted.content, !rawContent.isEmpty {
@@ -652,9 +661,9 @@ class WebScrapingService: ObservableObject {
         do {
             let (title, markdown) = try await extractMarkdown(from: url, timeoutSeconds: timeoutSeconds)
             let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            guard !trimmed.isEmpty, !HTMLSanitizer.isCookieConsentText(trimmed) else {
                 #if DEBUG
-                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown after conversion")
+                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown or cookie consent boilerplate after conversion")
                 #endif
                 return nil
             }

@@ -258,10 +258,10 @@
     "semantic_hash": "a767e6087e7c2733b34467e37ecccb7b"
   },
   "SilicIA/Services/HTMLSanitizer.swift": {
-    "mtime": 1792343839.9522724,
-    "seen": 1793266945.461545,
-    "ast_hash": "84bcf20ea88d9877babea1061afc96d6",
-    "semantic_hash": "84bcf20ea88d9877babea1061afc96d6"
+    "mtime": 1794319457.9424977,
+    "seen": 1794319699.4330938,
+    "ast_hash": "9707c2ee214e95dd2a87340a55fea1dc",
+    "semantic_hash": ""
   },
   "SilicIA/Services/ImageAnalysisService.swift": {
     "mtime": 1794307394.268043,
@@ -300,9 +300,9 @@
     "semantic_hash": "08154300d48ded3fd4e0043acc76caea"
   },
   "SilicIA/Services/RAGContextService.swift": {
-    "mtime": 1794317458.4847827,
-    "seen": 1794317627.236614,
-    "ast_hash": "cb6990a24037d56efd15f771383d46be",
+    "mtime": 1794319536.1734996,
+    "seen": 1794319699.4331,
+    "ast_hash": "779a7b80ca0b3caaf87286cea86c0079",
     "semantic_hash": ""
   },
   "SilicIA/Services/Sanitizer.swift": {
@@ -366,9 +366,9 @@
     "semantic_hash": "1e11fb18836465bd559535e7f0a630f3"
   },
   "SilicIA/Services/WebScrapingService.swift": {
-    "mtime": 1794317544.1031847,
-    "seen": 1794317627.236622,
-    "ast_hash": "d8e9d2e78483daf009d108228726c3ce",
+    "mtime": 1794319527.2262304,
+    "seen": 1794319699.4331079,
+    "ast_hash": "7b3a0b98a4ee60616177f0344808f53f",
     "semantic_hash": ""
   },
   "SilicIA/Services/WebSearchService.swift": {
@@ -564,9 +564,9 @@
     "semantic_hash": "c5ed50dfeabd276ba0b7416459ba7633"
   },
   "SilicIATests/SanitizerTests.swift": {
-    "mtime": 1794146227.3233538,
-    "seen": 1794146390.111264,
-    "ast_hash": "b9dea430c611fb5397ecc89774b31877",
+    "mtime": 1794319620.6344893,
+    "seen": 1794319699.4331362,
+    "ast_hash": "2613dda0d67ff829c73bea24cea42f8b",
     "semantic_hash": ""
   },
   "SilicIATests/TokenBudgetingTests.swift": {
@@ -708,8 +708,8 @@
     "semantic_hash": ""
   },
   "TestRAG/wiki_distance_euclidienne.md": {
-    "mtime": 1794317484.4436061,
-    "seen": 1794317627.2367492,
+    "mtime": 1794317632.3646574,
+    "seen": 1794317740.168083,
     "ast_hash": "5cab8242523dab6a33989aa48a23a55f",
     "semantic_hash": ""
   },
@@ -1440,9 +1440,9 @@
     "semantic_hash": ""
   },
   "TestRAG/ranked_chunks_distance_euclidienne.txt": {
-    "mtime": 1794317484.677629,
-    "seen": 1794317627.236748,
-    "ast_hash": "264bc1a4007feeb810703a1c423c75cd",
+    "mtime": 1794317632.6069698,
+    "seen": 1794317740.168082,
+    "ast_hash": "3a8e53bc5fd5875229c0a95a6d4da8cd",
     "semantic_hash": ""
   },
   "index.html": {
@@ -2037,12 +2037,6 @@
     "mtime": 1794317596.859389,
     "seen": 1794317627.236577,
     "ast_hash": "ae502b40a6221ca9b28f91771afb9109",
-    "semantic_hash": ""
-  },
-  "benchmark_foundation_model.swift": {
-    "mtime": 1794317316.0065925,
-    "seen": 1794317627.2366562,
-    "ast_hash": "4ebde641caf5ddf650698794508db6fb",
     "semantic_hash": ""
   }
 }
