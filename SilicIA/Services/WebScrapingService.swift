@@ -341,6 +341,9 @@ class WebScrapingService: ObservableObject {
 
     /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
     private func parseWikipediaURL(_ url: URL) -> (host: String, title: String)? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return nil
+        }
         guard let host = url.host?.lowercased(),
               host.contains("wikipedia.org"),
               url.path.hasPrefix("/wiki/") else {
@@ -405,6 +408,10 @@ class WebScrapingService: ObservableObject {
     /// Extracts clean article Markdown from a URL using Reeeed and html-to-markdown-swift,
     /// with resilient URLSession fetching, Wikipedia API acceleration, and a strict timeout.
     func extractMarkdown(from url: URL, timeoutSeconds: Double = 4.0) async throws -> (title: String, markdown: String) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw URLError(.unsupportedURL)
+        }
+
         // Fast path: if the URL is a Wikipedia article, use MediaWiki's action=parse API
         if let wiki = parseWikipediaURL(url) {
             do {
@@ -555,6 +562,10 @@ class WebScrapingService: ObservableObject {
     /// Extracts styled Reader HTML (preserving images and layout via Reeeed's ReadableDoc)
     /// along with plain text for AI summarization in a single pass.
     func extractReaderHTML(from url: URL, timeoutSeconds: Double = 6.0) async throws -> ReaderWebPageContent {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw URLError(.unsupportedURL)
+        }
+
         return try await withThrowingTaskGroup(of: ReaderWebPageContent.self) { group in
             group.addTask {
                 var request = URLRequest(url: url)

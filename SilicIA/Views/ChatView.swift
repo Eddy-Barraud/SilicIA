@@ -1359,7 +1359,7 @@ struct ChatView: View {
 
     private func debugDrop(_ message: @autoclosure () -> String) {
         #if DEBUG
-        print("[ChatView][PDFDrop] \(message())")
+        print("[ChatView][AttachmentDrop] \(message())")
         #endif
     }
 

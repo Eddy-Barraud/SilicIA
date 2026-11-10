@@ -12,7 +12,7 @@ import SwiftUI
 import LaTeXSwiftUI
 
 /// Block structure extracted from raw Markdown text.
-enum MarkdownBlock: Identifiable {
+enum MarkdownBlock: Identifiable, Hashable, Sendable {
     case heading(level: Int, text: String)
     case quote(String)
     case code(language: String, code: String)
@@ -37,7 +37,7 @@ enum MarkdownBlock: Identifiable {
         case .orderedList(let items):
             return "ol-\(items.joined().hashValue)"
         case .horizontalRule:
-            return "hr-\(UUID().uuidString)"
+            return "hr-\(hashValue)"
         case .paragraph(let text):
             return "p-\(text.hashValue)"
         }

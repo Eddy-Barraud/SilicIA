@@ -159,4 +159,18 @@ final class PDFContextBudgetingTests: XCTestCase {
         XCTAssertFalse(batches[0].isMerged)
         XCTAssertEqual(batches[0].combinedContent.count, 4000 * TokenBudgeting.avgCharsPerToken)
     }
+
+    func testChatServicePDFPresenceDistinction() {
+        let pdfURL = URL(fileURLWithPath: "/path/to/document.pdf")
+        let txtURL = URL(fileURLWithPath: "/path/to/notes.txt")
+        let mdURL = URL(fileURLWithPath: "/path/to/readme.md")
+
+        let onlyTextFiles = [txtURL, mdURL]
+        let hasPDF1 = onlyTextFiles.contains { !ChatService.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        XCTAssertFalse(hasPDF1, "Text and Markdown files must not be flagged as PDF")
+
+        let mixed = [txtURL, pdfURL]
+        let hasPDF2 = mixed.contains { !ChatService.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        XCTAssertTrue(hasPDF2, "Mixture containing .pdf must be flagged as PDF")
+    }
 }

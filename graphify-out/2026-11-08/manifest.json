@@ -210,9 +210,9 @@
     "semantic_hash": ""
   },
   "SilicIA/Services/ChatService.swift": {
-    "mtime": 1794175106.904432,
-    "seen": 1794175503.549647,
-    "ast_hash": "83e17b7b82ac896297b56c1184afcad5",
+    "mtime": 1794176697.6690938,
+    "seen": 1794176971.552095,
+    "ast_hash": "0f883dc60f903bb612e209f03f36e9e2",
     "semantic_hash": ""
   },
   "SilicIA/Services/DebugRAGStorage.swift": {
@@ -300,9 +300,9 @@
     "semantic_hash": "08154300d48ded3fd4e0043acc76caea"
   },
   "SilicIA/Services/RAGContextService.swift": {
-    "mtime": 1794139164.9062414,
-    "seen": 1794139179.6076531,
-    "ast_hash": "d55beda8e69f1d65bb4793f4481be456",
+    "mtime": 1794176865.2147586,
+    "seen": 1794176971.552112,
+    "ast_hash": "cadceeae984a3f3d805190244ca0970e",
     "semantic_hash": ""
   },
   "SilicIA/Services/Sanitizer.swift": {
@@ -312,9 +312,9 @@
     "semantic_hash": ""
   },
   "SilicIA/Services/TokenBudgeting.swift": {
-    "mtime": 1794095977.178704,
-    "seen": 1794096423.602154,
-    "ast_hash": "fc3f47f5e753040ea529cd8a85a16efb",
+    "mtime": 1794176525.7652876,
+    "seen": 1794176971.552114,
+    "ast_hash": "788b3c2a89d337dd6623e3d2b7383811",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/CalculatorTool.swift": {
@@ -2022,9 +2022,15 @@
     "semantic_hash": ""
   },
   "SilicIATests/PDFPageSummaryBenchmarkTests.swift": {
-    "mtime": 1794175157.7939267,
-    "seen": 1794175503.54969,
-    "ast_hash": "11642828618ad8df2d4c00fede392884",
+    "mtime": 1794176197.0971463,
+    "seen": 1794176971.552151,
+    "ast_hash": "09f5c696e08196082c41f5fde533eed1",
+    "semantic_hash": ""
+  },
+  "SilicIATests/PDFContextBudgetingTests.swift": {
+    "mtime": 1794176920.6185107,
+    "seen": 1794176971.55215,
+    "ast_hash": "ae3edfae475e2888a808a795abb9f8d6",
     "semantic_hash": ""
   }
 }

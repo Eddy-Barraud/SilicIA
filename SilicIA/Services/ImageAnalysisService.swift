@@ -394,6 +394,7 @@ enum ImageAnalysisService {
         from url: URL,
         progress: (@MainActor @Sendable (_ completedPages: Int, _ totalPages: Int) -> Void)? = nil
     ) async -> [PDFPageAnalysisResult] {
+        guard !Task.isCancelled else { return [] }
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed {
@@ -425,11 +426,13 @@ enum ImageAnalysisService {
 
         await withTaskGroup(of: (Int, PDFPageAnalysisResult).self) { group in
             for pageIndex in 0..<workerCount {
+                if Task.isCancelled { break }
                 let renderedImage = document
                     .page(at: pageIndex)
                     .flatMap { renderedCGImage(for: $0) }
                 group.addTask {
-                    (pageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
+                    let result = renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty
+                    return (pageIndex, result)
                 }
             }
 
@@ -440,14 +443,20 @@ enum ImageAnalysisService {
                     progress(completedPages, totalPages)
                 }
 
-                if nextPageIndex < totalPages, !Task.isCancelled {
+                if Task.isCancelled {
+                    group.cancelAll()
+                    break
+                }
+
+                if nextPageIndex < totalPages {
                     let scheduledPageIndex = nextPageIndex
                     nextPageIndex += 1
                     let renderedImage = document
                         .page(at: scheduledPageIndex)
                         .flatMap { renderedCGImage(for: $0) }
                     group.addTask {
-                        (scheduledPageIndex, await MainActor.run { renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } } ?? empty)
+                        let result = renderedImage.flatMap { Self.analyzePDFPage(cgImage: $0) } ?? empty
+                        return (scheduledPageIndex, result)
                     }
                 }
             }

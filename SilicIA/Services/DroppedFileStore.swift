@@ -43,6 +43,11 @@ struct DroppedFileStore: Sendable {
                 return sourceURL.standardizedFileURL
             }
             let destinationURL = uniqueDestinationURL(preferredFileName: preferredFileName, sourceURL: sourceURL)
+            let normalizedDestination = destinationURL.standardizedFileURL.resolvingSymlinksInPath()
+            // Ensure the destination strictly resides directly within the designated storage directory (prevent path traversal).
+            guard normalizedDestination.deletingLastPathComponent().path == normalizedStorageDirectory.path else {
+                return nil
+            }
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try fileManager.removeItem(at: destinationURL)
             }
@@ -92,19 +97,32 @@ struct DroppedFileStore: Sendable {
     }
 
     private func normalizedRawName(preferredFileName: String?, sourceURL: URL) -> String {
-        let candidate = preferredFileName?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-
-        let sourceName = sourceURL.lastPathComponent
+        let candidate = preferredFileName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sourceName = sourceURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = sourceName.isEmpty ? "dropped.\(defaultExtension)" : sourceName
-        let chosen = (candidate?.isEmpty == false ? candidate! : fallback)
-        let chosenExt = (chosen as NSString).pathExtension.lowercased()
-        if allowedExtensions.contains(chosenExt) {
-            return chosen
+        var raw = (candidate?.isEmpty == false ? candidate! : fallback)
+
+        // Strip directory traversal components, path separators, and colons
+        raw = (raw as NSString).lastPathComponent
+        raw = raw
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: "\\", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        while raw.contains("..") {
+            raw = raw.replacingOccurrences(of: "..", with: "")
         }
-        return "\(chosen).\(defaultExtension)"
+
+        if raw.isEmpty || raw == "." {
+            raw = "dropped.\(defaultExtension)"
+        }
+
+        let chosenExt = (raw as NSString).pathExtension.lowercased()
+        if allowedExtensions.contains(chosenExt) {
+            return raw
+        }
+        return "\(raw).\(defaultExtension)"
     }
 }
 

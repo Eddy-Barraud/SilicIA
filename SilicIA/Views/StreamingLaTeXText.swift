@@ -43,12 +43,6 @@ struct StreamingLaTeXText: View {
         let committed = isStreaming ? Array(blocks.dropLast()) : blocks
         let pending = isStreaming ? (blocks.last ?? "") : ""
 
-        #if DEBUG
-        if pending.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty{
-            let _ = print("[StreamingLaTeX] render isStreaming=\(isStreaming) total=\(text.count) blocks=\(blocks.count) committed=\(committed.count)")
-        }
-        #endif
-
         return VStack(alignment: .leading, spacing: 8) {
             // Stable identity = position. Blocks are append-only, so a given
             // index always maps to the same completed content; SwiftUI keeps

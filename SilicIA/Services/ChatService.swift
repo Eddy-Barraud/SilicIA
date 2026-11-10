@@ -140,7 +140,7 @@ final class ChatService: ObservableObject {
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxResponseTokens)
-        let isPDFPresent = !pdfURLs.isEmpty
+        let isPDFPresent = pdfURLs.contains { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
         let effectiveMaxContextTokens: Int
         if isPDFPresent {
             effectiveMaxContextTokens = TokenBudgeting.maxPDFInputContextTokens(
@@ -413,11 +413,6 @@ final class ChatService: ObservableObject {
             // the tool transcript). Recover by retrying the SAME question
             // WITHOUT tools: the classical grounded path builds no tool
             // transcript, so it sidesteps the failure (mirrors AIService's
-            // A tool-calling turn can transiently fail — most notably the
-            // intermittent `GenerationError -1` (context-window overflow from
-            // the tool transcript). Recover by retrying the SAME question
-            // WITHOUT tools: the classical grounded path builds no tool
-            // transcript, so it sidesteps the failure (mirrors AIService's
             // search-path fallback).
             if let assistantID = streamingAssistantID {
                 let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
@@ -617,10 +612,20 @@ final class ChatService: ObservableObject {
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
-        let effectiveMaxContextTokens = calculateEffectiveContextTokens(
-            requestedContextTokens: maxContextTokens,
-            maxOutputTokens: effectiveMaxOutputTokens
-        )
+        let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxResponseTokens)
+        let isPDFPresent = pdfURLs.contains { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        let effectiveMaxContextTokens: Int
+        if isPDFPresent {
+            effectiveMaxContextTokens = TokenBudgeting.maxPDFInputContextTokens(
+                maxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevel: reasoningLevel
+            )
+        } else {
+            effectiveMaxContextTokens = calculateEffectiveContextTokens(
+                requestedContextTokens: maxContextTokens,
+                maxOutputTokens: effectiveMaxOutputTokens
+            )
+        }
 
         let contextKey = makeContextKey(
             contextInput: contextInput,
@@ -793,10 +798,13 @@ final class ChatService: ObservableObject {
     static let textFileExtensions: Set<String> = ["txt", "md", "markdown", "text"]
 
     /// Chunks plain text and Markdown files directly using RAGChunker without Vision OCR.
+    static let maxTextFileCharacters = 1_000_000
+
     static func makeTextFileChunks(text: String, fileName: String) -> [RAGChunk] {
         let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleanText.isEmpty else { return [] }
-        return RAGChunker.chunkParagraphs(text: cleanText, source: "File: \(fileName)", url: nil)
+        let cappedText = cleanText.count > maxTextFileCharacters ? String(cleanText.prefix(maxTextFileCharacters)) : cleanText
+        return RAGChunker.chunkParagraphs(text: cappedText, source: "File: \(fileName)", url: nil)
     }
 
     /// Collects web, PDF, text, and image chunks from provided context.
@@ -815,7 +823,13 @@ final class ChatService: ObservableObject {
         useWikipedia: Bool = true
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
-        let uniqueDocuments = Array(Set(pdfURLs))
+        var seenDocs = Set<URL>()
+        var uniqueDocuments: [URL] = []
+        for url in pdfURLs {
+            if seenDocs.insert(url.standardizedFileURL).inserted {
+                uniqueDocuments.append(url)
+            }
+        }
         let textFileURLs = uniqueDocuments.filter { Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
         let actualPDFURLs = uniqueDocuments.filter { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
         let uniqueImages = Array(Set(imageURLs))
@@ -876,6 +890,7 @@ final class ChatService: ObservableObject {
         let totalMaxWebResults = effectiveMaxDDGResults + effectiveMaxWikiResults
 
         for result in retrievedWebResults {
+            if Task.isCancelled { break }
             guard let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !retrievedContent.isEmpty else {
                 continue
@@ -892,13 +907,14 @@ final class ChatService: ObservableObject {
             }
         }
 
-        if !urls.isEmpty {
+        if !urls.isEmpty && !Task.isCancelled {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, totalMaxWebResults),
                 maxCharacters: webScrapingCharacters
             )
             for url in urls {
+                if Task.isCancelled { break }
                 guard let text = scraped[url] else { continue }
                 let chunked = RAGChunker.chunkParagraphs(
                     text: text,
@@ -915,6 +931,7 @@ final class ChatService: ObservableObject {
 
         // Text & Markdown files: bypass OCR and chunk directly into structured paragraphs and tables
         for textURL in textFileURLs {
+            if Task.isCancelled { break }
             let progressKey = Self.contextAttachmentKey(for: textURL)
             var fileContent: String?
             let didAccess = textURL.startAccessingSecurityScopedResource()
@@ -923,6 +940,14 @@ final class ChatService: ObservableObject {
                     textURL.stopAccessingSecurityScopedResource()
                 }
             }
+
+            let maxFileSize = 10 * 1024 * 1024 // 10 MB ceiling to guard against OOM on massive log/dump files
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: textURL.path),
+               let size = attrs[.size] as? Int, size > maxFileSize {
+                debugContext("collectChunks textFile=\(textURL.lastPathComponent) skipped (exceeds 10MB budget: \(size) bytes)")
+                continue
+            }
+
             if let data = try? Data(contentsOf: textURL) {
                 if let str = String(data: data, encoding: .utf8) {
                     fileContent = str
@@ -945,6 +970,7 @@ final class ChatService: ObservableObject {
         }
 
         for pdfURL in actualPDFURLs {
+            if Task.isCancelled { break }
             let completedBeforePDF = completedWorkItems
             let progressKey = Self.contextAttachmentKey(for: pdfURL)
             let pageTexts: [String]
@@ -994,12 +1020,20 @@ final class ChatService: ObservableObject {
             debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) batches=\(batches.count) for query=\(trimmedMessage)")
 
             for (batchIndex, batch) in batches.enumerated() {
+                if Task.isCancelled { break }
+                let trimmedBatchContent = batch.combinedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedBatchContent.isEmpty else { continue }
+
                 let summary = await summarizePDFBatch(batch: batch, query: trimmedMessage)
+                if Task.isCancelled { break }
+                let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedSummary.isEmpty else { continue }
+
                 let pageLabel = batch.isMerged ? "pages \(batch.pageNumbers[0])-\(batch.pageNumbers[1])" : "page \(batch.pageNumbers[0])"
                 let source = "PDF: \(pdfURL.lastPathComponent) \(pageLabel)"
                 let chunk = RAGChunk(
                     source: source,
-                    text: summary,
+                    text: trimmedSummary,
                     url: nil,
                     pdfPage: batch.pageNumbers[0]
                 )
@@ -1038,9 +1072,19 @@ final class ChatService: ObservableObject {
         return chunks
     }
 
-    /// Partitions PDF pages into batches: if two consecutive pages fit within
-    /// `maxMergedTokens` (3500 tokens), they are merged into one batch. Otherwise,
-    /// a single page is processed (capped at `maxSingleTokens`, 4000 tokens for safety).
+    /// Partitions extracted PDF page strings into sequential batches for LLM summarization.
+    ///
+    /// Batching Strategy:
+    /// - Consecutive pages whose joint estimated token count falls within `maxMergedTokens` (3500 tokens)
+    ///   are merged into a single multi-page batch, reducing LLM invocation overhead by ~50%.
+    /// - Pages that cannot be merged are processed individually, with their text safely truncated
+    ///   to `maxSingleTokens` (4000 tokens) to guard against context-window overflow.
+    ///
+    /// - Parameters:
+    ///   - pages: The array of extracted page texts (layout-aware OCR / raw text).
+    ///   - maxMergedTokens: Upper token threshold allowing two consecutive pages to merge.
+    ///   - maxSingleTokens: Safety ceiling on characters ingested for an individual unmerged page.
+    /// - Returns: An ordered array of `PDFPageBatch` items ready for technical summarization.
     static func makePDFPageBatches(
         pages: [String],
         maxMergedTokens: Int = 3500,
@@ -1080,13 +1124,27 @@ final class ChatService: ObservableObject {
         return batches
     }
 
-    /// Invokes the Foundation Model to summarize a page batch into one paragraph (single page)
-    /// or two paragraphs (two merged pages), weighting content towards the user query and
-    /// strictly preserving equations, numbers, and dates.
+    /// Invokes the on-device Foundation Model to generate a targeted technical summary of a PDF page batch.
+    ///
+    /// Summarization Rules:
+    /// - Targets 1 paragraph for single pages, or 2 paragraphs for merged two-page batches.
+    /// - Weights extracted content heavily toward the user's specific query.
+    /// - Strictly preserves critical domain facts: mathematical equations, quantitative measurements, and dates.
+    /// - Automatically short-circuits with an empty string if the batch content is blank or whitespace-only.
+    /// - Gracefully falls back to the raw batch content on unexpected inference failure.
+    /// - Returns an empty string early when the operation is cancelled (`CancellationError`).
+    ///
+    /// - Parameters:
+    ///   - batch: The `PDFPageBatch` containing 1 or 2 pages and combined text.
+    ///   - query: The user's prompt or question guiding relevance weighting.
+    /// - Returns: A concise, technical summary paragraph or the original content fallback.
     private func summarizePDFBatch(
         batch: PDFPageBatch,
         query: String
     ) async -> String {
+        let trimmedCombined = batch.combinedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCombined.isEmpty else { return "" }
+
         let promptParagraphs = batch.isMerged ? "two paragraphs" : "one paragraph"
         let targetNoun = batch.isMerged ? "pages below" : "page below"
         let headerNoun = batch.isMerged ? "Pages content:" : "Page content:"
@@ -1115,6 +1173,8 @@ Summarize in \(promptParagraphs) the content of the \(targetNoun), and preserve 
             let response = try await session.respond(to: prompt, options: options)
             let output = String(describing: response.content).trimmingCharacters(in: .whitespacesAndNewlines)
             return output.isEmpty ? batch.combinedContent : output
+        } catch is CancellationError {
+            return ""
         } catch {
             return batch.combinedContent
         }
@@ -2038,6 +2098,11 @@ Summarize in \(promptParagraphs) the content of the \(targetNoun), and preserve 
     /// `sendMessage` so adds/removes that happen between turns reach the
     /// store on the next message.
     private func syncCurrentConversationPDFs(with pdfURLs: [URL]) {
+        // Prune raw page cache for any URLs that were removed from the active context,
+        // even if the conversation is not yet persisted.
+        let activeURLPaths = Set(pdfURLs.map { $0.standardizedFileURL.path })
+        pdfRawPageCache = pdfRawPageCache.filter { activeURLPaths.contains($0.key.standardizedFileURL.path) }
+
         guard let conv = currentConversation else { return }
         var names: [String] = []
         var bookmarks: [Data] = []
