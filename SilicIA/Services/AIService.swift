@@ -144,16 +144,31 @@ class AIService: ObservableObject {
 
             if let onPartialUpdate {
                 var latestPartial = ""
+                var lastUpdateTime: ContinuousClock.Instant = .now - .milliseconds(100)
+                let minInterval = Duration.milliseconds(35)
                 let responseStream = session.streamResponse(to: prompt, options: options)
                 for try await snapshot in responseStream {
-                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !partial.isEmpty, partial != latestPartial else { continue }
-                    latestPartial = partial
-                    onPartialUpdate(partial)
+                    let text = snapshot.content
+                    guard !text.isEmpty, text != latestPartial else { continue }
+                    latestPartial = text
+                    let now = ContinuousClock.now
+                    if now - lastUpdateTime >= minInterval || text.hasSuffix("\n") {
+                        lastUpdateTime = now
+                        let cleanText: String
+                        if text.contains("\\begin{document}") || text.contains("\\documentclass") {
+                            cleanText = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
+                        } else {
+                            cleanText = text
+                        }
+                        let trimmed = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onPartialUpdate(trimmed)
+                    }
                 }
                 if !latestPartial.isEmpty {
-                    return (latestPartial, pageMarkdown)
+                    let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    onPartialUpdate(finalSanitized)
+                    return (finalSanitized, pageMarkdown)
                 }
             }
 
@@ -186,6 +201,9 @@ class AIService: ObservableObject {
         toolFetchedResults = []
         toolScoresCalculated = false
 
+        // Keep active Foundation Models session warm in memory during network I/O
+        DynamicSessionCoordinator.shared.reprewarmActiveSession()
+
         lastAnswerElapsedSeconds = nil
         toolRAGScrapeDuration = 0.0
         toolRAGChunkDuration = 0.0
@@ -196,7 +214,8 @@ class AIService: ObservableObject {
         debugNotes = []
         #endif
 
-        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: maxTokens).kind == .concise
+        let outputProfile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
+        let isConcise = outputProfile.kind == .concise
         let effectiveScrapingResults: Int
         if isConcise {
             effectiveScrapingResults = min(maxScrapingResults, useWikipedia ? 2 : 3)
@@ -204,7 +223,7 @@ class AIService: ObservableObject {
             effectiveScrapingResults = max(0, maxScrapingResults)
         }
         let effectiveScrapingChars = isConcise ? min(maxScrapingChars, 2_500) : max(0, maxScrapingChars)
-        let scrapeTimeout: Double = isConcise ? 1.5 : 4.0
+        let scrapeTimeout: Double = isConcise ? 1.5 : 3.0
 
         // Scrape only URLs without provider-supplied full content that passed the NLEmbedding snippet threshold.
         let urlsToScrape = results.compactMap { result -> String? in
@@ -341,8 +360,14 @@ class AIService: ObservableObject {
         // Note: selected.selectedChunks are ordered from least relevant to most relevant (#1 at the end).
         let contextToSend: String
         let corpusChunksToSend: [RAGChunk]
-        if isConcise && selected.selectedChunks.count > 3 {
-            let cappedChunks = Array(selected.selectedChunks.suffix(3))
+        let maxKeptChunks: Int
+        switch outputProfile.kind {
+        case .concise: maxKeptChunks = 3
+        case .standard: maxKeptChunks = 4
+        case .detailed: maxKeptChunks = 6
+        }
+        if selected.selectedChunks.count > maxKeptChunks {
+            let cappedChunks = Array(selected.selectedChunks.suffix(maxKeptChunks))
             corpusChunksToSend = cappedChunks.map(\.chunk)
             contextToSend = cappedChunks.map { "Source: \($0.chunk.source)\n\($0.chunk.text)" }.joined(separator: "\n\n---\n\n")
         } else {
@@ -989,24 +1014,41 @@ class AIService: ObservableObject {
 
         if let onPartialUpdate {
             var latestPartial = ""
+            var lastUpdateTime: ContinuousClock.Instant = .now - .milliseconds(100)
+            let minInterval = Duration.milliseconds(35)
             let responseStream = session.streamResponse(to: prompt, options: options)
             for try await snapshot in responseStream {
-                let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !partial.isEmpty, partial != latestPartial else { continue }
-                latestPartial = partial
-                onPartialUpdate(partial)
+                let text = snapshot.content
+                guard !text.isEmpty, text != latestPartial else { continue }
+                latestPartial = text
+                let now = ContinuousClock.now
+                if now - lastUpdateTime >= minInterval || text.hasSuffix("\n") {
+                    lastUpdateTime = now
+                    let cleanText: String
+                    if text.contains("\\begin{document}") || text.contains("\\documentclass") {
+                        cleanText = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
+                    } else {
+                        cleanText = text
+                    }
+                    let trimmed = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onPartialUpdate(trimmed)
+                }
             }
 
             if !latestPartial.isEmpty {
-                return latestPartial
+                let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                onPartialUpdate(finalSanitized)
+                return finalSanitized
             }
         }
 
-        // Generate the summary
+        // Generate the summary (fallback if streaming was skipped or empty)
         let response = try await session.respond(to: prompt, options: options)
         let txt_response = String(describing: response.content)
-
-        return txt_response
+        let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(txt_response)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        onPartialUpdate?(finalSanitized)
+        return finalSanitized
     }
 }

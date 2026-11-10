@@ -297,9 +297,9 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Executes HTML-to-Markdown conversion on a dedicated Thread with an explicit 4 MB stack
-    /// after validating memory and DOM nesting limits.
-    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String) async throws -> String {
-        let prepared = try validateAndPrepareHTMLForMarkdown(html)
+    /// after validating memory and DOM nesting limits (unless `skipValidation` is true for already extracted content).
+    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String, skipValidation: Bool = false) async throws -> String {
+        let prepared = skipValidation ? html : (try validateAndPrepareHTMLForMarkdown(html))
         return try await withCheckedThrowingContinuation { continuation in
             let thread = Thread {
                 autoreleasepool {
@@ -378,6 +378,9 @@ class WebScrapingService: ObservableObject {
 
         var request = URLRequest(url: apiURL)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 4.0
 
         let (data, response) = try await self.session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -428,6 +431,9 @@ class WebScrapingService: ObservableObject {
             group.addTask {
                 var request = URLRequest(url: url)
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
@@ -479,7 +485,7 @@ class WebScrapingService: ObservableObject {
             let rawContent = extracted.content ?? ""
 
             if !rawContent.isEmpty {
-                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent)
+                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent, skipValidation: true)
                 return (title, markdown)
             }
         }
@@ -570,6 +576,9 @@ class WebScrapingService: ObservableObject {
             group.addTask {
                 var request = URLRequest(url: url)
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode),

@@ -1171,11 +1171,17 @@ actor RAGContextService {
 
         let embedding = resolveEmbedding(for: primaryWebQuery, language: language)
         let wordEmbedding = resolveWordEmbedding(for: primaryWebQuery, language: language)
+        let primaryQueryTermData: [QueryTermData] = {
+            guard let wordEmbedding else { return [] }
+            return prepareQueryTermData(for: primaryWebQuery, wordEmbedding: wordEmbedding)
+        }()
         let queryEmbeddingInfo: (unitVector: [Double], query: String, embedding: NLEmbedding)? = {
             guard let embedding, let rawVec = embedding.vector(for: primaryWebQuery) else { return nil }
-            let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
-            guard norm > 0 else { return nil }
-            return (rawVec.map { $0 / norm }, primaryWebQuery, embedding)
+            var sumSq = 0.0
+            for v in rawVec { sumSq += v * v }
+            guard sumSq > 0 else { return nil }
+            let invNorm = 1.0 / sqrt(sumSq)
+            return (rawVec.map { $0 * invNorm }, primaryWebQuery, embedding)
         }()
 
         #if DEBUG
@@ -1253,12 +1259,18 @@ actor RAGContextService {
         }()
         let englishSentenceEmbedding: NLEmbedding? = embeddingCache[.english] ?? NLEmbedding.sentenceEmbedding(for: .english)
         let englishWordEmbedding: NLEmbedding? = wordEmbeddingCache[.english] ?? NLEmbedding.wordEmbedding(for: .english)
+        let englishQueryTermData: [QueryTermData] = {
+            guard let englishWordEmbedding else { return [] }
+            return prepareQueryTermData(for: englishQueryForWiki, wordEmbedding: englishWordEmbedding)
+        }()
         let englishUnitQueryVector: [Double]? = {
             guard let enEmb = englishSentenceEmbedding,
                   let rawVec = enEmb.vector(for: englishQueryForWiki) else { return nil }
-            let norm = sqrt(rawVec.map { $0 * $0 }.reduce(0, +))
-            guard norm > 0 else { return nil }
-            return rawVec.map { $0 / norm }
+            var sumSq = 0.0
+            for v in rawVec { sumSq += v * v }
+            guard sumSq > 0 else { return nil }
+            let invNorm = 1.0 / sqrt(sumSq)
+            return rawVec.map { $0 * invNorm }
         }()
 
         // Stage 2: Deep NLEmbedding evaluation only on the top bounded portion
@@ -1288,7 +1300,8 @@ actor RAGContextService {
                     let enWord = wordEmbeddingSemanticScore(
                         chunk: candidate.chunk,
                         query: englishQueryForWiki,
-                        wordEmbedding: enWordEmb
+                        wordEmbedding: enWordEmb,
+                        precomputedQueryTerms: englishQueryTermData
                     )
                     enSemantic = enSemantic * 0.75 + enWord * 0.25
                 }
@@ -1305,7 +1318,8 @@ actor RAGContextService {
                     let wordScore = wordEmbeddingSemanticScore(
                         chunk: candidate.chunk,
                         query: primaryWebQuery,
-                        wordEmbedding: wordEmbedding
+                        wordEmbedding: wordEmbedding,
+                        precomputedQueryTerms: primaryQueryTermData
                     )
                     primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
                 }
@@ -1322,7 +1336,8 @@ actor RAGContextService {
                     let wordScore = wordEmbeddingSemanticScore(
                         chunk: candidate.chunk,
                         query: primaryWebQuery,
-                        wordEmbedding: wordEmbedding
+                        wordEmbedding: wordEmbedding,
+                        precomputedQueryTerms: primaryQueryTermData
                     )
                     primarySemantic = primarySemantic * 0.75 + wordScore * 0.25
                 }
@@ -1332,7 +1347,8 @@ actor RAGContextService {
                     chunk: candidate.chunk,
                     query: primaryWebQuery,
                     wordEmbedding: wordEmbedding,
-                    includeBoostsWithOptions: options
+                    includeBoostsWithOptions: options,
+                    precomputedQueryTerms: primaryQueryTermData
                 )
                 semanticScore = wordScore
             }
@@ -1476,16 +1492,44 @@ actor RAGContextService {
         return nil
     }
 
+    private struct QueryTermData {
+        let term: String
+        let stem: String
+        let root: String
+        let lookup: String?
+    }
+
+    private func prepareQueryTermData(for query: String, wordEmbedding: NLEmbedding) -> [QueryTermData] {
+        let queryTerms = contentTokens(from: query)
+        return Set(queryTerms).map { qTerm in
+            let qStem = Self.stemStatic(qTerm)
+            let qRoot = Self.morphologicalRootStatic(qTerm)
+            let hasQVector = wordEmbedding.contains(qTerm) || wordEmbedding.contains(qStem)
+            let qLookup = hasQVector ? (wordEmbedding.contains(qTerm) ? qTerm : qStem) : nil
+            return QueryTermData(term: qTerm, stem: qStem, root: qRoot, lookup: qLookup)
+        }
+    }
+
     /// Computes semantic similarity between `query` and `chunk` using the query language's `NLEmbedding.wordEmbedding`.
     private func wordEmbeddingSemanticScore(
         chunk: RAGChunk,
         query: String,
         wordEmbedding: NLEmbedding,
-        includeBoostsWithOptions options: RAGSelectionOptions? = nil
+        includeBoostsWithOptions options: RAGSelectionOptions? = nil,
+        precomputedQueryTerms: [QueryTermData]? = nil
     ) -> Double {
-        let queryTerms = contentTokens(from: query)
-        let chunkTerms = contentTokens(from: "\(chunk.source) \(chunk.text)")
-        guard !queryTerms.isEmpty, !chunkTerms.isEmpty else {
+        let queryTermsData = precomputedQueryTerms ?? prepareQueryTermData(for: query, wordEmbedding: wordEmbedding)
+        guard !queryTermsData.isEmpty else {
+            if let options {
+                return relevanceScore(chunk: chunk, query: query, options: options)
+            }
+            return 0
+        }
+
+        // Sample up to first 650 characters of chunk to bound tokenization overhead
+        let chunkSample = chunk.text.count > 650 ? String(chunk.text.prefix(650)) : chunk.text
+        let chunkTerms = contentTokens(from: "\(chunk.source) \(chunkSample)")
+        guard !chunkTerms.isEmpty else {
             if let options {
                 return relevanceScore(chunk: chunk, query: query, options: options)
             }
@@ -1496,33 +1540,32 @@ actor RAGContextService {
         var totalSimilarity = 0.0
         var evaluatedQueryTerms = 0
 
-        let uniqueChunkTerms = Array(Set(chunkTerms).prefix(64))
-        for qTerm in Set(queryTerms) {
-            let qStem = Self.stemStatic(qTerm)
-            let qRoot = Self.morphologicalRootStatic(qTerm)
+        let uniqueChunkTerms = Array(Set(chunkTerms).prefix(32))
+        let chunkTermData: [(term: String, stem: String, root: String, lookup: String?)] = uniqueChunkTerms.map { term in
+            let stem = Self.stemStatic(term)
+            let root = Self.morphologicalRootStatic(term)
+            let lookup = wordEmbedding.contains(term) ? term : (wordEmbedding.contains(stem) ? stem : nil)
+            return (term, stem, root, lookup)
+        }
+
+        for qData in queryTermsData {
             var bestTermSim = 0.0
             var bestContextSim = 0.0
-            let hasQVector = wordEmbedding.contains(qTerm) || wordEmbedding.contains(qStem)
-            let qLookup = wordEmbedding.contains(qTerm) ? qTerm : qStem
 
-            for cTerm in uniqueChunkTerms {
-                let cStem = Self.stemStatic(cTerm)
-                if qStem == cStem || qRoot == Self.morphologicalRootStatic(cTerm) {
+            for cData in chunkTermData {
+                if qData.stem == cData.stem || qData.root == cData.root {
                     bestTermSim = 1.0
                     continue
                 }
-                if hasQVector {
-                    let cLookup = wordEmbedding.contains(cTerm) ? cTerm : (wordEmbedding.contains(cStem) ? cStem : nil)
-                    if let cLookup {
-                        let dist = wordEmbedding.distance(between: qLookup, and: cLookup, distanceType: .cosine)
-                        if !dist.isNaN {
-                            let sim = max(0.0, 1.0 - dist / 2.0)
-                            if sim > bestTermSim {
-                                bestTermSim = sim
-                            }
-                            if sim > bestContextSim {
-                                bestContextSim = sim
-                            }
+                if let qLookup = qData.lookup, let cLookup = cData.lookup {
+                    let dist = wordEmbedding.distance(between: qLookup, and: cLookup, distanceType: .cosine)
+                    if !dist.isNaN {
+                        let sim = max(0.0, 1.0 - dist / 2.0)
+                        if sim > bestTermSim {
+                            bestTermSim = sim
+                        }
+                        if sim > bestContextSim {
+                            bestContextSim = sim
                         }
                     }
                 }
@@ -1550,15 +1593,21 @@ actor RAGContextService {
         embedding: NLEmbedding,
         options: RAGSelectionOptions
     ) -> Double {
-        let sampleText = chunk.text.count > 850 ? String(chunk.text.prefix(850)) : chunk.text
+        let sampleText = chunk.text.count > 340 ? String(chunk.text.prefix(340)) : chunk.text
         let distance: Double
         if let unitQueryVector, let chunkVector = embedding.vector(for: sampleText) {
-            let chunkNorm = sqrt(chunkVector.map { $0 * $0 }.reduce(0, +))
-            if chunkNorm > 0 {
+            var sumSq = 0.0
+            let vCount = chunkVector.count
+            for i in 0..<vCount {
+                let v = chunkVector[i]
+                sumSq += v * v
+            }
+            if sumSq > 0 {
+                let invNorm = 1.0 / sqrt(sumSq)
                 var diffSq = 0.0
-                let count = min(unitQueryVector.count, chunkVector.count)
+                let count = min(unitQueryVector.count, vCount)
                 for i in 0..<count {
-                    let d = unitQueryVector[i] - (chunkVector[i] / chunkNorm)
+                    let d = unitQueryVector[i] - (chunkVector[i] * invNorm)
                     diffSq += d * d
                 }
                 distance = sqrt(diffSq)

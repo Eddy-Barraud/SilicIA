@@ -281,8 +281,8 @@ class WebSearchService: ObservableObject {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 15
-            config.waitsForConnectivity = true
+            config.timeoutIntervalForRequest = 8
+            config.waitsForConnectivity = false
             config.requestCachePolicy = .returnCacheDataElseLoad
             self.session = URLSession(configuration: config)
         }
@@ -294,8 +294,8 @@ class WebSearchService: ObservableObject {
             self.session = session
         } else {
             let config = URLSessionConfiguration.default
-            config.timeoutIntervalForRequest = 15
-            config.waitsForConnectivity = true
+            config.timeoutIntervalForRequest = 8
+            config.waitsForConnectivity = false
             config.requestCachePolicy = .returnCacheDataElseLoad
             self.session = URLSession(configuration: config)
         }
@@ -595,6 +595,9 @@ class WebSearchService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 6.0
 
         try await waitForDuckDuckGoRequestSlot()
 
@@ -716,6 +719,9 @@ class WebSearchService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 6.0
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -754,6 +760,9 @@ class WebSearchService: ObservableObject {
 
         var request = URLRequest(url: url)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 6.0
 
         let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -1065,6 +1074,9 @@ class WebSearchService: ObservableObject {
         do {
             var request = URLRequest(url: pageURL)
             request.setValue("MediaWiki REST API docs examples/0.1 (https://www.mediawiki.org/wiki/API_talk:REST_API)", forHTTPHeaderField: "User-Agent")
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+            request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+            request.timeoutInterval = 5.0
             let (data, response) = try await session.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse,
                   httpResponse.statusCode == 200 else {
