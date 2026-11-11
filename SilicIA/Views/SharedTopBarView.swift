@@ -38,34 +38,35 @@ struct SharedTopBarView: View {
     }
 
     var body: some View {
-        ZStack {
+        HStack(spacing: 4) {
+            headerIconButton(
+                systemImage: "square.and.pencil",
+                label: L.t("common.new", language: settings.language),
+                action: onNew
+            )
+
             if showContextSelector {
+                Spacer(minLength: 0)
                 SourceToggleButtons(settingsStore: settingsStore)
-            }
-
-            HStack(spacing: 4) {
-                headerIconButton(
-                    systemImage: "square.and.pencil",
-                    label: L.t("common.new", language: settings.language),
-                    action: onNew
-                )
-
+                Spacer(minLength: 0)
+            } else {
                 Spacer()
-
-                headerIconButton(
-                    systemImage: "clock.arrow.circlepath",
-                    label: L.t("common.history", language: settings.language),
-                    action: onHistory
-                )
-
-                headerIconButton(
-                    systemImage: "gearshape",
-                    label: L.t("common.settings", language: settings.language),
-                    action: onSettings
-                )
             }
+
+            headerIconButton(
+                systemImage: "clock.arrow.circlepath",
+                label: L.t("common.history", language: settings.language),
+                action: onHistory
+            )
+
+            headerIconButton(
+                systemImage: "gearshape",
+                label: L.t("common.settings", language: settings.language),
+                action: onSettings
+            )
         }
-        .padding()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
