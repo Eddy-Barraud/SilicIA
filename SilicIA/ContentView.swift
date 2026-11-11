@@ -91,17 +91,20 @@ struct ContentView: View {
                         },
                         chatService: chatService,
                         aiService: aiService,
-                        onOfflineQuery: { query in
+                        onChatQuery: { query in
                             selectedTab = .chat
+                            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
                             chatService.modelContext = modelContext
                             Task {
                                 let settings = settingsStore.settings
+                                let includeWebSearch = settings.useDuckDuckGo || settings.useWikipedia
                                 await chatService.sendMessage(
-                                    query,
+                                    trimmed,
                                     contextInput: "",
                                     pdfURLs: [],
                                     imageURLs: [],
-                                    includeWebSearch: false,
+                                    includeWebSearch: includeWebSearch,
                                     maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                                     maxWikipediaResults: settings.maxWikipediaResults,
                                     language: settings.language,
@@ -128,6 +131,9 @@ struct ContentView: View {
                             if !pdfs.isEmpty || !images.isEmpty {
                                 selectedTab = .chat
                             }
+                        },
+                        onSelectConversation: { _ in
+                            selectedTab = .chat
                         }
                     )
                 case .chat:

@@ -127,7 +127,7 @@ struct ChatView: View {
                 }
             )
         } else if showSettings {
-            chatSettingsPage
+            SharedSettingsView(isPresented: $showSettings, mode: mode)
         } else {
             VStack(spacing: 12) {
                 chatHeaderView
@@ -219,212 +219,30 @@ struct ChatView: View {
         }
     }
 
-    /// Renders top-level chat actions. Icon-only buttons sized for the
-    /// minimum 44pt tap target, with `.help` (macOS hover) and
-    /// `.accessibilityLabel` (VoiceOver) on every entry.
+    /// Shared top bar with context source selector, new message, history, and settings.
     private var chatHeaderView: some View {
-        ZStack {
-            if mode != .pdfTalkme {
-                SourceToggleButtons(settingsStore: settingsStore)
+        SharedTopBarView(
+            settingsStore: settingsStore,
+            showContextSelector: mode != .pdfTalkme,
+            onNew: { startOver() },
+            onHistory: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showHistory = true
+            },
+            onSettings: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showSettings = true
             }
-
-            HStack(spacing: 4) {
-                headerIconButton(
-                    systemImage: "square.and.pencil",
-                    label: L.t("common.new", language: settings.language),
-                    action: { startOver() }
-                )
-
-                Spacer()
-
-                headerIconButton(
-                    systemImage: "clock.arrow.circlepath",
-                    label: L.t("common.history", language: settings.language),
-                    action: { showHistory = true }
-                )
-
-                headerIconButton(
-                    systemImage: "gearshape",
-                    label: L.t("common.settings", language: settings.language),
-                    action: {
-                        #if canImport(UIKit)
-                        dismissKeyboard()
-                        #endif
-                        showSettings = true
-                    }
-                )
-            }
-        }
+        )
         .padding(.bottom, 2)
         .textSelection(.enabled)
     }
 
-    /// Standard icon-only header button: 44pt tap target, secondary tint,
-    /// hover help + VoiceOver label baked in.
-    @ViewBuilder
-    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
-    }
 
-    private var chatSettingsPage: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: { showSettings = false }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text(L.t("common.back", language: settings.language))
-                            .fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.glass)
-
-                Spacer()
-            }
-            .padding()
-
-            ScrollView {
-                chatSettingsPanel
-                    .padding()
-            }
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    /// Renders chat-specific tuning controls.
-    private var chatSettingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(L.t("chat.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.temperature", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(String(format: "%.2f", settings.temperature))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            // Token Budget (Unified Input/Output Slider)
-            TokenBudgetSliderView(
-                settings: $settingsStore.settings,
-                language: settings.language
-            )
-
-            if mode != .pdfTalkme {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("chat.settings.searchSources", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
-                    Text("DuckDuckGo")
-                        .font(.subheadline)
-                }
-                if settings.useDuckDuckGo {
-                    HStack {
-                        Text(L.t("chat.settings.maxDDG", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxDuckDuckGoResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxDuckDuckGoResults) },
-                        set: { settings.maxDuckDuckGoResults = Int($0) }
-                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
-                }
-
-                Toggle(isOn: $settingsStore.settings.useWikipedia) {
-                    Text("Wikipedia")
-                        .font(.subheadline)
-                }
-                if settings.useWikipedia {
-                    HStack {
-                        Text(L.t("chat.settings.wikiSource", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Picker("", selection: $settingsStore.settings.wikipediaSource) {
-                            Text(L.t("chat.settings.wikiSource.online", language: settings.language))
-                                .tag(WikipediaSource.online)
-                            Text(L.t("chat.settings.wikiSource.wikiFast", language: settings.language))
-                                .tag(WikipediaSource.wikiFast)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(maxWidth: 200)
-                    }
-
-                    HStack {
-                        Text(L.t("chat.settings.maxWiki", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxWikipediaResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxWikipediaResults) },
-                        set: { settings.maxWikipediaResults = Int($0) }
-                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
-                }
-
-                if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi.slash")
-                        Text(L.t("chat.settings.offlineMode", language: settings.language))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.modelLanguage", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(settings.language.rawValue)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Picker("Language", selection: $settingsStore.settings.language) {
-                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
-                        Text(lang.rawValue).tag(lang)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .padding()
-        .glassCard(cornerRadius: 16)
-    }
 
     /// Invisible marker pinned to the end of the transcript so we can scroll
     /// to the bottom on send / while streaming.

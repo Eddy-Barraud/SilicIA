@@ -2,67 +2,53 @@
 //  SourceToggleButtons.swift
 //  SilicIA
 //
-//  Context source toggle buttons for Wikipedia and Internet.
-//  Centered in both SearchView and ChatView headers, allowing users
-//  to quickly toggle context sources or deactivate both for offline LLM mode.
+//  Context source selector allowing only one source of context:
+//  Offline, Wiki, or Web.
+//  Styled to match the Reasoning Level Selector while keeping small icons.
 //
 
 import SwiftUI
 
 struct SourceToggleButtons: View {
-    var settingsStore: AppSettingsStore = .shared
+    @Bindable var settingsStore: AppSettingsStore = .shared
 
     var body: some View {
-        HStack(spacing: 8) {
-            sourceButton(
-                title: "Wikipedia",
-                systemImage: "book.closed",
-                isActive: settingsStore.settings.useWikipedia,
-                action: {
-                    settingsStore.settings.useWikipedia.toggle()
+        HStack(spacing: 0) {
+            ForEach(ContextSourceKind.allCases) { source in
+                let isSelected = settingsStore.settings.contextSourceKind == source
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        settingsStore.settings.contextSourceKind = source
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: source.systemImage)
+                            .font(.subheadline)
+                        Text(source.displayName)
+                            .font(.subheadline)
+                            .fontWeight(isSelected ? .semibold : .medium)
+                    }
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .frame(minHeight: 24)
+                    .background {
+                        if isSelected {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .fill(PlatformColors.controlBackground)
+                                .shadow(color: .black.opacity(0.12), radius: 1, x: 0, y: 0.5)
+                        }
+                    }
                 }
-            )
-
-            sourceButton(
-                title: "Internet",
-                systemImage: "globe",
-                isActive: settingsStore.settings.useDuckDuckGo,
-                action: {
-                    settingsStore.settings.useDuckDuckGo.toggle()
-                }
-            )
-        }
-    }
-
-    private func sourceButton(
-        title: String,
-        systemImage: String,
-        isActive: Bool,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: systemImage)
-                    .font(.subheadline)
-                Text(title)
-                    .font(.subheadline)
-                    .fontWeight(.medium)
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityLabel("\(source.displayName): \(isSelected ? "Selected" : "Not selected")")
             }
-            .foregroundStyle(isActive ? Color.green : Color.secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(isActive ? Color.green.opacity(0.12) : Color.gray.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(isActive ? Color.green.opacity(0.4) : Color.gray.opacity(0.25), lineWidth: 1)
-            )
         }
-        .buttonStyle(.plain)
-        .contentShape(Rectangle())
-        .animation(.easeInOut(duration: 0.15), value: isActive)
-        .accessibilityLabel("\(title): \(isActive ? "Active" : "Inactive")")
+        .padding(2)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.primary.opacity(0.06))
+        )
     }
 }

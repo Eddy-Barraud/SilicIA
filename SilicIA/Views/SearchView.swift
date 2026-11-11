@@ -27,11 +27,16 @@ struct SearchView: View {
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
+    let onChatQuery: ((String) -> Void)?
     let onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)?
+    var onSelectConversation: ((Conversation) -> Void)? = nil
     /// Dropping a PDF/image on the search surface writes here so that the
     /// containing view can flip to the Chat tab and ChatView picks the file
     /// up as context via its existing shared-input merge.
     let onAttachmentsDropped: (([URL], [URL]) -> Void)?
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var showHistory = false
 
     private static let imageFileExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
@@ -176,8 +181,10 @@ struct SearchView: View {
         chatService: ChatService,
         aiService: AIService? = nil,
         onOfflineQuery: ((String) -> Void)? = nil,
+        onChatQuery: ((String) -> Void)? = nil,
         onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil,
-        onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil
+        onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil,
+        onSelectConversation: ((Conversation) -> Void)? = nil
     ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
@@ -186,8 +193,10 @@ struct SearchView: View {
             self._aiService = ObservedObject(wrappedValue: aiService)
         }
         self.onOfflineQuery = onOfflineQuery
+        self.onChatQuery = onChatQuery ?? onOfflineQuery
         self.onChatMore = onChatMore
         self.onAttachmentsDropped = onAttachmentsDropped
+        self.onSelectConversation = onSelectConversation
     }
     
     private var maxAllowedContextTokensForCurrentResponse: Int {
@@ -215,10 +224,7 @@ struct SearchView: View {
     }
 
     private var isChatButtonDisabled: Bool {
-        if hasChatMoreContext {
-            return false
-        }
-        return searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching
+        searchService.isSearching
     }
 
     private func handleChatButtonTap() {
@@ -231,20 +237,37 @@ struct SearchView: View {
             return
         }
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return }
-        onOfflineQuery?(trimmedQuery)
+        if let onChatQuery {
+            onChatQuery(trimmedQuery)
+        } else {
+            onOfflineQuery?(trimmedQuery)
+        }
     }
 
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                // Header
-                headerView
+        if showHistory {
+            ConversationsListView(
+                onLoadConversation: { conversation in
+                    chatService.loadConversation(id: conversation.id)
+                    showHistory = false
+                    onSelectConversation?(conversation)
+                },
+                onDismiss: {
+                    showHistory = false
+                }
+            )
+        } else if showSettings {
+            SharedSettingsView(
+                isPresented: $showSettings,
+                mode: .full
+            )
+        } else {
+            ZStack {
+                VStack(spacing: 0) {
+                    // Header
+                    headerView
 
-                if showSettings {
-                    settingsPage
-                } else {
                     // Content
                     if searchService.isSearching {
                         loadingView
@@ -267,128 +290,82 @@ struct SearchView: View {
                     // Search Bar
                     searchBarView
                 }
-            }
 
-            if isShowingWebPageSummaryOverlay {
-                webPageSummaryOverlay
-            }
-        }
-        .background(Color.platformWindowBackground)
-        .contentShape(Rectangle())
-        .onDrop(of: [.pdf, .plainText, .text, .image, .fileURL], isTargeted: nil) { providers in
-            handleAttachmentDrop(providers)
-        }
-        // Mirror the AIService's tool-call accumulator into the local
-        // searchResults state whenever it changes — this is how the cards
-        // get populated in tool-calling mode (the auto web search is
-        // skipped, so the model's webSearch invocations are the only
-        // source of URLs). Filtered to current request only by also
-        // checking hasAttemptedSearch so a stale post-cancel notification
-        // doesn't repopulate the cards on the welcome screen.
-        .onChange(of: aiService.toolFetchedResults) { _, newResults in
-            guard hasAttemptedSearch else { return }
-            searchResults = newResults
-        }
-        .onAppear {
-            consumeInitialQueryIfNeeded()
-            // Drop the caret into the search field whenever this screen
-            // appears in an idle state. Triggers the iOS soft keyboard
-            // immediately so the user can start typing without an extra
-            // tap. We skip it when results are visible to avoid stealing
-            // focus while the user is scanning them.
-            if searchResults.isEmpty && !searchService.isSearching {
-                // Defer a runloop so the TextField is mounted before we
-                // request focus — SwiftUI ignores focus changes made
-                // before the target view is in the responder chain.
-                DispatchQueue.main.async {
-                    isSearchFieldFocused = true
+                if isShowingWebPageSummaryOverlay {
+                    webPageSummaryOverlay
                 }
             }
+            .background(Color.platformWindowBackground)
+            .contentShape(Rectangle())
+            .onDrop(of: [.pdf, .plainText, .text, .image, .fileURL], isTargeted: nil) { providers in
+                handleAttachmentDrop(providers)
+            }
+            // Mirror the AIService's tool-call accumulator into the local
+            // searchResults state whenever it changes — this is how the cards
+            // get populated in tool-calling mode (the auto web search is
+            // skipped, so the model's webSearch invocations are the only
+            // source of URLs). Filtered to current request only by also
+            // checking hasAttemptedSearch so a stale post-cancel notification
+            // doesn't repopulate the cards on the welcome screen.
+            .onChange(of: aiService.toolFetchedResults) { _, newResults in
+                guard hasAttemptedSearch else { return }
+                searchResults = newResults
+            }
+            .onAppear {
+                chatService.modelContext = modelContext
+                consumeInitialQueryIfNeeded()
+                // Drop the caret into the search field whenever this screen
+                // appears in an idle state. Triggers the iOS soft keyboard
+                // immediately so the user can start typing without an extra
+                // tap. We skip it when results are visible to avoid stealing
+                // focus while the user is scanning them.
+                if searchResults.isEmpty && !searchService.isSearching {
+                    // Defer a runloop so the TextField is mounted before we
+                    // request focus — SwiftUI ignores focus changes made
+                    // before the target view is in the responder chain.
+                    DispatchQueue.main.async {
+                        isSearchFieldFocused = true
+                    }
+                }
+            }
+            .onChange(of: initialQuery) {
+                consumeInitialQueryIfNeeded()
+            }
+            #if canImport(UIKit)
+            .overlay {
+                KeyboardDismissTapOverlay(onTapOutsideTextInput: {
+                    dismissKeyboard()
+                })
+            }
+            #endif
         }
-        .onChange(of: initialQuery) {
-            consumeInitialQueryIfNeeded()
-        }
-        #if canImport(UIKit)
-        .overlay {
-            KeyboardDismissTapOverlay(onTapOutsideTextInput: {
-                dismissKeyboard()
-            })
-        }
-        #endif
     }
 
     // MARK: - Header View
     private var headerView: some View {
-        HStack(spacing: 4) {
-            if showSettings {
-                // Settings is a sub-screen; keep its back button as the
-                // dominant affordance so users know how to leave.
-                Button(action: { showSettings = false }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text(L.t("common.back", language: settings.language))
-                            .fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel(L.t("common.back", language: settings.language))
-
-                Text(L.t("search.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-
-                Spacer(minLength: 0)
-            } else {
-                ZStack {
-                    SourceToggleButtons(settingsStore: settingsStore)
-
-                    HStack(spacing: 4) {
-                        headerIconButton(
-                            systemImage: "arrow.counterclockwise",
-                            label: L.t("common.startOver", language: settings.language),
-                            action: { goHome() }
-                        )
-
-                        Spacer()
-
-                        headerIconButton(
-                            systemImage: "gearshape",
-                            label: L.t("common.settings", language: settings.language),
-                            action: { showSettings = true }
-                        )
-                    }
-                }
+        SharedTopBarView(
+            settingsStore: settingsStore,
+            showContextSelector: true,
+            onNew: { startNew() },
+            onHistory: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showHistory = true
+            },
+            onSettings: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showSettings = true
             }
-        }
-        .padding()
-        // Transparent header — floats over the content in the Liquid
-        // Glass style rather than sitting on an opaque bar.
+        )
     }
 
-    /// 44pt-tap-target icon button used in the top bar. Matches the
-    /// equivalent helper in `ChatView` so the two tabs feel symmetric.
-    @ViewBuilder
-    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
-    }
-
-    private var settingsPage: some View {
-        ScrollView {
-            settingsPanel
-                .padding()
-        }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func startNew() {
+        cancelCurrentSearch()
+        goHome()
+        chatService.resetConversation()
     }
 
     // MARK: - Search Bar View
@@ -447,7 +424,7 @@ struct SearchView: View {
             // Action row: Chat left-aligned, send arrow right.
             HStack(spacing: 8) {
                 Button(action: handleChatButtonTap) {
-                    Label(chatButtonTitle, systemImage: "network.slash")
+                    Label(chatButtonTitle, systemImage: "bubble.left.and.bubble.right")
                         .font(.subheadline)
                 }
                 .buttonStyle(.bordered)
@@ -782,150 +759,7 @@ struct SearchView: View {
         .padding(.horizontal, 4)
     }
 
-    // MARK: - Settings Panel
-    private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(L.t("search.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
-            }
 
-            Divider()
-
-            // Temperature
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("search.settings.temperature", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(String(format: "%.2f", settings.temperature))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            // Reader View and Summary Toggle
-            VStack(alignment: .leading, spacing: 4) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isReaderViewAndSummaryEnabled) {
-                    Text(L.t("search.settings.readerViewAndSummaryToggle", language: settings.language))
-                        .font(.subheadline)
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
-
-            // Search Sources
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("search.settings.searchSources", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
-                    Text("DuckDuckGo")
-                        .font(.subheadline)
-                }
-                if settings.useDuckDuckGo {
-                    HStack {
-                        Text(L.t("search.settings.maxDDG", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxDuckDuckGoResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxDuckDuckGoResults) },
-                        set: { settings.maxDuckDuckGoResults = Int($0) }
-                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
-                }
-
-                Toggle(isOn: $settingsStore.settings.useWikipedia) {
-                    Text("Wikipedia")
-                        .font(.subheadline)
-                }
-                if settings.useWikipedia {
-                    HStack {
-                        Text(L.t("search.settings.wikiSource", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Picker("", selection: $settingsStore.settings.wikipediaSource) {
-                            Text(L.t("search.settings.wikiSource.online", language: settings.language))
-                                .tag(WikipediaSource.online)
-                            Text(L.t("search.settings.wikiSource.wikiFast", language: settings.language))
-                                .tag(WikipediaSource.wikiFast)
-                        }
-                        .pickerStyle(.segmented)
-                        .labelsHidden()
-                        .frame(maxWidth: 200)
-                    }
-
-                    HStack {
-                        Text(L.t("search.settings.maxWiki", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxWikipediaResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxWikipediaResults) },
-                        set: { settings.maxWikipediaResults = Int($0) }
-                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
-                }
-
-                if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi.slash")
-                        Text(L.t("search.settings.offlineMode", language: settings.language))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            // Token Budget (Unified Input/Output Slider)
-            TokenBudgetSliderView(
-                settings: $settingsStore.settings,
-                language: settings.language
-            )
-
-            // Model Language
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("search.settings.modelLanguage", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(settings.language.rawValue)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Picker("Language", selection: $settingsStore.settings.language) {
-                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
-                        Text(lang.rawValue).tag(lang)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-        }
-        .padding()
-        .glassCard(cornerRadius: 16)
-    }
 
     // MARK: - Web Page Reader View and Summary Overlay
     private var webPageSummaryOverlay: some View {
@@ -1300,6 +1134,9 @@ struct SearchView: View {
         searchQuery = trimmedQuery
         hasAttemptedSearch = true
 
+        // Immediately register the search in historic data so it appears in history even if canceled or in-flight
+        registerSearchConversation(query: trimmedQuery, answer: "", citations: nil)
+
         let requestID = UUID()
         activeSearchRequestID = requestID
 
@@ -1407,6 +1244,13 @@ struct SearchView: View {
                     )
                 } else {
                     searchService.isSearching = false
+                    let topSnippet = fetchedResults.first?.snippet ?? ""
+                    let topURL = fetchedResults.first?.url
+                    registerSearchConversation(
+                        query: trimmedQuery,
+                        answer: topSnippet,
+                        citations: topURL
+                    )
                 }
             } catch {
                 guard activeSearchRequestID == requestID else {
@@ -1520,6 +1364,25 @@ struct SearchView: View {
         } else if let start = summaryStartTime, summaryElapsedSeconds == nil {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
         }
+
+        let trimmedSummary = aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let citations = aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines)
+        registerSearchConversation(
+            query: searchQuery,
+            answer: trimmedSummary,
+            citations: citations.isEmpty ? nil : citations
+        )
+    }
+
+    private func registerSearchConversation(query: String, answer: String, citations: String? = nil) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+        chatService.modelContext = modelContext
+        chatService.startConversationFromSearch(
+            query: trimmedQuery,
+            answer: answer,
+            citations: citations
+        )
     }
 
     /// Resets all search and summary state to the initial home screen.

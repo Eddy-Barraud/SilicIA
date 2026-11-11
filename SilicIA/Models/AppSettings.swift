@@ -47,6 +47,27 @@ nonisolated enum WikipediaSource: String, CaseIterable, Codable, Sendable {
     case wikiFast = "wiki_fast"
 }
 
+/// Mutually exclusive source of context for searches and chat.
+nonisolated enum ContextSourceKind: String, CaseIterable, Identifiable, Codable, Sendable {
+    case offline = "Offline"
+    case wiki = "Wiki"
+    case web = "Web"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        rawValue
+    }
+
+    var systemImage: String {
+        switch self {
+        case .offline: return "wifi.slash"
+        case .wiki: return "book.closed"
+        case .web: return "globe"
+        }
+    }
+}
+
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
     var maxDuckDuckGoResults: Int = 4
@@ -70,10 +91,44 @@ struct AppSettings: Codable, Equatable {
         get { isReaderViewAndSummaryEnabled }
         set { isReaderViewAndSummaryEnabled = newValue }
     }
-    var useDuckDuckGo: Bool = true
-    var useWikipedia: Bool = true
+    var useDuckDuckGo: Bool = true {
+        didSet {
+            if useDuckDuckGo && useWikipedia {
+                useWikipedia = false
+            }
+        }
+    }
+    var useWikipedia: Bool = false {
+        didSet {
+            if useWikipedia && useDuckDuckGo {
+                useDuckDuckGo = false
+            }
+        }
+    }
     var wikipediaSource: WikipediaSource = .online
     var language: ModelLanguage = .systemPreferred()
+
+    /// Active context source (`Offline`, `Wiki`, `Web`). Only one source is allowed at a time.
+    var contextSourceKind: ContextSourceKind {
+        get {
+            if useDuckDuckGo { return .web }
+            if useWikipedia { return .wiki }
+            return .offline
+        }
+        set {
+            switch newValue {
+            case .offline:
+                useDuckDuckGo = false
+                useWikipedia = false
+            case .wiki:
+                useDuckDuckGo = false
+                useWikipedia = true
+            case .web:
+                useDuckDuckGo = true
+                useWikipedia = false
+            }
+        }
+    }
 
     /// Active reasoning / output profile level (`Concise`, `Standard`, `Detailed`).
     /// Setting this updates `maxResponseTokens`, `maxContextTokens`, and `totalTokensBudget`
@@ -164,10 +219,17 @@ struct AppSettings: Codable, Equatable {
         } else {
             isReaderViewAndSummaryEnabled = Self.defaultSettings.isReaderViewAndSummaryEnabled
         }
-        useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
+        let decodedDDG = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
             ?? Self.defaultSettings.useDuckDuckGo
-        useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
+        let decodedWiki = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
             ?? Self.defaultSettings.useWikipedia
+        if decodedDDG && decodedWiki {
+            useDuckDuckGo = true
+            useWikipedia = false
+        } else {
+            useDuckDuckGo = decodedDDG
+            useWikipedia = decodedWiki
+        }
         wikipediaSource = try container.decodeIfPresent(WikipediaSource.self, forKey: .wikipediaSource)
             ?? Self.defaultSettings.wikipediaSource
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
@@ -214,7 +276,7 @@ struct AppSettings: Codable, Equatable {
     }
 
     // Value ranges for validation
-    static let maxDuckDuckGoResultsRange = 4...12
+    static let maxDuckDuckGoResultsRange = 2...12
     static let maxWikipediaResultsRange = 2...12
     /// Combined per-search cap derived from per-source ranges; used by callers that need a
     /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
@@ -247,6 +309,10 @@ struct AppSettings: Codable, Equatable {
 
     private func normalized() -> AppSettings {
         var copy = self
+        if copy.useDuckDuckGo && copy.useWikipedia {
+            // Only one source of context allowed at a time: default to Web
+            copy.useWikipedia = false
+        }
         copy.totalTokensBudget = min(max(copy.totalTokensBudget, Self.totalTokensBudgetRange.lowerBound), Self.totalTokensBudgetRange.upperBound)
         copy.maxDuckDuckGoResults = min(max(copy.maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
         copy.maxWikipediaResults = min(max(copy.maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)

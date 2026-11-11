@@ -2020,6 +2020,30 @@ Summarize in \(promptParagraphs) the content of the \(targetNoun), and preserve 
         let trimmedCitations = citations?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCitations = (trimmedCitations?.isEmpty ?? true) ? nil : trimmedCitations
 
+        // If current conversation was already seeded with this exact search exchange, update in place
+        if let current = currentConversation,
+           let firstUser = current.messages.first(where: { $0.role == "user" }),
+           firstUser.content == trimmedQuery {
+            if let assistantMsg = current.messages.first(where: { $0.role == "assistant" }) {
+                assistantMsg.content = trimmedAnswer
+                assistantMsg.citations = normalizedCitations
+            } else if !trimmedAnswer.isEmpty {
+                current.messages.append(Message(role: "assistant", content: trimmedAnswer, citations: normalizedCitations))
+            }
+            current.updatedAt = Date()
+            if let modelContext {
+                _ = saveContext(modelContext)
+            }
+            messages = []
+            if !trimmedQuery.isEmpty {
+                messages.append(ChatMessage(role: .user, content: trimmedQuery))
+            }
+            if !trimmedAnswer.isEmpty {
+                messages.append(ChatMessage(role: .assistant, content: trimmedAnswer, citations: normalizedCitations))
+            }
+            return
+        }
+
         messages = []
         if !trimmedQuery.isEmpty {
             messages.append(ChatMessage(role: .user, content: trimmedQuery))
