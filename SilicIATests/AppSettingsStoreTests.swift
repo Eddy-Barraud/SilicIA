@@ -2,23 +2,18 @@
 //  AppSettingsStoreTests.swift
 //  SilicIATests
 //
-//  Covers the shared observable settings store that is now the single
-//  source of truth for every screen: same-instance sharing, automatic
-//  persistence on mutation, and change publication (the mechanism that
-//  keeps ContentView's tab bar in sync with a language change made in a
-//  nested settings page).
+//  Covers the shared observable settings store: same-instance sharing, automatic
+//  persistence, mutual exclusion, and search conversation recording.
 //
 
 import XCTest
 import Observation
+import SwiftData
 @testable import SilicIA
 
 @MainActor
 final class AppSettingsStoreTests: XCTestCase {
 
-    /// The store is a process-wide singleton persisting to the real
-    /// UserDefaults; snapshot and restore around each test so cases don't
-    /// leak state into each other or the rest of the suite.
     private var snapshot: AppSettings!
 
     override func setUp() async throws {
@@ -37,45 +32,91 @@ final class AppSettingsStoreTests: XCTestCase {
         try await super.tearDown()
     }
 
-    func testSingletonAndObservation() {
+    private final class SendableBox<T>: @unchecked Sendable {
+        nonisolated(unsafe) var value: T
+        init(_ value: T) { self.value = value }
+    }
+
+    func testSingletonObservationPersistenceAndMutualExclusion() throws {
         XCTAssertTrue(AppSettingsStore.shared === AppSettingsStore.shared)
 
-        var fired = false
+        let fired = SendableBox(false)
         withObservationTracking {
             _ = AppSettingsStore.shared.settings
         } onChange: {
-            fired = true
+            fired.value = true
         }
-
         AppSettingsStore.shared.settings.language =
             AppSettingsStore.shared.settings.language == .french ? .english : .french
+        XCTAssertTrue(fired.value, "Mutating settings should notify observation trackers")
 
-        XCTAssertTrue(fired, "mutating settings should notify observation trackers")
-    }
-
-    func testMutationsPersistAutomatically() {
-        AppSettingsStore.shared.settings.totalTokensBudget = 2700
-
-        // Individual field update & read-after-write
+        // Automatic persistence and in-memory bounds clamping
         AppSettingsStore.shared.settings.temperature = 0.77
-        XCTAssertEqual(AppSettings.load().temperature, 0.77, accuracy: 0.0001)
-
-        AppSettingsStore.shared.settings.language = .spanish
-        XCTAssertEqual(AppSettings.load().language, .spanish)
-
-        AppSettingsStore.shared.settings.maxResponseTokens = 321
-        XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
-
-        // Multiple field updates persist together
-        AppSettingsStore.shared.settings.maxContextTokens = 1234
-        AppSettingsStore.shared.settings.useWikipedia = false
+        AppSettingsStore.shared.settings.maxDuckDuckGoResults = 2
+        AppSettingsStore.shared.settings.save()
 
         let reloaded = AppSettings.load()
-        XCTAssertEqual(reloaded.maxContextTokens, 1234)
-        XCTAssertFalse(reloaded.useWikipedia)
+        XCTAssertEqual(reloaded.temperature, 0.77, accuracy: 0.0001)
+        XCTAssertEqual(reloaded.maxDuckDuckGoResults, 2)
 
-        AppSettingsStore.shared.settings.setTotalTokensBudget(3200)
-        let reloadedBudget = AppSettings.load()
-        XCTAssertEqual(reloadedBudget.totalTokensBudget, 3200)
+        // Context source mutual exclusion & legacy decoding
+        var settings = AppSettings()
+        settings.contextSourceKind = .web
+        XCTAssertTrue(settings.useDuckDuckGo)
+        XCTAssertFalse(settings.useWikipedia)
+
+        settings.contextSourceKind = .wiki
+        XCTAssertFalse(settings.useDuckDuckGo)
+        XCTAssertTrue(settings.useWikipedia)
+
+        settings.contextSourceKind = .offline
+        XCTAssertFalse(settings.useDuckDuckGo)
+        XCTAssertFalse(settings.useWikipedia)
+
+        let legacyJSON = #"{"useDuckDuckGo": true, "useWikipedia": true}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
+        XCTAssertTrue(decoded.useDuckDuckGo)
+        XCTAssertFalse(decoded.useWikipedia)
+    }
+
+    func testSearchRegistersConversationInHistoricDataAndDefaults() throws {
+        let container = try ModelContainer(
+            for: Conversation.self, Message.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let context = container.mainContext
+        let chatService = ChatService()
+        chatService.modelContext = context
+
+        // Register a search query and answer
+        chatService.startConversationFromSearch(
+            query: "What is SwiftData?",
+            answer: "SwiftData is Apple's modern persistence framework.",
+            citations: "https://developer.apple.com"
+        )
+
+        let descriptor = FetchDescriptor<Conversation>()
+        let conversations = try context.fetch(descriptor)
+        XCTAssertEqual(conversations.count, 1)
+        let messages = conversations[0].messages.sorted { $0.timestamp < $1.timestamp }
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0].content, "What is SwiftData?")
+        XCTAssertEqual(messages[1].content, "SwiftData is Apple's modern persistence framework.")
+
+        // Deduplication: calling again with same exchange does not duplicate
+        chatService.startConversationFromSearch(
+            query: "What is SwiftData?",
+            answer: "SwiftData is Apple's modern persistence framework.",
+            citations: "https://developer.apple.com"
+        )
+        let reloaded = try context.fetch(descriptor)
+        XCTAssertEqual(reloaded.count, 1)
+
+        // Default settings verification
+        let defaults = AppSettings()
+        XCTAssertTrue(defaults.useWikipedia)
+        XCTAssertFalse(defaults.useDuckDuckGo)
+        XCTAssertEqual(defaults.outputProfileKind, .standard)
+        XCTAssertTrue(defaults.isReaderViewAndSummaryEnabled)
     }
 }

@@ -93,6 +93,8 @@ struct ConversationsListView: View {
                 }
                 _ = saveContext()
                 _ = DroppedPDFStore.clearAll()
+                _ = DroppedTextFileStore.clearAll()
+                _ = DroppedImageStore.clearAll()
             }
             Button(L.t("common.cancel", language: language), role: .cancel) {}
         } message: {

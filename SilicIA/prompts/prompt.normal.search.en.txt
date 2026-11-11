@@ -1,3 +1,6 @@
+Instructions: Synthesize the context below (ordered from least relevant to most relevant) to answer the question accurately.
+Topic or question: {{query}}
+
 Web context:
 {{context}}
 

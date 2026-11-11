@@ -2,7 +2,6 @@
 //  SilicIASpotlightIntent.swift
 //  SilicIA
 //
-//  Created by Copilot on 31/03/2026.
 //
 
 import AppIntents

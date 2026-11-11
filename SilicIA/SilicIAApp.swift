@@ -98,7 +98,7 @@ struct SilicIAApp: App {
     private func handleIncomingURL(_ url: URL) {
         if url.isFileURL {
             let ext = url.pathExtension.lowercased()
-            if ext == "pdf" {
+            if ext == "pdf" || ext == "md" || ext == "txt" || ext == "markdown" || ext == "text" {
                 sharedPDFs = [url]
                 return
             }

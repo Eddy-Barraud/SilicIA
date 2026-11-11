@@ -1,13 +1,8 @@
-{{groundingContext}}
+Instrucciones:
 {{corpusHint}}
-Llama a `currentDateTime` únicamente si la pregunta depende explícitamente de la fecha u hora actual.
-Si la pregunta requiere un cálculo, usa `calculate`.
-
-Responde con:
 {{structureDirective}}
 {{lengthDirective}}
-Sé riguroso con los recuentos y listas.
-Formato de salida esperado: texto claro en Markdown.
-Cuando sea pertinente, incluye fórmulas matemáticas simples en LaTeX ($...$ en línea, $$...$$ en bloque).
-Nunca uses LaTeX para código, consultas o texto ordinario, y nunca uses comandos \text{ ni entornos \begin{ (como \begin{array}).
+
 Tema o pregunta: {{query}}
+
+{{groundingContext}}Tema o pregunta: {{query}}

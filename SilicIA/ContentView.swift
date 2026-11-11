@@ -31,6 +31,7 @@ struct ContentView: View {
     @Binding var sharedPDFs: [URL]
     @Binding var sharedImages: [URL]
     @Binding var pendingSearchQuery: String?
+    @StateObject private var aiService = AIService()
     @StateObject private var chatService = ChatService()
     /// Shared settings store (@Observable). Reading `language` in the body
     /// re-localises the top tab bar the instant the language changes anywhere
@@ -89,17 +90,21 @@ struct ContentView: View {
                             pendingSearchQuery = nil
                         },
                         chatService: chatService,
-                        onOfflineQuery: { query in
+                        aiService: aiService,
+                        onChatQuery: { query in
                             selectedTab = .chat
+                            let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty else { return }
                             chatService.modelContext = modelContext
                             Task {
                                 let settings = settingsStore.settings
+                                let includeWebSearch = settings.useDuckDuckGo || settings.useWikipedia
                                 await chatService.sendMessage(
-                                    query,
+                                    trimmed,
                                     contextInput: "",
                                     pdfURLs: [],
                                     imageURLs: [],
-                                    includeWebSearch: false,
+                                    includeWebSearch: includeWebSearch,
                                     maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
                                     maxWikipediaResults: settings.maxWikipediaResults,
                                     language: settings.language,
@@ -126,6 +131,9 @@ struct ContentView: View {
                             if !pdfs.isEmpty || !images.isEmpty {
                                 selectedTab = .chat
                             }
+                        },
+                        onSelectConversation: { _ in
+                            selectedTab = .chat
                         }
                     )
                 case .chat:
@@ -158,6 +166,20 @@ struct ContentView: View {
             if pendingSearchQuery != nil {
                 selectedTab = .searchAssist
             }
+        }
+        .onAppear {
+            DynamicSessionCoordinator.shared.switchActiveViewMode(
+                selectedTab == .searchAssist ? .searchSummary : .chat,
+                settings: settingsStore.settings,
+                prewarm: true
+            )
+        }
+        .onChange(of: selectedTabRawValue) {
+            DynamicSessionCoordinator.shared.switchActiveViewMode(
+                selectedTab == .searchAssist ? .searchSummary : .chat,
+                settings: settingsStore.settings,
+                prewarm: true
+            )
         }
     }
 }

@@ -9,9 +9,10 @@
 //
 
 import SwiftUI
+import LaTeXSwiftUI
 
 /// Block structure extracted from raw Markdown text.
-enum MarkdownBlock: Identifiable {
+enum MarkdownBlock: Identifiable, Hashable, Sendable {
     case heading(level: Int, text: String)
     case quote(String)
     case code(language: String, code: String)
@@ -36,7 +37,7 @@ enum MarkdownBlock: Identifiable {
         case .orderedList(let items):
             return "ol-\(items.joined().hashValue)"
         case .horizontalRule:
-            return "hr-\(UUID().uuidString)"
+            return "hr-\(hashValue)"
         case .paragraph(let text):
             return "p-\(text.hashValue)"
         }
@@ -149,6 +150,20 @@ enum MarkdownBlockParser {
                     if curTrimmed.hasPrefix("- ") || curTrimmed.hasPrefix("* ") || curTrimmed.hasPrefix("+ ") {
                         items.append(String(curTrimmed.dropFirst(2)).trimmingCharacters(in: .whitespaces))
                         i += 1
+                    } else if curTrimmed.isEmpty {
+                        // Support loose lists with blank lines between items
+                        var nextNonEmpty = i + 1
+                        while nextNonEmpty < rawLines.count && rawLines[nextNonEmpty].trimmingCharacters(in: .whitespaces).isEmpty {
+                            nextNonEmpty += 1
+                        }
+                        if nextNonEmpty < rawLines.count {
+                            let nextTrimmed = rawLines[nextNonEmpty].trimmingCharacters(in: .whitespaces)
+                            if nextTrimmed.hasPrefix("- ") || nextTrimmed.hasPrefix("* ") || nextTrimmed.hasPrefix("+ ") {
+                                i += 1
+                                continue
+                            }
+                        }
+                        break
                     } else if !curTrimmed.isEmpty && !items.isEmpty && !curTrimmed.hasPrefix("#") {
                         items[items.count - 1] += " " + curTrimmed
                         i += 1
@@ -174,6 +189,23 @@ enum MarkdownBlockParser {
                        Int(curTrimmed[..<dIdx]) != nil {
                         items.append(String(curTrimmed[curTrimmed.index(after: fSpace)...]).trimmingCharacters(in: .whitespaces))
                         i += 1
+                    } else if curTrimmed.isEmpty {
+                        // Support loose lists with blank lines between items
+                        var nextNonEmpty = i + 1
+                        while nextNonEmpty < rawLines.count && rawLines[nextNonEmpty].trimmingCharacters(in: .whitespaces).isEmpty {
+                            nextNonEmpty += 1
+                        }
+                        if nextNonEmpty < rawLines.count {
+                            let nextTrimmed = rawLines[nextNonEmpty].trimmingCharacters(in: .whitespaces)
+                            if let fSpace2 = nextTrimmed.firstIndex(of: " "),
+                               let dIdx2 = nextTrimmed.firstIndex(of: "."),
+                               dIdx2 < fSpace2,
+                               Int(nextTrimmed[..<dIdx2]) != nil {
+                                i += 1
+                                continue
+                            }
+                        }
+                        break
                     } else if !curTrimmed.isEmpty && !items.isEmpty && !curTrimmed.hasPrefix("#") {
                         items[items.count - 1] += " " + curTrimmed
                         i += 1
@@ -216,6 +248,14 @@ enum MarkdownBlockParser {
 struct MarkdownContentView: View {
     let markdown: String
 
+    /// Converts MediaWiki math tags (`{\displaystyle ...}` and `{\textstyle ...}`)
+    /// commonly returned by wiki_fast into standard, LaTeX-compatible math delimiters (`$` / `$$`).
+    /// Handles balanced curly braces (including nested fractions, matrices, and environments),
+    /// preserves display style semantics, and unescapes Markdown-escaped underscores (`\_` -> `_`).
+    nonisolated static func formatWikiFastMath(_ text: String) -> String {
+        ModelOutputLaTeXSanitizer.formatWikiFastMath(text)
+    }
+
     private func attributedInline(_ text: String) -> AttributedString {
         if let attr = try? AttributedString(
             markdown: text,
@@ -226,8 +266,32 @@ struct MarkdownContentView: View {
         return AttributedString(text)
     }
 
+    private func hasMathDelimiters(_ text: String) -> Bool {
+        text.contains("$") || text.contains("\\[") || text.contains("\\(")
+    }
+
+    @ViewBuilder
+    private func formattedInlineView(
+        _ text: String,
+        font: Font = .body,
+        foregroundColor: Color = .primary
+    ) -> some View {
+        if hasMathDelimiters(text) {
+            LaTeX(text)
+                .font(font)
+                .foregroundColor(foregroundColor)
+                .textSelection(.enabled)
+        } else {
+            Text(attributedInline(text))
+                .font(font)
+                .foregroundColor(foregroundColor)
+                .textSelection(.enabled)
+        }
+    }
+
     var body: some View {
-        let blocks = MarkdownBlockParser.parse(markdown: markdown)
+        let cleanMarkdown = Self.formatWikiFastMath(markdown)
+        let blocks = MarkdownBlockParser.parse(markdown: cleanMarkdown)
 
         VStack(alignment: .leading, spacing: 14) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
@@ -240,11 +304,8 @@ struct MarkdownContentView: View {
                         RoundedRectangle(cornerRadius: 2)
                             .fill(Color.accentColor.opacity(0.7))
                             .frame(width: 3)
-                        Text(attributedInline(text))
-                            .font(.body)
+                        formattedInlineView(text, font: .body, foregroundColor: .secondary)
                             .italic()
-                            .foregroundColor(.secondary)
-                            .textSelection(.enabled)
                     }
                     .padding(.vertical, 4)
                     .padding(.horizontal, 8)
@@ -284,10 +345,8 @@ struct MarkdownContentView: View {
                             // Headers
                             HStack(spacing: 16) {
                                 ForEach(Array(headers.enumerated()), id: \.offset) { _, header in
-                                    Text(attributedInline(header))
-                                        .font(.subheadline)
+                                    formattedInlineView(header, font: .subheadline, foregroundColor: .primary)
                                         .fontWeight(.bold)
-                                        .foregroundColor(.primary)
                                         .frame(minWidth: 90, alignment: .leading)
                                 }
                             }
@@ -301,9 +360,7 @@ struct MarkdownContentView: View {
                             ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
                                 HStack(spacing: 16) {
                                     ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                                        Text(attributedInline(cell))
-                                            .font(.footnote)
-                                            .foregroundColor(.primary)
+                                        formattedInlineView(cell, font: .footnote, foregroundColor: .primary)
                                             .frame(minWidth: 90, alignment: .leading)
                                     }
                                 }
@@ -331,10 +388,7 @@ struct MarkdownContentView: View {
                                     .font(.body)
                                     .fontWeight(.bold)
                                     .foregroundColor(.accentColor)
-                                Text(attributedInline(item))
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                    .textSelection(.enabled)
+                                formattedInlineView(item, font: .body, foregroundColor: .primary)
                             }
                         }
                     }
@@ -348,10 +402,7 @@ struct MarkdownContentView: View {
                                     .font(.body)
                                     .fontWeight(.semibold)
                                     .foregroundColor(.secondary)
-                                Text(attributedInline(item))
-                                    .font(.body)
-                                    .foregroundColor(.primary)
-                                    .textSelection(.enabled)
+                                formattedInlineView(item, font: .body, foregroundColor: .primary)
                             }
                         }
                     }
@@ -362,11 +413,8 @@ struct MarkdownContentView: View {
                         .padding(.vertical, 6)
 
                 case .paragraph(let text):
-                    Text(attributedInline(text))
-                        .font(.body)
+                    formattedInlineView(text, font: .body, foregroundColor: .primary)
                         .lineSpacing(4)
-                        .foregroundColor(.primary)
-                        .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -375,38 +423,27 @@ struct MarkdownContentView: View {
 
     @ViewBuilder
     private func headingView(level: Int, text: String) -> some View {
-        let attr = attributedInline(text)
         switch level {
         case 1:
-            Text(attr)
-                .font(.title)
+            formattedInlineView(text, font: .title, foregroundColor: .primary)
                 .fontWeight(.bold)
-                .foregroundColor(.primary)
                 .padding(.top, 8)
                 .padding(.bottom, 2)
         case 2:
-            Text(attr)
-                .font(.title2)
+            formattedInlineView(text, font: .title2, foregroundColor: .primary)
                 .fontWeight(.semibold)
-                .foregroundColor(.primary)
                 .padding(.top, 6)
                 .padding(.bottom, 1)
         case 3:
-            Text(attr)
-                .font(.title3)
+            formattedInlineView(text, font: .title3, foregroundColor: .primary)
                 .fontWeight(.semibold)
-                .foregroundColor(.primary)
                 .padding(.top, 4)
         case 4:
-            Text(attr)
-                .font(.headline)
+            formattedInlineView(text, font: .headline, foregroundColor: .primary)
                 .fontWeight(.semibold)
-                .foregroundColor(.primary)
         default:
-            Text(attr)
-                .font(.subheadline)
+            formattedInlineView(text, font: .subheadline, foregroundColor: .secondary)
                 .fontWeight(.medium)
-                .foregroundColor(.secondary)
         }
     }
 }

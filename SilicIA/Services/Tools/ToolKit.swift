@@ -66,6 +66,7 @@ nonisolated enum ToolKit {
         let maxWikipediaResults: Int
         let useDuckDuckGo: Bool
         let useWikipedia: Bool
+        var wikipediaSource: WikipediaSource = .online
         var contextUtilizationFactor: Double? = nil
         /// Optional sink that receives every result the model's
         /// `searchSources` call fetched. SearchView wires it through
@@ -130,6 +131,7 @@ nonisolated enum ToolKit {
                 maxWikipediaResults: config.maxWikipediaResults,
                 useDuckDuckGo: config.useDuckDuckGo,
                 useWikipedia: config.useWikipedia,
+                wikipediaSource: config.wikipediaSource,
                 responseTokens: responseTokens,
                 contextUtilizationFactor: config.contextUtilizationFactor,
                 onResults: config.onWebResults,

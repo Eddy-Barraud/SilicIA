@@ -2,7 +2,6 @@
 //  SearchView.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import SwiftUI
@@ -27,11 +26,16 @@ struct SearchView: View {
     let onInitialQueryHandled: (() -> Void)?
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
+    let onChatQuery: ((String) -> Void)?
     let onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)?
+    var onSelectConversation: ((Conversation) -> Void)? = nil
     /// Dropping a PDF/image on the search surface writes here so that the
     /// containing view can flip to the Chat tab and ChatView picks the file
     /// up as context via its existing shared-input merge.
     let onAttachmentsDropped: (([URL], [URL]) -> Void)?
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var showHistory = false
 
     private static let imageFileExtensions: Set<String> = [
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
@@ -174,16 +178,24 @@ struct SearchView: View {
         initialQuery: String? = nil,
         onInitialQueryHandled: (() -> Void)? = nil,
         chatService: ChatService,
+        aiService: AIService? = nil,
         onOfflineQuery: ((String) -> Void)? = nil,
+        onChatQuery: ((String) -> Void)? = nil,
         onChatMore: ((_ query: String, _ answer: String, _ citations: String?) -> Void)? = nil,
-        onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil
+        onAttachmentsDropped: (([URL], [URL]) -> Void)? = nil,
+        onSelectConversation: ((Conversation) -> Void)? = nil
     ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
         self.chatService = chatService
+        if let aiService {
+            self._aiService = ObservedObject(wrappedValue: aiService)
+        }
         self.onOfflineQuery = onOfflineQuery
+        self.onChatQuery = onChatQuery ?? onOfflineQuery
         self.onChatMore = onChatMore
         self.onAttachmentsDropped = onAttachmentsDropped
+        self.onSelectConversation = onSelectConversation
     }
     
     private var maxAllowedContextTokensForCurrentResponse: Int {
@@ -211,10 +223,7 @@ struct SearchView: View {
     }
 
     private var isChatButtonDisabled: Bool {
-        if hasChatMoreContext {
-            return false
-        }
-        return searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || searchService.isSearching
+        searchService.isSearching
     }
 
     private func handleChatButtonTap() {
@@ -227,20 +236,37 @@ struct SearchView: View {
             return
         }
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedQuery.isEmpty else { return }
-        onOfflineQuery?(trimmedQuery)
+        if let onChatQuery {
+            onChatQuery(trimmedQuery)
+        } else {
+            onOfflineQuery?(trimmedQuery)
+        }
     }
 
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
-        ZStack {
-            VStack(spacing: 0) {
-                // Header
-                headerView
+        if showHistory {
+            ConversationsListView(
+                onLoadConversation: { conversation in
+                    chatService.loadConversation(id: conversation.id)
+                    showHistory = false
+                    onSelectConversation?(conversation)
+                },
+                onDismiss: {
+                    showHistory = false
+                }
+            )
+        } else if showSettings {
+            SharedSettingsView(
+                isPresented: $showSettings,
+                mode: .full
+            )
+        } else {
+            ZStack {
+                VStack(spacing: 0) {
+                    // Header
+                    headerView
 
-                if showSettings {
-                    settingsPage
-                } else {
                     // Content
                     if searchService.isSearching {
                         loadingView
@@ -263,128 +289,82 @@ struct SearchView: View {
                     // Search Bar
                     searchBarView
                 }
-            }
 
-            if isShowingWebPageSummaryOverlay {
-                webPageSummaryOverlay
-            }
-        }
-        .background(Color.platformWindowBackground)
-        .contentShape(Rectangle())
-        .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
-            handleAttachmentDrop(providers)
-        }
-        // Mirror the AIService's tool-call accumulator into the local
-        // searchResults state whenever it changes — this is how the cards
-        // get populated in tool-calling mode (the auto web search is
-        // skipped, so the model's webSearch invocations are the only
-        // source of URLs). Filtered to current request only by also
-        // checking hasAttemptedSearch so a stale post-cancel notification
-        // doesn't repopulate the cards on the welcome screen.
-        .onChange(of: aiService.toolFetchedResults) { _, newResults in
-            guard hasAttemptedSearch else { return }
-            searchResults = newResults
-        }
-        .onAppear {
-            consumeInitialQueryIfNeeded()
-            // Drop the caret into the search field whenever this screen
-            // appears in an idle state. Triggers the iOS soft keyboard
-            // immediately so the user can start typing without an extra
-            // tap. We skip it when results are visible to avoid stealing
-            // focus while the user is scanning them.
-            if searchResults.isEmpty && !searchService.isSearching {
-                // Defer a runloop so the TextField is mounted before we
-                // request focus — SwiftUI ignores focus changes made
-                // before the target view is in the responder chain.
-                DispatchQueue.main.async {
-                    isSearchFieldFocused = true
+                if isShowingWebPageSummaryOverlay {
+                    webPageSummaryOverlay
                 }
             }
+            .background(Color.platformWindowBackground)
+            .contentShape(Rectangle())
+            .onDrop(of: [.pdf, .plainText, .text, .image, .fileURL], isTargeted: nil) { providers in
+                handleAttachmentDrop(providers)
+            }
+            // Mirror the AIService's tool-call accumulator into the local
+            // searchResults state whenever it changes — this is how the cards
+            // get populated in tool-calling mode (the auto web search is
+            // skipped, so the model's webSearch invocations are the only
+            // source of URLs). Filtered to current request only by also
+            // checking hasAttemptedSearch so a stale post-cancel notification
+            // doesn't repopulate the cards on the welcome screen.
+            .onChange(of: aiService.toolFetchedResults) { _, newResults in
+                guard hasAttemptedSearch else { return }
+                searchResults = newResults
+            }
+            .onAppear {
+                chatService.modelContext = modelContext
+                consumeInitialQueryIfNeeded()
+                // Drop the caret into the search field whenever this screen
+                // appears in an idle state. Triggers the iOS soft keyboard
+                // immediately so the user can start typing without an extra
+                // tap. We skip it when results are visible to avoid stealing
+                // focus while the user is scanning them.
+                if searchResults.isEmpty && !searchService.isSearching {
+                    // Defer a runloop so the TextField is mounted before we
+                    // request focus — SwiftUI ignores focus changes made
+                    // before the target view is in the responder chain.
+                    DispatchQueue.main.async {
+                        isSearchFieldFocused = true
+                    }
+                }
+            }
+            .onChange(of: initialQuery) {
+                consumeInitialQueryIfNeeded()
+            }
+            #if canImport(UIKit)
+            .overlay {
+                KeyboardDismissTapOverlay(onTapOutsideTextInput: {
+                    dismissKeyboard()
+                })
+            }
+            #endif
         }
-        .onChange(of: initialQuery) {
-            consumeInitialQueryIfNeeded()
-        }
-        #if canImport(UIKit)
-        .overlay {
-            KeyboardDismissTapOverlay(onTapOutsideTextInput: {
-                dismissKeyboard()
-            })
-        }
-        #endif
     }
 
     // MARK: - Header View
     private var headerView: some View {
-        HStack(spacing: 4) {
-            if showSettings {
-                // Settings is a sub-screen; keep its back button as the
-                // dominant affordance so users know how to leave.
-                Button(action: { showSettings = false }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text(L.t("common.back", language: settings.language))
-                            .fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .accessibilityLabel(L.t("common.back", language: settings.language))
-
-                Text(L.t("search.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-
-                Spacer(minLength: 0)
-            } else {
-                ZStack {
-                    SourceToggleButtons(settingsStore: settingsStore)
-
-                    HStack(spacing: 4) {
-                        headerIconButton(
-                            systemImage: "arrow.counterclockwise",
-                            label: L.t("common.startOver", language: settings.language),
-                            action: { goHome() }
-                        )
-
-                        Spacer()
-
-                        headerIconButton(
-                            systemImage: "gearshape",
-                            label: L.t("common.settings", language: settings.language),
-                            action: { showSettings = true }
-                        )
-                    }
-                }
+        SharedTopBarView(
+            settingsStore: settingsStore,
+            showContextSelector: true,
+            onNew: { startNew() },
+            onHistory: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showHistory = true
+            },
+            onSettings: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showSettings = true
             }
-        }
-        .padding()
-        // Transparent header — floats over the content in the Liquid
-        // Glass style rather than sitting on an opaque bar.
+        )
     }
 
-    /// 44pt-tap-target icon button used in the top bar. Matches the
-    /// equivalent helper in `ChatView` so the two tabs feel symmetric.
-    @ViewBuilder
-    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
-    }
-
-    private var settingsPage: some View {
-        ScrollView {
-            settingsPanel
-                .padding()
-        }
-        .textSelection(.enabled)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    private func startNew() {
+        cancelCurrentSearch()
+        goHome()
+        chatService.resetConversation()
     }
 
     // MARK: - Search Bar View
@@ -778,134 +758,7 @@ struct SearchView: View {
         .padding(.horizontal, 4)
     }
 
-    // MARK: - Settings Panel
-    private var settingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(L.t("search.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
-            }
 
-            Divider()
-
-            // Temperature
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("search.settings.temperature", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(String(format: "%.2f", settings.temperature))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            // Reader View and Summary Toggle
-            VStack(alignment: .leading, spacing: 4) {
-                let isModelAvailable = FoundationModelAvailability.check().isAvailable
-                Toggle(isOn: $settingsStore.settings.isReaderViewAndSummaryEnabled) {
-                    Text(L.t("search.settings.readerViewAndSummaryToggle", language: settings.language))
-                        .font(.subheadline)
-                }
-                .disabled(!isModelAvailable)
-                .opacity(!isModelAvailable ? 0.5 : 1.0)
-
-                if !isModelAvailable {
-                    Text(FoundationModelAvailability.appleIntelligenceRequiredNotice(language: settings.language))
-                        .font(.caption2)
-                        .foregroundColor(.red)
-                }
-            }
-
-            // Search Sources
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("search.settings.searchSources", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
-                    Text("DuckDuckGo")
-                        .font(.subheadline)
-                }
-                if settings.useDuckDuckGo {
-                    HStack {
-                        Text(L.t("search.settings.maxDDG", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxDuckDuckGoResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxDuckDuckGoResults) },
-                        set: { settings.maxDuckDuckGoResults = Int($0) }
-                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
-                }
-
-                Toggle(isOn: $settingsStore.settings.useWikipedia) {
-                    Text("Wikipedia")
-                        .font(.subheadline)
-                }
-                if settings.useWikipedia {
-                    HStack {
-                        Text(L.t("search.settings.maxWiki", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxWikipediaResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxWikipediaResults) },
-                        set: { settings.maxWikipediaResults = Int($0) }
-                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
-                }
-
-                if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi.slash")
-                        Text(L.t("search.settings.offlineMode", language: settings.language))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-
-            // Token Budget (Unified Input/Output Slider)
-            TokenBudgetSliderView(
-                settings: $settingsStore.settings,
-                language: settings.language
-            )
-
-            // Model Language
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("search.settings.modelLanguage", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(settings.language.rawValue)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Picker("Language", selection: $settingsStore.settings.language) {
-                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
-                        Text(lang.rawValue).tag(lang)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-
-        }
-        .padding()
-        .glassCard(cornerRadius: 16)
-    }
 
     // MARK: - Web Page Reader View and Summary Overlay
     private var webPageSummaryOverlay: some View {
@@ -1062,7 +915,19 @@ struct SearchView: View {
 
         Task {
             var preExtractedPlainText: String? = nil
-            if let targetURL = URL(string: result.url) {
+            if let wikiFastTitle = result.wikiFastTitle {
+                // Fast Wiki mode: fetch Markdown directly from /articles/{page_title}
+                // (falling back to already retrieved Markdown from /top_n_articles) and render via MarkdownContentView.
+                let fetchedArticle = try? await searchService.fetchWikiFastArticle(title: wikiFastTitle)
+                guard activeWebPageSummaryRequestID == requestID else { return }
+                let rawMarkdown = (fetchedArticle?.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+                    ? fetchedArticle!.text
+                    : (result.retrievedContent ?? result.snippet)
+                let articleMarkdown = ModelOutputLaTeXSanitizer.formatWikiFastMath(rawMarkdown)
+                webPageReaderHTML = ""
+                webPageMarkdownText = articleMarkdown
+                preExtractedPlainText = articleMarkdown
+            } else if let targetURL = URL(string: result.url) {
                 if let readerContent = try? await WebScrapingService().extractReaderHTML(from: targetURL) {
                     guard activeWebPageSummaryRequestID == requestID else { return }
                     webPageReaderHTML = readerContent.styledHTML
@@ -1084,8 +949,8 @@ struct SearchView: View {
             guard activeWebPageSummaryRequestID == requestID else { return }
             isGeneratingWebPageSummary = false
 
-            if webPageReaderHTML.isEmpty && !markdown.isEmpty {
-                webPageMarkdownText = markdown
+            if webPageReaderHTML.isEmpty && webPageMarkdownText.isEmpty && !markdown.isEmpty {
+                webPageMarkdownText = ModelOutputLaTeXSanitizer.formatWikiFastMath(markdown)
             }
             let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
             if trimmed.isEmpty && webPageSummaryText.isEmpty {
@@ -1134,9 +999,7 @@ struct SearchView: View {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
             } else {
                 // Fallback to UIApplication.open if SFSafariViewController presentation fails
-                if UIApplication.shared.canOpenURL(url) {
-                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                }
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }
     }
@@ -1268,6 +1131,9 @@ struct SearchView: View {
         searchQuery = trimmedQuery
         hasAttemptedSearch = true
 
+        // Immediately register the search in historic data so it appears in history even if canceled or in-flight
+        registerSearchConversation(query: trimmedQuery, answer: "", citations: nil)
+
         let requestID = UUID()
         activeSearchRequestID = requestID
 
@@ -1295,23 +1161,45 @@ struct SearchView: View {
         Task {
             do {
                 let fetchedResults: [SearchResult]
+                var generatedSubQueries: [String]? = nil
+                var generatedWebQueries: [String]? = nil
+                var generatedWikiQueries: [String]? = nil
                 if !noAIOnly && isModelAvailable {
+                    let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
                     let generated = await SearchSourcesTool.generateQueries(
                         for: trimmedQuery,
                         language: settings.language,
+                        maxResponseTokens: settings.maxResponseTokens,
                         useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
+                        useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource
                     )
+                    generatedWebQueries = generated.webQueries
+                    generatedWikiQueries = generated.wikiQueries
+                    var subQs = [trimmedQuery]
+                    for q in generated.webQueries + generated.wikiQueries where !subQs.contains(q) {
+                        subQs.append(q)
+                    }
+                    generatedSubQueries = subQs
+
+                    // Re-prewarm the active searchSummary session on the Neural Engine / GPU
+                    // concurrently while DuckDuckGo and Wikipedia network requests are in flight.
+                    DynamicSessionCoordinator.shared.reprewarmActiveSession()
+
+                    let ddgLimit = isConcise ? min(6, settings.maxDuckDuckGoResults) : (settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults)
+                    let wikiLimit = isConcise ? min(2, settings.maxWikipediaResults) : settings.maxWikipediaResults
+                    let mergedLimit = isConcise ? min(8, resultsCount + 2) : (resultsCount + Self.aiSummaryOverfetchResults)
 
                     fetchedResults = try await searchService.search(
                         webQueries: generated.webQueries,
                         wikiQueries: generated.wikiQueries,
-                        maxDuckDuckGoResults: settings.maxDuckDuckGoResults + Self.aiSummaryOverfetchResults,
-                        maxWikipediaResults: settings.maxWikipediaResults,
-                        mergedLimit: resultsCount + Self.aiSummaryOverfetchResults,
+                        maxDuckDuckGoResults: ddgLimit,
+                        maxWikipediaResults: wikiLimit,
+                        mergedLimit: mergedLimit,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
                         useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource,
                         userQuery: trimmedQuery
                     )
                 } else {
@@ -1321,7 +1209,8 @@ struct SearchView: View {
                         maxWikipediaResults: settings.maxWikipediaResults,
                         language: settings.language,
                         useDuckDuckGo: settings.useDuckDuckGo,
-                        useWikipedia: settings.useWikipedia
+                        useWikipedia: settings.useWikipedia,
+                        wikipediaSource: settings.wikipediaSource
                     )
                 }
 
@@ -1339,13 +1228,26 @@ struct SearchView: View {
                         aiService.isSummarizing = true
                     }
                     searchService.isSearching = false
+                    let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
+                    let targetScrapeResults = isConcise ? (settings.useWikipedia ? 2 : 3) : resultsCount
+                    let targetScrapeChars = isConcise ? min(scrapingChars, 2_500) : scrapingChars
                     await generateSummary(
-                        maxScrapingResults: resultsCount,
-                        maxScrapingChars: scrapingChars,
-                        summaryResults: fetchedResults
+                        maxScrapingResults: targetScrapeResults,
+                        maxScrapingChars: targetScrapeChars,
+                        summaryResults: fetchedResults,
+                        subQueries: generatedSubQueries,
+                        webQueries: generatedWebQueries,
+                        wikiQueries: generatedWikiQueries
                     )
                 } else {
                     searchService.isSearching = false
+                    let topSnippet = fetchedResults.first?.snippet ?? ""
+                    let topURL = fetchedResults.first?.url
+                    registerSearchConversation(
+                        query: trimmedQuery,
+                        answer: topSnippet,
+                        citations: topURL
+                    )
                 }
             } catch {
                 guard activeSearchRequestID == requestID else {
@@ -1384,15 +1286,25 @@ struct SearchView: View {
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, summaryResults: [SearchResult]? = nil) async {
+    private func generateSummary(
+        maxScrapingResults: Int? = nil,
+        maxScrapingChars: Int? = nil,
+        summaryResults: [SearchResult]? = nil,
+        subQueries: [String]? = nil,
+        webQueries: [String]? = nil,
+        wikiQueries: [String]? = nil
+    ) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         let isModelAvailable = FoundationModelAvailability.check().isAvailable
+        let isConcise = TokenBudgeting.outputProfile(forResponseTokens: settings.maxResponseTokens).kind == .concise
+        let defaultScrapeResults = isConcise ? (settings.useWikipedia ? 2 : 3) : settings.maxSearchResults
+        let defaultScrapeChars = isConcise ? min(defaultScrapingCharactersFromContextTokens, 2_500) : defaultScrapingCharactersFromContextTokens
         _ = await aiService.summarize(
             query: searchQuery,
             results: summaryResults ?? searchResults,
-            maxScrapingResults: maxScrapingResults ?? settings.maxSearchResults,
-            maxScrapingChars: maxScrapingChars ?? defaultScrapingCharactersFromContextTokens,
+            maxScrapingResults: maxScrapingResults ?? defaultScrapeResults,
+            maxScrapingChars: maxScrapingChars ?? defaultScrapeChars,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
             language: settings.language,
@@ -1400,6 +1312,9 @@ struct SearchView: View {
             maxWikipediaResults: settings.maxWikipediaResults,
             useDuckDuckGo: settings.useDuckDuckGo,
             useWikipedia: settings.useWikipedia,
+            subQueries: subQueries,
+            webQueries: webQueries,
+            wikiQueries: wikiQueries,
             generateAnswer: isModelAvailable,
             onSummaryPartialUpdate: { _ in
                 if summaryElapsedSeconds == nil, let start = summaryStartTime {
@@ -1446,6 +1361,25 @@ struct SearchView: View {
         } else if let start = summaryStartTime, summaryElapsedSeconds == nil {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
         }
+
+        let trimmedSummary = aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let citations = aiService.citations.trimmingCharacters(in: .whitespacesAndNewlines)
+        registerSearchConversation(
+            query: searchQuery,
+            answer: trimmedSummary,
+            citations: citations.isEmpty ? nil : citations
+        )
+    }
+
+    private func registerSearchConversation(query: String, answer: String, citations: String? = nil) {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+        chatService.modelContext = modelContext
+        chatService.startConversationFromSearch(
+            query: trimmedQuery,
+            answer: answer,
+            citations: citations
+        )
     }
 
     /// Resets all search and summary state to the initial home screen.
@@ -1501,12 +1435,18 @@ struct SearchView: View {
 
     // MARK: - Drag-and-drop
 
-    /// Persists dropped PDFs and images, then hands them to the host view
+    private static let textFileExtensions: Set<String> = [
+        "txt", "md", "markdown", "text"
+    ]
+
+    /// Persists dropped documents (PDF, Markdown, text) and images, then hands them to the host view
     /// (typically `ContentView`) via `onAttachmentsDropped`. That callback is
     /// responsible for switching to the Chat tab and seeding shared inputs.
     private func handleAttachmentDrop(_ providers: [NSItemProvider]) -> Bool {
         let accepted = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.text.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
@@ -1515,6 +1455,11 @@ struct SearchView: View {
         for provider in accepted {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                 loadDroppedPDF(from: provider)
+                continue
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                || provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
+                loadDroppedTextFile(from: provider)
                 continue
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
@@ -1539,6 +1484,21 @@ struct SearchView: View {
         }
     }
 
+    private func loadDroppedTextFile(from provider: NSItemProvider) {
+        let typeIdentifier = provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            ? UTType.plainText.identifier
+            : UTType.text.identifier
+        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, _ in
+            guard let url,
+                  let persisted = DroppedTextFileStore.persist(url, preferredFileName: provider.suggestedName) else {
+                return
+            }
+            Task { @MainActor in
+                onAttachmentsDropped?([persisted], [])
+            }
+        }
+    }
+
     private func loadDroppedImage(from provider: NSItemProvider) {
         provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, _ in
             guard let url,
@@ -1555,21 +1515,16 @@ struct SearchView: View {
     }
 
     private func loadDroppedFileURL(from provider: NSItemProvider) {
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-            let fileURL: URL?
-            if let data = item as? Data {
-                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-            } else if let url = item as? URL {
-                fileURL = url
-            } else if let nsURL = item as? NSURL {
-                fileURL = nsURL as URL
-            } else {
-                fileURL = nil
-            }
-            guard let fileURL else { return }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let fileURL = url else { return }
             let ext = fileURL.pathExtension.lowercased()
             if ext == "pdf" {
                 guard let persisted = DroppedPDFStore.persist(fileURL) else { return }
+                Task { @MainActor in
+                    onAttachmentsDropped?([persisted], [])
+                }
+            } else if Self.textFileExtensions.contains(ext) {
+                guard let persisted = DroppedTextFileStore.persist(fileURL) else { return }
                 Task { @MainActor in
                     onAttachmentsDropped?([persisted], [])
                 }
@@ -1610,9 +1565,7 @@ struct SearchResultCard: View {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
             } else {
                 // Fallback to UIApplication.open if SFSafariViewController presentation fails
-                if UIApplication.shared.canOpenURL(url) {
-                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                }
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }
     }

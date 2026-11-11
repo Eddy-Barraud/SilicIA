@@ -2,7 +2,6 @@
 //  WebScrapingService.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import Foundation
@@ -193,6 +192,7 @@ class WebScrapingService: ObservableObject {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = blockRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
         }
+        cleaned = HTMLSanitizer.removeCookieConsent(from: cleaned)
         if let wrapperRegex = inlineWrapperTagRegex {
             let range = NSRange(cleaned.startIndex..., in: cleaned)
             cleaned = wrapperRegex.stringByReplacingMatches(in: cleaned, options: [], range: range, withTemplate: "")
@@ -297,9 +297,9 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Executes HTML-to-Markdown conversion on a dedicated Thread with an explicit 4 MB stack
-    /// after validating memory and DOM nesting limits.
-    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String) async throws -> String {
-        let prepared = try validateAndPrepareHTMLForMarkdown(html)
+    /// after validating memory and DOM nesting limits (unless `skipValidation` is true for already extracted content).
+    nonisolated static func runHTMLToMarkdownOnBoundedThread(_ html: String, skipValidation: Bool = false) async throws -> String {
+        let prepared = skipValidation ? html : (try validateAndPrepareHTMLForMarkdown(html))
         return try await withCheckedThrowingContinuation { continuation in
             let thread = Thread {
                 autoreleasepool {
@@ -341,6 +341,9 @@ class WebScrapingService: ObservableObject {
 
     /// Checks if a URL points to a Wikipedia article and returns its host and article title/slug.
     private func parseWikipediaURL(_ url: URL) -> (host: String, title: String)? {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            return nil
+        }
         guard let host = url.host?.lowercased(),
               host.contains("wikipedia.org"),
               url.path.hasPrefix("/wiki/") else {
@@ -375,6 +378,9 @@ class WebScrapingService: ObservableObject {
 
         var request = URLRequest(url: apiURL)
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+        request.timeoutInterval = 4.0
 
         let (data, response) = try await self.session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse,
@@ -405,6 +411,10 @@ class WebScrapingService: ObservableObject {
     /// Extracts clean article Markdown from a URL using Reeeed and html-to-markdown-swift,
     /// with resilient URLSession fetching, Wikipedia API acceleration, and a strict timeout.
     func extractMarkdown(from url: URL, timeoutSeconds: Double = 4.0) async throws -> (title: String, markdown: String) {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw URLError(.unsupportedURL)
+        }
+
         // Fast path: if the URL is a Wikipedia article, use MediaWiki's action=parse API
         if let wiki = parseWikipediaURL(url) {
             do {
@@ -421,6 +431,10 @@ class WebScrapingService: ObservableObject {
             group.addTask {
                 var request = URLRequest(url: url)
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.setValue("SOCS=CAESEwgDEgk2ODE4NDk0MTAaAmZyIAEaBgiA_LyaBg; CONSENT=PENDING+999", forHTTPHeaderField: "Cookie")
+                request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode) else {
@@ -451,8 +465,8 @@ class WebScrapingService: ObservableObject {
     /// Extracts clean article Markdown from raw HTML using Reeeed (Readability with Mercury fallback)
     /// and bounded-stack html-to-markdown-swift conversion with DOM depth/memory limits.
     func extractMarkdown(from html: String, baseURL: URL? = nil) async throws -> (title: String, markdown: String) {
-        // Pre-validate raw HTML size and DOM nesting depth before running Readability/Mercury or SwiftSoup.
-        _ = try Self.validateAndPrepareHTMLForMarkdown(
+        // Pre-validate raw HTML size and DOM nesting depth, stripping non-content & cookie consent blocks.
+        let preparedHTML = try Self.validateAndPrepareHTMLForMarkdown(
             html,
             maxInputBytes: Self.maxRawHTMLBytes,
             maxElements: Self.maxDOMElementCount * 3
@@ -462,9 +476,9 @@ class WebScrapingService: ObservableObject {
 
         var extracted: ExtractedContent?
         do {
-            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .readability)
+            extracted = try await Reeeed.extractArticleContent(url: dummyURL, html: preparedHTML, extractor: .readability)
         } catch {
-            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: html, extractor: .mercury)
+            extracted = try? await Reeeed.extractArticleContent(url: dummyURL, html: preparedHTML, extractor: .mercury)
         }
 
         if let extracted = extracted {
@@ -472,13 +486,13 @@ class WebScrapingService: ObservableObject {
             let rawContent = extracted.content ?? ""
 
             if !rawContent.isEmpty {
-                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent)
+                let markdown = try await Self.runHTMLToMarkdownOnBoundedThread(rawContent, skipValidation: true)
                 return (title, markdown)
             }
         }
 
         // Only attempt direct conversion if the HTML itself passes strict size, element count, and DOM depth checks.
-        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(html)
+        let directMarkdown = try await Self.runHTMLToMarkdownOnBoundedThread(preparedHTML, skipValidation: true)
         return ("", directMarkdown)
     }
 
@@ -555,10 +569,18 @@ class WebScrapingService: ObservableObject {
     /// Extracts styled Reader HTML (preserving images and layout via Reeeed's ReadableDoc)
     /// along with plain text for AI summarization in a single pass.
     func extractReaderHTML(from url: URL, timeoutSeconds: Double = 6.0) async throws -> ReaderWebPageContent {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
+            throw URLError(.unsupportedURL)
+        }
+
         return try await withThrowingTaskGroup(of: ReaderWebPageContent.self) { group in
             group.addTask {
                 var request = URLRequest(url: url)
                 request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+                request.setValue("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8", forHTTPHeaderField: "Accept")
+                request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
+                request.setValue("SOCS=CAESEwgDEgk2ODE4NDk0MTAaAmZyIAEaBgiA_LyaBg; CONSENT=PENDING+999", forHTTPHeaderField: "Cookie")
+                request.timeoutInterval = timeoutSeconds
                 let (data, response) = try await self.session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse,
                       (200...299).contains(httpResponse.statusCode),
@@ -584,11 +606,17 @@ class WebScrapingService: ObservableObject {
 
     /// Extracts styled Reader HTML and plain text from raw HTML using Reeeed's ReadableDoc.
     func extractReaderHTML(from html: String, baseURL: URL) async throws -> ReaderWebPageContent {
+        let preparedHTML = (try? Self.validateAndPrepareHTMLForMarkdown(
+            html,
+            maxInputBytes: Self.maxRawHTMLBytes,
+            maxElements: Self.maxDOMElementCount * 3
+        )) ?? HTMLSanitizer.removeCookieConsent(from: html)
+
         var extracted: ExtractedContent?
         do {
-            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .readability)
+            extracted = try await Reeeed.extractArticleContent(url: baseURL, html: preparedHTML, extractor: .readability)
         } catch {
-            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: html, extractor: .mercury)
+            extracted = try? await Reeeed.extractArticleContent(url: baseURL, html: preparedHTML, extractor: .mercury)
         }
 
         if let extracted, let rawContent = extracted.content, !rawContent.isEmpty {
@@ -622,7 +650,7 @@ class WebScrapingService: ObservableObject {
 
     /// Scrape content from a single URL into clean Markdown.
     /// Returns `nil` if the page cannot be fetched or safely reduced to Markdown within memory/depth limits.
-    func scrapeContent(from urlString: String, maxCharacters: Int? = 5000) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int? = 5000, timeoutSeconds: Double = 4.0) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
         #if DEBUG
@@ -630,11 +658,11 @@ class WebScrapingService: ObservableObject {
         #endif
 
         do {
-            let (title, markdown) = try await extractMarkdown(from: url)
+            let (title, markdown) = try await extractMarkdown(from: url, timeoutSeconds: timeoutSeconds)
             let trimmed = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else {
+            guard !trimmed.isEmpty, !HTMLSanitizer.isCookieConsentText(trimmed) else {
                 #if DEBUG
-                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown after conversion")
+                print("[WebScrapingService] Ignoring source \(urlString): empty Markdown or cookie consent boilerplate after conversion")
                 #endif
                 return nil
             }
@@ -659,7 +687,12 @@ class WebScrapingService: ObservableObject {
     /// Scrape content from multiple URLs concurrently into clean Markdown.
     /// Sources that fail or exceed memory/DOM depth limits are omitted from the returned dictionary
     /// and recorded in `lastFailedURLs`.
-    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int? = 5000) async -> [String: String] {
+    func scrapeMultiplePages(
+        urls: [String],
+        limit: Int = 10,
+        maxCharacters: Int? = 5000,
+        timeoutSeconds: Double = 4.0
+    ) async -> [String: String] {
         isScrapingContent = true
         lastFailedURLs = []
         defer { isScrapingContent = false }
@@ -689,7 +722,11 @@ class WebScrapingService: ObservableObject {
                 launchedTasks += 1
                 #endif
                 group.addTask {
-                    let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                    let content = await self.scrapeContent(
+                        from: nextURL,
+                        maxCharacters: maxCharacters,
+                        timeoutSeconds: timeoutSeconds
+                    )
                     return (nextURL, content)
                 }
             }
@@ -718,7 +755,11 @@ class WebScrapingService: ObservableObject {
                     launchedTasks += 1
                     #endif
                     group.addTask {
-                        let content = await self.scrapeContent(from: nextURL, maxCharacters: maxCharacters)
+                        let content = await self.scrapeContent(
+                            from: nextURL,
+                            maxCharacters: maxCharacters,
+                            timeoutSeconds: timeoutSeconds
+                        )
                         return (nextURL, content)
                     }
                 }

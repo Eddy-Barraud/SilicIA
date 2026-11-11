@@ -2,7 +2,6 @@
 //  PromptLoader.swift
 //  SilicIA
 //
-//  Created by Copilot on 29/03/2026.
 //
 
 import Foundation

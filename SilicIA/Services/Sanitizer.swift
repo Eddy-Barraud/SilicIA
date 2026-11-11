@@ -2,13 +2,12 @@
 //  Sanitizer.swift
 //  SilicIA
 //
-//  Created by Claude on [date].
 //
 
 import Foundation
 
 /// Sanitizes LaTeX output to ensure proper rendering in the UI.
-enum ModelOutputLaTeXSanitizer {
+nonisolated enum ModelOutputLaTeXSanitizer {
     
     // MARK: - Precompiled Regexes
 
@@ -44,6 +43,7 @@ enum ModelOutputLaTeXSanitizer {
     /// Final sanitization of accumulated text
     static func finalizeSanitizedText(_ text: String) -> String {
         var sanitized = unwrapProseArrayEnvironments(in: text)
+        sanitized = formatWikiFastMath(sanitized)
         // Escape currency `$` BEFORE any other transformation so subsequent
         // passes don't accidentally treat `$1025.75` as the start of an
         // unterminated inline-math block (which silently swallows the rest
@@ -59,6 +59,7 @@ enum ModelOutputLaTeXSanitizer {
     static func sanitizeLaTeXDocumentWrappers(_ text: String) -> String {
         var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
         cleaned = unwrapProseArrayEnvironments(in: cleaned)
+        cleaned = formatWikiFastMath(cleaned)
 
         if let beginRange = cleaned.range(of: "\\begin{document}"),
            let endRange = cleaned.range(of: "\\end{document}"),
@@ -73,6 +74,114 @@ enum ModelOutputLaTeXSanitizer {
         cleaned = cleaned.replacingOccurrences(of: "\\end{document}", with: "")
 
         return cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Converts MediaWiki/wiki_fast math tags (`{\displaystyle ...}` and `{\textstyle ...}`)
+    /// into standard LaTeX-compatible math delimiters (`$` / `$$`).
+    /// Handles balanced curly braces (including nested fractions, matrices, and environments),
+    /// preserves display style semantics, and unescapes Markdown-escaped underscores (`\_` -> `_`).
+    static func formatWikiFastMath(_ text: String) -> String {
+        guard text.contains("displaystyle") || text.contains("textstyle") else {
+            return text
+        }
+
+        var result = ""
+        result.reserveCapacity(text.count)
+
+        let chars = Array(text)
+        var i = 0
+        let n = chars.count
+
+        while i < n {
+            if chars[i] == "{" {
+                var scan = i + 1
+                while scan < n && chars[scan].isWhitespace && chars[scan] != "\n" {
+                    scan += 1
+                }
+
+                let isDisplayStyle: Bool
+                let isTextStyle: Bool
+                let tagLength: Int
+
+                let remaining = String(chars[scan..<min(scan + 16, n)])
+                if remaining.hasPrefix("\\displaystyle") {
+                    isDisplayStyle = true
+                    isTextStyle = false
+                    tagLength = 13 // "\\displaystyle".count
+                } else if remaining.hasPrefix("\\textstyle") {
+                    isDisplayStyle = false
+                    isTextStyle = true
+                    tagLength = 10 // "\\textstyle".count
+                } else {
+                    isDisplayStyle = false
+                    isTextStyle = false
+                    tagLength = 0
+                }
+
+                if isDisplayStyle || isTextStyle {
+                    let afterTagIndex = scan + tagLength
+                    let boundaryOk = afterTagIndex >= n || !chars[afterTagIndex].isLetter
+
+                    if boundaryOk {
+                        var depth = 1
+                        var pScan = afterTagIndex
+                        var closingBraceIndex: Int? = nil
+
+                        while pScan < n {
+                            let c = chars[pScan]
+                            if c == "\\" {
+                                pScan += 2 // skip escaped character (e.g. \{, \}, or LaTeX command)
+                                continue
+                            } else if c == "{" {
+                                depth += 1
+                            } else if c == "}" {
+                                depth -= 1
+                                if depth == 0 {
+                                    closingBraceIndex = pScan
+                                    break
+                                }
+                            }
+                            pScan += 1
+                        }
+
+                        if let closeIdx = closingBraceIndex {
+                            let mathRaw = String(chars[afterTagIndex..<closeIdx])
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                            let cleanedMath = mathRaw.replacingOccurrences(of: "\\_", with: "_")
+
+                            // Check if this tag is standalone on its line
+                            var lineStart = i
+                            while lineStart > 0 && chars[lineStart - 1] != "\n" {
+                                lineStart -= 1
+                            }
+                            let beforeOnLine = String(chars[lineStart..<i]).trimmingCharacters(in: .whitespaces)
+
+                            var lineEnd = closeIdx + 1
+                            while lineEnd < n && chars[lineEnd] != "\n" {
+                                lineEnd += 1
+                            }
+                            let afterOnLine = String(chars[(closeIdx + 1)..<lineEnd]).trimmingCharacters(in: .whitespaces)
+
+                            let isStandaloneLine = (beforeOnLine.isEmpty || beforeOnLine.allSatisfy({ $0 == ":" }))
+                                && (afterOnLine.isEmpty || afterOnLine == "." || afterOnLine == "," || afterOnLine == ";")
+
+                            let tagPrefix = isDisplayStyle ? "\\displaystyle " : (isTextStyle ? "\\textstyle " : "")
+                            let formattedMath = isStandaloneLine ? "$$\(tagPrefix)\(cleanedMath)$$" : "$\(tagPrefix)\(cleanedMath)$"
+
+                            result.append(formattedMath)
+                            i = closeIdx + 1
+                            continue
+                        }
+                    }
+                }
+            }
+
+            result.append(chars[i])
+            i += 1
+        }
+
+        return result
     }
 
     /// Unwraps fake LaTeX math arrays that models sometimes use to wrap ordinary prose or bullet points

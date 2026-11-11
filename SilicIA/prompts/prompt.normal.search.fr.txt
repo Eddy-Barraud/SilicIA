@@ -1,3 +1,6 @@
+Instructions : Synthétise le contexte ci-dessous (classé du moins pertinent au plus pertinent) pour répondre précisément à la question.
+Sujet ou question : {{query}}
+
 Contexte web :
 {{context}}
 

@@ -1,3 +1,7 @@
+Instructions : Réponds clairement et directement à la question de l'utilisateur en t'appuyant sur le contexte ci-dessous (classé du moins pertinent au plus pertinent).
+Question de l'utilisateur :
+{{question}}
+
 Conversation :
 {{history}}
 

@@ -21,6 +21,7 @@ struct SourceFunnel {
     let maxWikipediaResults: Int
     let useDuckDuckGo: Bool
     let useWikipedia: Bool
+    var wikipediaSource: WikipediaSource = .online
     let responseTokens: Int
     let contextUtilizationFactor: Double?
 
@@ -103,7 +104,8 @@ struct SourceFunnel {
                             query: query,
                             language: self.language,
                             limit: wikiLimitPerQuery,
-                            userQuery: self.userQuery
+                            userQuery: self.userQuery,
+                            wikipediaSource: self.wikipediaSource
                         )
                         return .success(res)
                     } catch {
@@ -244,6 +246,8 @@ struct SourceFunnel {
             maxOutputTokens: responseTokens,
             contextUtilizationFactor: contextUtilizationFactor,
             queries: allSubQueries,
+            webQueries: cleanWeb,
+            wikiQueries: cleanWiki,
             language: language
         )
         let rankElapsed = Date().timeIntervalSince(rankStart)

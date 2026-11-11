@@ -2,7 +2,6 @@
 //  AIService.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import Foundation
@@ -62,15 +61,15 @@ class AIService: ObservableObject {
     // answers from being flooded with excessive peripheral chunks.
     private static let summaryContextUtilizationFactor = 0.80
 
-    private static func summaryContextUtilizationFactor(forTokens maxTokens: Int) -> Double {
+    static func summaryContextUtilizationFactor(forTokens maxTokens: Int) -> Double {
         let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
         switch profile.kind {
         case .concise:
-            return 0.40
+            return 0.8
         case .standard:
-            return 0.60
+            return 0.9
         case .detailed:
-            return 0.80
+            return 1.0
         }
     }
 
@@ -101,7 +100,8 @@ class AIService: ObservableObject {
         if pageMarkdown.isEmpty {
             pageMarkdown = await webScraper.scrapeContent(from: url, maxCharacters: maxCharacters) ?? ""
         }
-        let trimmedContent = pageMarkdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedContent = RAGChunker.stripWikipediaNavboxes(from: pageMarkdown)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedContent.isEmpty else { return ("", "") }
 
         guard let instructions = PromptLoader.loadPrompt(
@@ -127,7 +127,12 @@ class AIService: ObservableObject {
         }
 
         do {
-            let session = LanguageModelSession(instructions: instructions)
+            let session = DynamicSessionCoordinator.shared.acquireSession(
+                mode: .webPageSummary,
+                instructions: instructions,
+                temperature: temperature,
+                maxResponseTokens: maxTokens
+            )
             let options = GenerationOptions(
                 temperature: temperature,
                 maximumResponseTokens: maxTokens
@@ -138,16 +143,31 @@ class AIService: ObservableObject {
 
             if let onPartialUpdate {
                 var latestPartial = ""
+                var lastUpdateTime: ContinuousClock.Instant = .now - .milliseconds(100)
+                let minInterval = Duration.milliseconds(35)
                 let responseStream = session.streamResponse(to: prompt, options: options)
                 for try await snapshot in responseStream {
-                    let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !partial.isEmpty, partial != latestPartial else { continue }
-                    latestPartial = partial
-                    onPartialUpdate(partial)
+                    let text = snapshot.content
+                    guard !text.isEmpty, text != latestPartial else { continue }
+                    latestPartial = text
+                    let now = ContinuousClock.now
+                    if now - lastUpdateTime >= minInterval || text.hasSuffix("\n") {
+                        lastUpdateTime = now
+                        let cleanText: String
+                        if text.contains("\\begin{document}") || text.contains("\\documentclass") {
+                            cleanText = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
+                        } else {
+                            cleanText = text
+                        }
+                        let trimmed = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        onPartialUpdate(trimmed)
+                    }
                 }
                 if !latestPartial.isEmpty {
-                    return (latestPartial, pageMarkdown)
+                    let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    onPartialUpdate(finalSanitized)
+                    return (finalSanitized, pageMarkdown)
                 }
             }
 
@@ -169,7 +189,7 @@ class AIService: ObservableObject {
     ///   Models generation step entirely and returns an empty summary. Used
     ///   when Apple Intelligence is unavailable — the search experience stays
     ///   functional as web-search-with-ranked-sources without a written answer.
-    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, maxDuckDuckGoResults: Int = 6, maxWikipediaResults: Int = 2, useDuckDuckGo: Bool = true, useWikipedia: Bool = true, subQueries: [String]? = nil, webQueries: [String]? = nil, wikiQueries: [String]? = nil, generateAnswer: Bool = true, onSummaryPartialUpdate: ((String) -> Void)? = nil, onMatchingScores: (([String: Double]) -> Void)? = nil, onValidSourcesUpdated: (([SearchResult]) -> Void)? = nil) async -> (summary: String, citations: String) {
         isSummarizing = true
         defer { isSummarizing = false }
         self.activeQuery = query
@@ -179,6 +199,9 @@ class AIService: ObservableObject {
         // Tool-calling mode appends to this as the model invokes webSearch.
         toolFetchedResults = []
         toolScoresCalculated = false
+
+        // Keep active Foundation Models session warm in memory during network I/O
+        DynamicSessionCoordinator.shared.reprewarmActiveSession()
 
         lastAnswerElapsedSeconds = nil
         toolRAGScrapeDuration = 0.0
@@ -190,8 +213,16 @@ class AIService: ObservableObject {
         debugNotes = []
         #endif
 
-        let effectiveScrapingResults = max(0, maxScrapingResults)
-        let effectiveScrapingChars = max(0, maxScrapingChars)
+        let outputProfile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
+        let isConcise = outputProfile.kind == .concise
+        let effectiveScrapingResults: Int
+        if isConcise {
+            effectiveScrapingResults = min(maxScrapingResults, useWikipedia ? 2 : 3)
+        } else {
+            effectiveScrapingResults = max(0, maxScrapingResults)
+        }
+        let effectiveScrapingChars = isConcise ? min(maxScrapingChars, 2_500) : max(0, maxScrapingChars)
+        let scrapeTimeout: Double = isConcise ? 1.5 : 3.0
 
         // Scrape only URLs without provider-supplied full content that passed the NLEmbedding snippet threshold.
         let urlsToScrape = results.compactMap { result -> String? in
@@ -207,7 +238,8 @@ class AIService: ObservableObject {
         let scrapedContent = await webScraper.scrapeMultiplePages(
             urls: urlsToScrape,
             limit: effectiveScrapingResults,
-            maxCharacters: effectiveScrapingChars
+            maxCharacters: effectiveScrapingChars,
+            timeoutSeconds: scrapeTimeout
         )
         let ragScrapeDuration = Date().timeIntervalSince(scrapeStart)
 
@@ -240,8 +272,10 @@ class AIService: ObservableObject {
             } else if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                !retrievedContent.isEmpty {
                 validResults.append(result)
+                let maxRetrievedContentChars = 100_000
+                let boundedText = String(retrievedContent.prefix(maxRetrievedContentChars))
                 let chunked = RAGChunker.chunkParagraphs(
-                    text: retrievedContent,
+                    text: boundedText,
                     source: result.title,
                     url: result.url
                 )
@@ -288,6 +322,9 @@ class AIService: ObservableObject {
             query: query,
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor,
+            queries: subQueries,
+            webQueries: webQueries,
+            wikiQueries: wikiQueries,
             language: language
         )
         let rankingDuration = Date().timeIntervalSince(rankingPrepStart)
@@ -319,18 +356,36 @@ class AIService: ObservableObject {
         #endif
 
         // Try Foundation Models first, fallback to NLP if it fails
+        // Note: selected.selectedChunks are ordered from least relevant to most relevant (#1 at the end).
+        let contextToSend: String
+        let corpusChunksToSend: [RAGChunk]
+        let maxKeptChunks: Int
+        switch outputProfile.kind {
+        case .concise: maxKeptChunks = 3
+        case .standard: maxKeptChunks = 4
+        case .detailed: maxKeptChunks = 6
+        }
+        if selected.selectedChunks.count > maxKeptChunks {
+            let cappedChunks = Array(selected.selectedChunks.suffix(maxKeptChunks))
+            corpusChunksToSend = cappedChunks.map(\.chunk)
+            contextToSend = cappedChunks.map { "Source: \($0.chunk.source)\n\($0.chunk.text)" }.joined(separator: "\n\n---\n\n")
+        } else {
+            contextToSend = selected.selectedContext
+            corpusChunksToSend = selected.selectedChunks.map(\.chunk)
+        }
+
         let generationStart = Date()
         var firstTokenDate: Date? = nil
         let summary: String
         if generateAnswer {
             summary = await generateSummaryWithFoundationModels(
                 query: query,
-                context: selected.selectedContext,
+                context: contextToSend,
                 results: validResults,
                 temperature: temperature,
                 maxTokens: maxTokens,
                 language: language,
-                corpusChunks: selected.selectedChunks.map(\.chunk),
+                corpusChunks: corpusChunksToSend,
                 maxDuckDuckGoResults: maxDuckDuckGoResults,
                 maxWikipediaResults: maxWikipediaResults,
                 useDuckDuckGo: useDuckDuckGo,
@@ -483,13 +538,14 @@ class AIService: ObservableObject {
     /// appending a tool-usage paragraph via the shared `ToolKit` (search tone).
     /// The `webSearchAvailable` flag gates the `webSearch` description so the model
     /// isn't told to call a tool that isn't attached.
-    private func buildInstructions(
+    static func buildSearchInstructions(
         for language: ModelLanguage,
         maxOutputTokens: Int,
         webSearchAvailable: Bool = true,
         hasCorpus: Bool = false,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        includeToolsAppendix: Bool = true
     ) -> String {
         let maxSentences = TokenBudgeting.estimatedOutputSentences(forTokens: maxOutputTokens)
         let profile = TokenBudgeting.outputProfile(forResponseTokens: maxOutputTokens)
@@ -509,6 +565,7 @@ class AIService: ObservableObject {
                 "lengthDirective": profile.lengthDirective(for: language)
             ]
         ) ?? ""
+        guard includeToolsAppendix else { return base }
         return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
             tone: .search,
@@ -516,6 +573,26 @@ class AIService: ObservableObject {
             hasCorpus: hasCorpus,
             useDuckDuckGo: useDuckDuckGo,
             useWikipedia: useWikipedia
+        )
+    }
+
+    private func buildInstructions(
+        for language: ModelLanguage,
+        maxOutputTokens: Int,
+        webSearchAvailable: Bool = true,
+        hasCorpus: Bool = false,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true,
+        includeToolsAppendix: Bool = true
+    ) -> String {
+        Self.buildSearchInstructions(
+            for: language,
+            maxOutputTokens: maxOutputTokens,
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia,
+            includeToolsAppendix: includeToolsAppendix
         )
     }
 
@@ -699,22 +776,61 @@ class AIService: ObservableObject {
 
     /// Classifies a generation error into a log label + whether retrying is
     /// worthwhile.
-    nonisolated private static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
-        if let genError = error as? LanguageModelSession.GenerationError {
-            let full = String(describing: genError)
-            let caseName = String(full.prefix(while: { $0 != "(" }))
-            let lower = caseName.lowercased()
-            let permanent = lower.contains("guardrail")
-                || lower.contains("unsupportedlanguage")
-                || lower.contains("unsupportedlocale")
-                || lower.contains("unsupportedguide")
-            return ("GenerationError.\(caseName)", !permanent)
+    nonisolated static func classifyGenerationError(_ error: Error) -> (label: String, isTransient: Bool) {
+        if let modelError = error as? LanguageModelError {
+            let label = "LanguageModelError.\(modelError)"
+            switch modelError {
+            case .guardrailViolation,
+                 .refusal,
+                 .unsupportedCapability,
+                 .unsupportedTranscriptContent,
+                 .unsupportedGenerationGuide,
+                 .unsupportedLanguageOrLocale:
+                return (label, false)
+            case .contextSizeExceeded,
+                 .rateLimited,
+                 .timeout:
+                return (label, true)
+            @unknown default:
+                return (label, true)
+            }
         }
         if error is CancellationError {
             return ("cancelled", false)
         }
         let ns = error as NSError
         return ("\(ns.domain) code=\(ns.code): \(error.localizedDescription)", true)
+    }
+
+    private nonisolated static let arithmeticRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\d\s*[\+\-\*\/\^]\s*\d|\d\s*%"#,
+        options: []
+    )
+    private nonisolated static let mathVerbsRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\b(?:calcul|calcule|calculer|calculez|combien font|somme de|multiplier|diviser|multiply|divide|square root|racine carrée)\b"#,
+        options: [.caseInsensitive]
+    )
+    private nonisolated static let dateRegex: NSRegularExpression? = try? NSRegularExpression(
+        pattern: #"\b(?:date|dates|aujourd'hui|heure|heures|quel jour|today|current time|what day|what time)\b"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Fast heuristic check to see if a factual query needs calculation or current date/time tools.
+    /// Used in concise mode to bypass tool schemas and appendix, saving ~500 tokens of prefill
+    /// and eliminating tool-routing passes to accelerate Time-To-First-Token.
+    static func queryRequiresTools(_ query: String) -> Bool {
+        let lower = query.lowercased()
+        let nsRange = NSRange(lower.startIndex..., in: lower)
+        if let arithmetic = arithmeticRegex, arithmetic.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        if let math = mathVerbsRegex, math.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        if let date = dateRegex, date.firstMatch(in: lower, options: [], range: nsRange) != nil {
+            return true
+        }
+        return false
     }
 
     /// Single generation attempt. Throws on failure so the orchestrator
@@ -736,16 +852,20 @@ class AIService: ObservableObject {
         contextUtilizationFactor: Double? = nil,
         onPartialUpdate: ((String) -> Void)? = nil
     ) async throws -> String {
+        let profile = TokenBudgeting.outputProfile(forResponseTokens: maxTokens)
+        let allowTools = Self.queryRequiresTools(query)
+
         // In SearchView summary generation, searchSources is NOT allowed as a tool.
         // Web results are pre-fetched and grounded directly; the model only uses
-        // calculate and currentDateTime.
+        // calculate and currentDateTime when tools are allowed.
         let instructions = buildInstructions(
             for: language,
             maxOutputTokens: maxTokens,
             webSearchAvailable: false,
             hasCorpus: false,
             useDuckDuckGo: false,
-            useWikipedia: false
+            useWikipedia: false,
+            includeToolsAppendix: allowTools
         )
         let clampedOutputTokens = TokenBudgeting.clampedOutputTokens(
             requestedMaxTokens: maxTokens,
@@ -753,83 +873,120 @@ class AIService: ObservableObject {
             promptOverheadTokens: TokenBudgeting.promptOverheadTokens,
             minContextTokens: TokenBudgeting.minContextTokens
         )
-        let assembled = ToolKit.assemble(
-            config: ToolKit.Configuration(
-                language: language,
-                corpusChunks: [],
-                userQuery: query,
-                webSearchAvailable: false,
-                webSearchService: webSearchService,
-                webScraper: webScraper,
-                ragContextService: ragContextService,
-                maxDuckDuckGoResults: maxDuckDuckGoResults,
-                maxWikipediaResults: maxWikipediaResults,
-                useDuckDuckGo: false,
-                useWikipedia: false,
-                contextUtilizationFactor: contextUtilizationFactor
-            ),
-            responseTokens: clampedOutputTokens
-        )
-        let toolBudget = assembled.tokenBudget
-        let tools = assembled.tools
-        #if DEBUG
-        debugNotes.append("generateSummaryWithFoundationModels path=search-summary tools=[\(tools.map { $0.name }.joined(separator: ", "))] webSearchAvailable=false toolBudget=\(toolBudget)t")
-        #endif
-        let session = LanguageModelSession(tools: tools, instructions: instructions)
+
+        let tools: [any Tool]
+        let toolBudget: Int
+        if allowTools {
+            let assembled = ToolKit.assemble(
+                config: ToolKit.Configuration(
+                    language: language,
+                    corpusChunks: [],
+                    userQuery: query,
+                    webSearchAvailable: false,
+                    webSearchService: webSearchService,
+                    webScraper: webScraper,
+                    ragContextService: ragContextService,
+                    maxDuckDuckGoResults: maxDuckDuckGoResults,
+                    maxWikipediaResults: maxWikipediaResults,
+                    useDuckDuckGo: false,
+                    useWikipedia: false,
+                    contextUtilizationFactor: contextUtilizationFactor
+                ),
+                responseTokens: clampedOutputTokens
+            )
+            tools = assembled.tools
+            toolBudget = assembled.tokenBudget
+        } else {
+            tools = []
+            toolBudget = 0
+        }
 
         let effectiveMaxTokens = TokenBudgeting.clampedToolResponseTokens(requestedMaxTokens: maxTokens)
-        let maxContextChars = TokenBudgeting.maxContextCharacters(
-            maxOutputTokens: effectiveMaxTokens,
-            contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)
+        let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxTokens)
+        #if DEBUG
+        debugNotes.append("generateSummaryWithFoundationModels path=search-summary tools=[\(tools.map { $0.name }.joined(separator: ", "))] webSearchAvailable=false toolBudget=\(toolBudget)t reasoning=\(reasoningLevel)")
+        #endif
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .searchSummary,
+            instructions: instructions,
+            tools: tools,
+            temperature: temperature,
+            maxResponseTokens: maxTokens,
+            effectiveMaxOutputTokens: effectiveMaxTokens,
+            reasoningLevelOverride: reasoningLevel
         )
-        
-        // If context fits, use it all; otherwise intelligently select summaries
+        let maxContextChars = min(
+            TokenBudgeting.maxContextCharacters(
+                maxOutputTokens: effectiveMaxTokens,
+                contextUtilizationFactor: Self.summaryContextUtilizationFactor(forTokens: maxTokens)
+            ),
+            profile.kind.implicitContextCharacters
+        )
+
+        // If context fits, use it all; otherwise preserve the tail (most relevant chunks are at the end)
         var selectedContext: String
         if context.count <= maxContextChars {
             selectedContext = context
         } else {
-            // Split summaries and include as many as fit within the context window
             let summaryChunks = context.components(separatedBy: "\n\n---\n\n")
-            selectedContext = ""
-            for chunk in summaryChunks {
-                if (selectedContext + chunk).count <= maxContextChars {
-                    if selectedContext.isEmpty {
-                        selectedContext = chunk
-                    } else {
-                        selectedContext += "\n\n---\n\n" + chunk
-                    }
+            var keptReversed: [String] = []
+            var runningChars = 0
+            let separator = "\n\n---\n\n"
+            for chunk in summaryChunks.reversed() {
+                let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                if runningChars + sepChars + chunk.count <= maxContextChars {
+                    keptReversed.append(chunk)
+                    runningChars += sepChars + chunk.count
                 } else {
-                    break
+                    continue
                 }
             }
-            
-            // If no summaries fit, use at least the first one
-            if selectedContext.isEmpty && !summaryChunks.isEmpty {
-                selectedContext = String(summaryChunks[0].prefix(maxContextChars))
+
+            if keptReversed.isEmpty, let mostRelevant = summaryChunks.last {
+                selectedContext = String(mostRelevant.prefix(maxContextChars))
+            } else {
+                selectedContext = keptReversed.reversed().joined(separator: separator)
             }
         }
 
-        // Build the prompt. In tool-calling mode we provide grounding context
-        // if pre-fetched web context is available, capped so that the prompt,
-        // tools, and model answer fit within the context window.
+        // Build the prompt. When tools are not needed, pass selectedContext intact
+        // without mid-sentence word chopping. When tools are attached, drop least-relevant
+        // leading chunks first so the most-relevant chunk at the end remains intact.
         let toolGroundingContext: String
         if selectedContext.isEmpty {
             toolGroundingContext = ""
+        } else if !allowTools {
+            toolGroundingContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
         } else {
-            let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
-                maxOutputTokens: effectiveMaxTokens,
-                reservedToolReplyTokens: toolBudget + 120
+            let toolGroundingCharCap = min(
+                maxContextChars,
+                TokenBudgeting.maxHybridToolGroundingCharacters(
+                    maxOutputTokens: effectiveMaxTokens,
+                    reservedToolReplyTokens: toolBudget + 120
+                )
             )
-            let toolGroundingTokenCap = TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
-            let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
-            var grounded = TokenBudgeting.truncateToApproxWordCount(
-                selectedContext,
-                maxWords: toolGroundingWords
-            )
-            if grounded.count > toolGroundingCharCap {
-                grounded = String(grounded.prefix(toolGroundingCharCap))
+            if selectedContext.count <= toolGroundingCharCap {
+                toolGroundingContext = selectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                let summaryChunks = selectedContext.components(separatedBy: "\n\n---\n\n")
+                var keptReversed: [String] = []
+                var runningChars = 0
+                let separator = "\n\n---\n\n"
+                for chunk in summaryChunks.reversed() {
+                    let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                    if runningChars + sepChars + chunk.count <= toolGroundingCharCap {
+                        keptReversed.append(chunk)
+                        runningChars += sepChars + chunk.count
+                    } else {
+                        continue
+                    }
+                }
+                if keptReversed.isEmpty, let mostRelevant = summaryChunks.last {
+                    toolGroundingContext = String(mostRelevant.prefix(toolGroundingCharCap)).trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    toolGroundingContext = keptReversed.reversed().joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
             }
-            toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         let prompt = Self.toolCallingSearchPrompt(
@@ -856,24 +1013,41 @@ class AIService: ObservableObject {
 
         if let onPartialUpdate {
             var latestPartial = ""
+            var lastUpdateTime: ContinuousClock.Instant = .now - .milliseconds(100)
+            let minInterval = Duration.milliseconds(35)
             let responseStream = session.streamResponse(to: prompt, options: options)
             for try await snapshot in responseStream {
-                let partial = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(String(describing: snapshot.content))
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !partial.isEmpty, partial != latestPartial else { continue }
-                latestPartial = partial
-                onPartialUpdate(partial)
+                let text = snapshot.content
+                guard !text.isEmpty, text != latestPartial else { continue }
+                latestPartial = text
+                let now = ContinuousClock.now
+                if now - lastUpdateTime >= minInterval || text.hasSuffix("\n") {
+                    lastUpdateTime = now
+                    let cleanText: String
+                    if text.contains("\\begin{document}") || text.contains("\\documentclass") {
+                        cleanText = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(text)
+                    } else {
+                        cleanText = text
+                    }
+                    let trimmed = cleanText.trimmingCharacters(in: .whitespacesAndNewlines)
+                    onPartialUpdate(trimmed)
+                }
             }
 
             if !latestPartial.isEmpty {
-                return latestPartial
+                let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(latestPartial)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                onPartialUpdate(finalSanitized)
+                return finalSanitized
             }
         }
 
-        // Generate the summary
+        // Generate the summary (fallback if streaming was skipped or empty)
         let response = try await session.respond(to: prompt, options: options)
         let txt_response = String(describing: response.content)
-
-        return txt_response
+        let finalSanitized = ModelOutputLaTeXSanitizer.sanitizeLaTeXDocumentWrappers(txt_response)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        onPartialUpdate?(finalSanitized)
+        return finalSanitized
     }
 }

@@ -39,6 +39,7 @@ final class AppSettingsStore {
     var settings: AppSettings {
         didSet {
             settings.save()
+            DynamicSessionCoordinator.shared.handleSettingsChanged(settings)
         }
     }
 

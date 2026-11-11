@@ -2,10 +2,10 @@
 //  TokenBudgeting.swift
 //  SilicIA
 //
-//  Created by Copilot on 29/03/2026.
 //
 
 import Foundation
+import FoundationModels
 
 /// Shared token-budget helpers used across chat, search, and RAG selection.
 ///
@@ -122,10 +122,64 @@ nonisolated enum TokenBudgeting {
         max(tokens, 0) * avgCharsPerToken
     }
 
-    enum OutputProfileKind: String, Sendable, CaseIterable {
+    enum OutputProfileKind: String, Sendable, CaseIterable, Codable {
         case concise = "Concise"
         case standard = "Standard"
         case detailed = "Detailed"
+
+        /// Maps the output token category to its corresponding Foundation Models
+        /// `ContextOptions.ReasoningLevel` used on `LanguageModelSession.Profile`.
+        var reasoningLevel: ContextOptions.ReasoningLevel {
+            switch self {
+            case .concise:
+                return .light
+            case .standard:
+                return .moderate
+            case .detailed:
+                return .deep
+            }
+        }
+
+        /// Implicit output (response) token budget for this reasoning profile.
+        var implicitResponseTokens: Int {
+            switch self {
+            case .concise:
+                return 300
+            case .standard:
+                return 500
+            case .detailed:
+                return 900
+            }
+        }
+
+        /// Implicit input (context) character cap for fast prompt prefill.
+        var implicitContextCharacters: Int {
+            switch self {
+            case .concise:
+                return 2_200
+            case .standard:
+                return 4_200
+            case .detailed:
+                return 6_000
+            }
+        }
+
+        /// Implicit input (context) token budget derived from `implicitContextCharacters`.
+        var implicitContextTokens: Int {
+            switch self {
+            case .concise:
+                return 750
+            case .standard:
+                return 1_400
+            case .detailed:
+                return 2_000
+            }
+        }
+
+        /// Combined implicit total token budget (`implicitContextTokens + implicitResponseTokens`).
+        var implicitTotalTokensBudget: Int {
+            implicitContextTokens + implicitResponseTokens
+        }
     }
 
     /// Output profiles customize the tone, persona, structure, and length of model summaries
@@ -139,6 +193,11 @@ nonisolated enum TokenBudgeting {
         let keyPointsRangeString: String
         let keyPointsRangeFrString: String
         let keyPointsRangeEsString: String
+
+        /// `ContextOptions.ReasoningLevel` corresponding to this output profile's category.
+        var reasoningLevel: ContextOptions.ReasoningLevel {
+            kind.reasoningLevel
+        }
 
         func localizedName(for language: ModelLanguage) -> String {
             switch language {
@@ -243,6 +302,49 @@ nonisolated enum TokenBudgeting {
                 keyPointsRangeEsString: "5 a 7"
             )
         }
+    }
+
+    /// Returns the `ContextOptions.ReasoningLevel` matching the output profile for `tokens`
+    /// (`.concise` -> `.light`, `.standard` -> `.moderate`, `.detailed` -> `.deep`).
+    static func reasoningLevel(forResponseTokens tokens: Int) -> ContextOptions.ReasoningLevel {
+        outputProfile(forResponseTokens: tokens).reasoningLevel
+    }
+
+    /// Token reservation allocated to internal reasoning (chain-of-thought) by reasoning level.
+    static func reasoningTokens(for level: ContextOptions.ReasoningLevel) -> Int {
+        switch level {
+        case .light: return 200
+        case .moderate: return 400
+        case .deep: return 800
+        case .custom: return 400
+        @unknown default: return 400
+        }
+    }
+
+    /// Hard cap on total combined tokens (input context + output response) when using PDF as source.
+    static let maxTotalTokensLimit = 4000
+
+    /// Calculates the maximum input context token budget when PDF is a source,
+    /// filling as much of the 4000-token total window as possible after accounting
+    /// for expected output tokens, reasoning level reservation, and instruction/prompt overhead.
+    static func maxPDFInputContextTokens(
+        maxOutputTokens: Int,
+        reasoningLevel: ContextOptions.ReasoningLevel = .moderate,
+        instructionTokens: Int = instructionTokens,
+        promptOverheadTokens: Int = promptOverheadTokens
+    ) -> Int {
+        let reasoning = reasoningTokens(for: reasoningLevel)
+        let effectiveOutput = clampedToolResponseTokens(requestedMaxTokens: maxOutputTokens)
+        let overhead = instructionTokens + promptOverheadTokens + reasoning + effectiveOutput
+        return max(minContextTokens, maxTotalTokensLimit - overhead)
+    }
+
+    /// Returns `maxPDFInputContextTokens` converted into approximate characters.
+    static func maxPDFInputContextCharacters(
+        maxOutputTokens: Int,
+        reasoningLevel: ContextOptions.ReasoningLevel = .moderate
+    ) -> Int {
+        maxPDFInputContextTokens(maxOutputTokens: maxOutputTokens, reasoningLevel: reasoningLevel) * avgCharsPerToken
     }
 
     /// Smallest tool reply we'll allow. Below this a tool call returns so

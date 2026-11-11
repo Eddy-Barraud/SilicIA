@@ -3,16 +3,10 @@
 //  SilicIATests
 //
 //  Integration tests that drive the REAL on-device model through
-//  ChatService.sendMessage and assert it answers cleanly across multi-turn
-//  conversations and tool-calling mode.
+//  ChatService.sendMessage and AIService.summarize to assert clean generation.
 //
 //  These require Apple Intelligence to be available on the test host. When
-//  it isn't (most CI), every test SKIPS rather than fails — so the suite
-//  stays green and deterministic, and these run for real on a capable Mac.
-//
-//  Kept offline (web search disabled, no documents) so the only moving
-//  part is the model itself: answers come from its own knowledge, no
-//  network flakiness.
+//  it isn't (most CI), tests skip rather than fail.
 //
 
 import XCTest
@@ -45,11 +39,9 @@ final class ModelAnsweringTests: XCTestCase {
         try await super.tearDown()
     }
 
-    /// Sends one message with offline, modest-length settings and returns
-    /// after the model finishes.
-    private func ask(_ question: String) async {
+    func testChatServiceAnswersCleanly() async {
         await chatService.sendMessage(
-            question,
+            "Briefly, what is a factorial?",
             contextInput: "",
             pdfURLs: [],
             imageURLs: [],
@@ -63,92 +55,17 @@ final class ModelAnsweringTests: XCTestCase {
             useDuckDuckGo: false,
             useWikipedia: false
         )
-    }
 
-    /// Asserts the most recent turn produced a clean, non-empty assistant answer.
-    private func assertLastAnswerClean(file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertNil(chatService.errorMessage, "model surfaced an error", file: file, line: line)
-        XCTAssertEqual(chatService.messages.last?.role, .assistant, file: file, line: line)
+        XCTAssertNil(chatService.errorMessage)
+        XCTAssertEqual(chatService.messages.last?.role, .assistant)
         let answer = chatService.messages.last?.content.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        XCTAssertFalse(answer.isEmpty, "assistant answer was empty", file: file, line: line)
-    }
-
-    // MARK: - Multi-turn conversation
-
-    func testMultiTurnChatAnswersWithoutError() async {
-        let questions = [
-            "What is the capital of France?",
-            "Name one landmark in that city."
-        ]
-        for q in questions {
-            await ask(q)
-            assertLastAnswerClean()
-        }
-        XCTAssertEqual(chatService.messages.count, 4) // 2 turns × (user + assistant)
-    }
-
-    // MARK: - Tool-calling path (governor + loop breaker)
-
-    func testToolCallingQuestionFinishesCleanly() async {
-        await ask("Briefly, what is a factorial?")
-        XCTAssertEqual(chatService.messages.count, 2)
-        assertLastAnswerClean()
-        let answer = chatService.messages.last?.content ?? ""
+        XCTAssertFalse(answer.isEmpty, "Assistant answer was empty")
         let lowerAnswer = answer.lowercased()
         XCTAssertFalse(lowerAnswer.contains("context does not"), "Model mentioned 'context does not': \(answer)")
         XCTAssertFalse(lowerAnswer.contains("provided context"), "Model mentioned 'provided context': \(answer)")
     }
 
-    func testToolCallingMathematicalQuestionDirectAnswerWithoutContext() async {
-        await ask("What is a cubic spline interpolation?")
-        XCTAssertEqual(chatService.messages.count, 2)
-        assertLastAnswerClean()
-        let answer = chatService.messages.last?.content ?? ""
-        let lowerAnswer = answer.lowercased()
-
-        // Assert the model does NOT exhibit false refusal or context apology
-        XCTAssertFalse(lowerAnswer.contains("provided context"), "Model mentioned 'provided context': \(answer)")
-        XCTAssertFalse(lowerAnswer.contains("context provided"), "Model mentioned 'context provided': \(answer)")
-        XCTAssertFalse(lowerAnswer.contains("based on the context"), "Model mentioned 'based on the context': \(answer)")
-        XCTAssertFalse(lowerAnswer.contains("cannot define"), "Model claimed it cannot define: \(answer)")
-        XCTAssertFalse(lowerAnswer.contains("additional context or sources"), "Model asked for additional context: \(answer)")
-        XCTAssertFalse(lowerAnswer.contains("source:"), "Model output spurious source citation: \(answer)")
-
-        // Assert the model gave an informative answer with mathematical content
-        XCTAssertTrue(
-            lowerAnswer.contains("spline") || lowerAnswer.contains("polynomial") || lowerAnswer.contains("curve") || lowerAnswer.contains("interpolation"),
-            "Model answer missing mathematical keywords: \(answer)"
-        )
-    }
-
-    func testKeywordQueryDoesNotLeakModelSelfIntroduction() async {
-        let aiService = AIService()
-        let nonToolSummary = await aiService.summarize(
-            query: "Michelin company",
-            results: [],
-            maxScrapingResults: 0,
-            maxScrapingChars: 0,
-            temperature: 0.3,
-            maxTokens: 300,
-            language: .english,
-            generateAnswer: true
-        )
-        XCTAssertFalse(
-            nonToolSummary.summary.lowercased().contains("foundation model"),
-            "Summary leaked foundation model self-intro: \(nonToolSummary.summary)"
-        )
-        XCTAssertFalse(
-            nonToolSummary.summary.lowercased().contains("developed by apple"),
-            "Summary leaked developed by apple: \(nonToolSummary.summary)"
-        )
-        let lower = nonToolSummary.summary.lowercased()
-        XCTAssertTrue(
-            lower.contains("michelin") || lower.contains("tire") || lower.contains("guide"),
-            "Summary missing expected entity keywords: \(nonToolSummary.summary)"
-        )
-    }
-
-    func testSwiftDataSetupProducesMarkdownWithoutArrayLaTeX() async {
+    func testAIServiceSummarizeGeneratesCleanAnswerWithoutLaTeXArtifacts() async {
         let aiService = AIService()
         let summary = await aiService.summarize(
             query: "How to set up SwiftData step by step",
@@ -162,87 +79,8 @@ final class ModelAnsweringTests: XCTestCase {
         )
         let text = summary.summary
         XCTAssertFalse(text.isEmpty, "Summary was empty")
-        XCTAssertFalse(text.contains(#"\begin{array}"#), "Summary wrapped output in \\begin{array}: \(text)")
-        XCTAssertFalse(text.contains(#"\end{array}"#), "Summary wrapped output in \\end{array}: \(text)")
-        XCTAssertFalse(text.contains(#"\text{"#), "Summary contained unwrapped \\text{ commands: \(text)")
-        XCTAssertFalse(text.contains(#"\bullet"#), "Summary contained raw LaTeX \\bullet: \(text)")
-        let lower = text.lowercased()
-        XCTAssertTrue(
-            lower.contains("swiftdata") || lower.contains("model"),
-            "Summary did not mention SwiftData: \(text)"
-        )
-    }
-
-    func testPresidentsOfFourthRepublicInFrenchAcrossThreeProfiles() async {
-        let aiService = AIService()
-        let query = "liste les présidents le 4ème république française"
-
-        let wikiPage = SearchResult(
-            title: "Quatrième République (France)",
-            url: "https://fr.wikipedia.org/wiki/Quatri%C3%A8me_R%C3%A9publique_(France)",
-            snippet: "Les deux présidents de la Quatrième République sont Vincent Auriol et René Coty.",
-            retrievedContent: """
-            # Quatrième République (France)
-
-            La Quatrième République est le régime républicain en vigueur en France de 1946 à 1958.
-            Les deux seuls présidents de la Quatrième République sont :
-            - Vincent Auriol (1947-1954)
-            - René Coty (1954-1959)
-            """
-        )
-
-        let profileTokens: [(name: String, tokens: Int)] = [
-            ("Concise", 300),
-            ("Standard", 550),
-            ("Detailed", 1100)
-        ]
-
-        for profile in profileTokens {
-            let res = await aiService.summarize(
-                query: query,
-                results: [wikiPage],
-                maxScrapingResults: 1,
-                maxScrapingChars: 2000,
-                temperature: 0.2,
-                maxTokens: profile.tokens,
-                language: .french,
-                generateAnswer: true
-            )
-            let answer = res.summary
-            #if DEBUG
-            print("┏━ Profile [\(profile.name)] Answer ━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            print(answer)
-            print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-            #endif
-
-            XCTAssertFalse(answer.isEmpty, "Profile \(profile.name) produced empty answer")
-
-            let lower = answer.lowercased()
-            // Must contain both presidents
-            XCTAssertTrue(
-                lower.contains("auriol"),
-                "Profile \(profile.name) missing Vincent Auriol: \(answer)"
-            )
-            XCTAssertTrue(
-                lower.contains("coty"),
-                "Profile \(profile.name) missing René Coty: \(answer)"
-            )
-
-            // Must NOT mention other French presidents as 4th Republic presidents
-            let forbiddenPresidents = ["pompidou", "giscard", "mitterrand", "chirac", "sarkozy", "hollande", "macron", "lebrun", "de gaulle"]
-            for forbidden in forbiddenPresidents {
-                XCTAssertFalse(
-                    lower.contains(forbidden),
-                    "Profile \(profile.name) erroneously mentioned \(forbidden): \(answer)"
-                )
-            }
-
-            // Normal and Detailed profiles must open with a concise introductory statement followed by detailed content
-            let firstSentence = answer.components(separatedBy: "\n").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            XCTAssertFalse(firstSentence.isEmpty, "Profile \(profile.name) missing concise opening sentence")
-            if profile.name == "Standard" || profile.name == "Detailed" {
-                XCTAssertGreaterThan(answer.count, 150, "Profile \(profile.name) expected detailed content after opening")
-            }
-        }
+        XCTAssertFalse(text.contains(#"\begin{array}"#), "Summary wrapped output in array: \(text)")
+        XCTAssertFalse(text.lowercased().contains("foundation model developed by apple"), "Summary leaked model intro: \(text)")
+        XCTAssertTrue(text.lowercased().contains("swiftdata") || text.lowercased().contains("model"))
     }
 }

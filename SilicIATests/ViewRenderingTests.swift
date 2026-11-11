@@ -76,6 +76,9 @@ final class ViewRenderingTests: XCTestCase {
             )
             .modelContainer(container)
         )
+        assertRenders(SharedSettingsView(isPresented: .constant(true)))
+        assertRenders(SharedTopBarView(onNew: {}, onHistory: {}, onSettings: {}))
+        assertRenders(SourceToggleButtons())
         assertRenders(ModelAvailabilityNotice(reason: .notEnabled, language: .english))
     }
 

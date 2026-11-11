@@ -77,12 +77,20 @@ final class ChatService: ObservableObject {
     private static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
+    private var preAnalyzedQuery: String?
     private var preAnalyzedMaxContextTokens: Int?
     private var preAnalyzedMaxOutputTokens: Int?
     private var preAnalyzedMaxDuckDuckGoResults: Int?
     private var preAnalyzedMaxWikipediaResults: Int?
     private var preAnalyzedUseDuckDuckGo: Bool = true
     private var preAnalyzedUseWikipedia: Bool = true
+    private var pdfRawPageCache: [URL: [String]] = [:]
+
+    struct PDFPageBatch: Sendable {
+        let pageNumbers: [Int] // 1-based
+        let combinedContent: String
+        let isMerged: Bool
+    }
 
     nonisolated static func contextAttachmentKey(for url: URL) -> String {
         url.standardizedFileURL.resolvingSymlinksInPath().path
@@ -102,7 +110,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async {
         activePDFURLForNewConversation = pdfURLs.first
         activePDFURLsForNewConversation = pdfURLs
@@ -130,10 +139,20 @@ final class ChatService: ObservableObject {
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
-        let effectiveMaxContextTokens = calculateEffectiveContextTokens(
-            requestedContextTokens: maxContextTokens,
-            maxOutputTokens: effectiveMaxOutputTokens
-        )
+        let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxResponseTokens)
+        let isPDFPresent = pdfURLs.contains { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        let effectiveMaxContextTokens: Int
+        if isPDFPresent {
+            effectiveMaxContextTokens = TokenBudgeting.maxPDFInputContextTokens(
+                maxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevel: reasoningLevel
+            )
+        } else {
+            effectiveMaxContextTokens = calculateEffectiveContextTokens(
+                requestedContextTokens: maxContextTokens,
+                maxOutputTokens: effectiveMaxOutputTokens
+            )
+        }
 
         // In tool-calling mode, the model owns the decision to search the web
         // via the `webSearch` tool. Suppress the auto-prefetch path so we
@@ -149,7 +168,9 @@ final class ChatService: ObservableObject {
             clampedWikipediaResults: effectiveMaxWikiResults
         )
         let hasRequestedContext = !contextKey.isEmpty
-        let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
+        let queryMatches = !isPDFPresent || (preAnalyzedQuery == message && !preAnalyzedChunks.isEmpty)
+        let canUsePreAnalyzed = queryMatches
+            && contextKey == preAnalyzedContextKey
             && effectiveMaxContextTokens == preAnalyzedMaxContextTokens
             && effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens
             && effectiveMaxDDGResults == preAnalyzedMaxDuckDuckGoResults
@@ -177,6 +198,7 @@ final class ChatService: ObservableObject {
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
+            preAnalyzedQuery = message
             preAnalyzedMaxContextTokens = effectiveMaxContextTokens
             preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
             preAnalyzedMaxDuckDuckGoResults = effectiveMaxDDGResults
@@ -194,8 +216,10 @@ final class ChatService: ObservableObject {
             query: message,
             historyTokens: historyTokens,
             maxOutputTokens: effectiveMaxOutputTokens,
-            contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor,
-            language: language
+            contextUtilizationFactor: isPDFPresent ? 1.0 : RAGSelectionOptions.default.contextUtilizationFactor,
+            language: language,
+            isPDFSource: isPDFPresent,
+            reasoningLevel: reasoningLevel
         )
         // Cap the selected context with a single primary strategy:
         //   1. Word-aware truncation (semantic boundaries — preferred).
@@ -204,10 +228,18 @@ final class ChatService: ObservableObject {
         // This replaces the prior double-cap which built two intermediate
         // Strings and picked the shorter — wasteful and harder to reason
         // about, since the two budgets are derived from the same token cap.
-        let maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
-            maxOutputTokens: effectiveMaxOutputTokens,
-            contextUtilizationFactor: 1.0
-        )
+        let maxPromptContextCharacters: Int
+        if isPDFPresent {
+            maxPromptContextCharacters = TokenBudgeting.maxPDFInputContextCharacters(
+                maxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevel: reasoningLevel
+            )
+        } else {
+            maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
+                maxOutputTokens: effectiveMaxOutputTokens,
+                contextUtilizationFactor: 1.0
+            )
+        }
         let effectiveContextTokenCap = min(
             effectiveMaxContextTokens,
             TokenBudgeting.estimatedTokens(forApproxCharacters: maxPromptContextCharacters)
@@ -256,7 +288,8 @@ final class ChatService: ObservableObject {
                     maxWikipediaResults: effectiveMaxWikiResults,
                     useDuckDuckGo: useDuckDuckGo,
                     useWikipedia: useWikipedia,
-                    contextUtilizationFactor: nil
+                    wikipediaSource: wikipediaSource,
+                    contextUtilizationFactor: isPDFPresent ? 1.0 : nil
                 ),
                 responseTokens: effectiveMaxOutputTokens
             )
@@ -264,32 +297,58 @@ final class ChatService: ObservableObject {
             let toolBudget = assembled.tokenBudget
             toolTranscriptRecorder = assembled.transcriptRecorder
             let toolNames = tools.map { $0.name }.joined(separator: ", ")
-            debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t")
-            let session = LanguageModelSession(
+            debugContext("sendMessage path=tool-calling tools=[\(toolNames)] corpusChunks=\(chunks.count) webSearchAvailable=\(webSearchAvailable) toolBudget=\(toolBudget)t reasoning=\(reasoningLevel)")
+            let session = DynamicSessionCoordinator.shared.acquireSession(
+                mode: .chat,
+                instructions: instructions,
                 tools: tools,
-                instructions: instructions
+                temperature: temperature,
+                maxResponseTokens: maxResponseTokens,
+                effectiveMaxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevelOverride: reasoningLevel
             )
             let toolGroundingContext: String
             if finalSelectedContext.isEmpty {
                 toolGroundingContext = ""
             } else {
-                let toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
-                    maxOutputTokens: effectiveMaxOutputTokens,
-                    reservedToolReplyTokens: toolBudget + 120
-                )
+                let toolGroundingCharCap: Int
+                if isPDFPresent {
+                    toolGroundingCharCap = maxPromptContextCharacters
+                } else {
+                    toolGroundingCharCap = TokenBudgeting.maxHybridToolGroundingCharacters(
+                        maxOutputTokens: effectiveMaxOutputTokens,
+                        reservedToolReplyTokens: toolBudget + 120
+                    )
+                }
                 let toolGroundingTokenCap = min(
                     effectiveMaxContextTokens,
                     TokenBudgeting.estimatedTokens(forApproxCharacters: toolGroundingCharCap)
                 )
-                let toolGroundingWords = TokenBudgeting.estimatedContextWords(forTokens: toolGroundingTokenCap)
-                var grounded = TokenBudgeting.truncateToApproxWordCount(
-                    finalSelectedContext,
-                    maxWords: toolGroundingWords
-                )
-                if grounded.count > toolGroundingCharCap {
-                    grounded = String(grounded.prefix(toolGroundingCharCap))
+                let maxChars = min(toolGroundingCharCap, TokenBudgeting.estimatedContextCharacters(forTokens: toolGroundingTokenCap))
+                if finalSelectedContext.count <= maxChars {
+                    toolGroundingContext = finalSelectedContext.trimmingCharacters(in: .whitespacesAndNewlines)
+                } else {
+                    // finalSelectedContext is ordered from least relevant to most relevant (#1 at the end).
+                    // Preserve the tail so the highest-ranked chunks are kept intact.
+                    let chunks = finalSelectedContext.components(separatedBy: "\n\n---\n\n")
+                    var keptReversed: [String] = []
+                    var runningChars = 0
+                    let separator = "\n\n---\n\n"
+                    for chunk in chunks.reversed() {
+                        let sepChars = keptReversed.isEmpty ? 0 : separator.count
+                        if runningChars + sepChars + chunk.count <= maxChars {
+                            keptReversed.append(chunk)
+                            runningChars += sepChars + chunk.count
+                        } else {
+                            break
+                        }
+                    }
+                    if keptReversed.isEmpty, let mostRelevant = chunks.last {
+                        toolGroundingContext = String(mostRelevant.prefix(maxChars)).trimmingCharacters(in: .whitespacesAndNewlines)
+                    } else {
+                        toolGroundingContext = keptReversed.reversed().joined(separator: separator).trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
                 }
-                toolGroundingContext = grounded.trimmingCharacters(in: .whitespacesAndNewlines)
             }
             debugContext("sendMessage tool-calling groundingChars=\(toolGroundingContext.count)")
             let prompt = buildToolCallingPrompt(
@@ -349,11 +408,6 @@ final class ChatService: ObservableObject {
             }
             errorMessage = nil
         } catch {
-            // A tool-calling turn can transiently fail — most notably the
-            // intermittent `GenerationError -1` (context-window overflow from
-            // the tool transcript). Recover by retrying the SAME question
-            // WITHOUT tools: the classical grounded path builds no tool
-            // transcript, so it sidesteps the failure (mirrors AIService's
             // A tool-calling turn can transiently fail — most notably the
             // intermittent `GenerationError -1` (context-window overflow from
             // the tool transcript). Recover by retrying the SAME question
@@ -455,7 +509,12 @@ final class ChatService: ObservableObject {
             hasContext: hasContext,
             appendToolsAppendix: false
         )
-        let session = LanguageModelSession(instructions: instructions)
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .chatFallback,
+            instructions: instructions,
+            temperature: temperature,
+            maxResponseTokens: maxOutputTokens
+        )
         let prompt = buildToolCallingPrompt(
             for: message,
             language: language,
@@ -503,7 +562,12 @@ final class ChatService: ObservableObject {
             hasContext: true,
             appendToolsAppendix: false
         )
-        let session = LanguageModelSession(instructions: instructions)
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .chatFallback,
+            instructions: instructions,
+            temperature: temperature,
+            maxResponseTokens: maxOutputTokens
+        )
         let prompt = buildToolTranscriptRecoveryPrompt(
             for: message,
             selectedContext: selectedContext,
@@ -548,10 +612,20 @@ final class ChatService: ObservableObject {
         let effectiveMaxDDGResults = clampedMaxDuckDuckGoResults(maxDuckDuckGoResults)
         let effectiveMaxWikiResults = clampedMaxWikipediaResults(maxWikipediaResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
-        let effectiveMaxContextTokens = calculateEffectiveContextTokens(
-            requestedContextTokens: maxContextTokens,
-            maxOutputTokens: effectiveMaxOutputTokens
-        )
+        let reasoningLevel = TokenBudgeting.reasoningLevel(forResponseTokens: maxResponseTokens)
+        let isPDFPresent = pdfURLs.contains { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        let effectiveMaxContextTokens: Int
+        if isPDFPresent {
+            effectiveMaxContextTokens = TokenBudgeting.maxPDFInputContextTokens(
+                maxOutputTokens: effectiveMaxOutputTokens,
+                reasoningLevel: reasoningLevel
+            )
+        } else {
+            effectiveMaxContextTokens = calculateEffectiveContextTokens(
+                requestedContextTokens: maxContextTokens,
+                maxOutputTokens: effectiveMaxOutputTokens
+            )
+        }
 
         let contextKey = makeContextKey(
             contextInput: contextInput,
@@ -634,7 +708,8 @@ final class ChatService: ObservableObject {
         maxResponseTokens: Int,
         maxContextTokens: Int,
         useDuckDuckGo: Bool = true,
-        useWikipedia: Bool = true
+        useWikipedia: Bool = true,
+        wikipediaSource: WikipediaSource = .online
     ) async {
         guard let assistantIndex = messages.firstIndex(where: { $0.id == id && $0.role == .assistant }) else {
             return
@@ -654,6 +729,7 @@ final class ChatService: ObservableObject {
         // Invalidate the pre-analyzed context cache so settings changes
         // (e.g. new max-context-tokens, new sources) get re-evaluated.
         preAnalyzedContextKey = nil
+        preAnalyzedQuery = nil
 
         await sendMessage(
             userText,
@@ -668,7 +744,8 @@ final class ChatService: ObservableObject {
             maxResponseTokens: maxResponseTokens,
             maxContextTokens: maxContextTokens,
             useDuckDuckGo: useDuckDuckGo,
-            useWikipedia: useWikipedia
+            useWikipedia: useWikipedia,
+            wikipediaSource: wikipediaSource
         )
     }
 
@@ -701,12 +778,14 @@ final class ChatService: ObservableObject {
         pdfAnalysisProgress = [:]
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
+        preAnalyzedQuery = nil
         preAnalyzedMaxContextTokens = nil
         preAnalyzedMaxOutputTokens = nil
         preAnalyzedMaxDuckDuckGoResults = nil
         preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
+        pdfRawPageCache.removeAll()
         currentConversation = nil
         currentConversationPDFFilename = nil
         currentConversationPDFBookmark = nil
@@ -716,8 +795,20 @@ final class ChatService: ObservableObject {
         activePDFURLsForNewConversation = []
     }
 
-    /// Collects web, PDF, and image chunks from provided context.
-    private func collectChunks(
+    static let textFileExtensions: Set<String> = ["txt", "md", "markdown", "text"]
+
+    /// Chunks plain text and Markdown files directly using RAGChunker without Vision OCR.
+    static let maxTextFileCharacters = 1_000_000
+
+    static func makeTextFileChunks(text: String, fileName: String) -> [RAGChunk] {
+        let cleanText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanText.isEmpty else { return [] }
+        let cappedText = cleanText.count > maxTextFileCharacters ? String(cleanText.prefix(maxTextFileCharacters)) : cleanText
+        return RAGChunker.chunkParagraphs(text: cappedText, source: "File: \(fileName)", url: nil)
+    }
+
+    /// Collects web, PDF, text, and image chunks from provided context.
+    func collectChunks(
         contextInput: String,
         pdfURLs: [URL],
         imageURLs: [URL] = [],
@@ -732,13 +823,21 @@ final class ChatService: ObservableObject {
         useWikipedia: Bool = true
     ) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
-        let uniquePDFs = Array(Set(pdfURLs))
+        var seenDocs = Set<URL>()
+        var uniqueDocuments: [URL] = []
+        for url in pdfURLs {
+            if seenDocs.insert(url.standardizedFileURL).inserted {
+                uniqueDocuments.append(url)
+            }
+        }
+        let textFileURLs = uniqueDocuments.filter { Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
+        let actualPDFURLs = uniqueDocuments.filter { !Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
         let uniqueImages = Array(Set(imageURLs))
         if reportProgress {
             isAnalyzingContext = true
             contextAnalysisProgress = 0
             pdfAnalysisProgress = Dictionary(
-                uniqueKeysWithValues: uniquePDFs.map { (Self.contextAttachmentKey(for: $0), 0.0) }
+                uniqueKeysWithValues: (actualPDFURLs + textFileURLs).map { (Self.contextAttachmentKey(for: $0), 0.0) }
             )
         }
         defer {
@@ -785,12 +884,13 @@ final class ChatService: ObservableObject {
         let discoveredURLs = discoveredResults.map(\.url)
         let urls = deduplicatedURLs(contextURLs + discoveredURLs)
             .filter { !retrievedResultURLKeys.contains(normalizedURLString($0)) }
-        let totalWorkItems = max(urls.count + uniquePDFs.count + uniqueImages.count + retrievedWebResults.count, 1)
+        let totalWorkItems = max(urls.count + actualPDFURLs.count + textFileURLs.count + uniqueImages.count + retrievedWebResults.count, 1)
         var completedWorkItems = 0
         let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
         let totalMaxWebResults = effectiveMaxDDGResults + effectiveMaxWikiResults
 
         for result in retrievedWebResults {
+            if Task.isCancelled { break }
             guard let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !retrievedContent.isEmpty else {
                 continue
@@ -807,13 +907,14 @@ final class ChatService: ObservableObject {
             }
         }
 
-        if !urls.isEmpty {
+        if !urls.isEmpty && !Task.isCancelled {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
                 limit: min(urls.count, totalMaxWebResults),
                 maxCharacters: webScrapingCharacters
             )
             for url in urls {
+                if Task.isCancelled { break }
                 guard let text = scraped[url] else { continue }
                 let chunked = RAGChunker.chunkParagraphs(
                     text: text,
@@ -828,49 +929,126 @@ final class ChatService: ObservableObject {
             }
         }
 
-        for pdfURL in uniquePDFs {
-            let completedBeforePDF = completedWorkItems
-            let progressKey = Self.contextAttachmentKey(for: pdfURL)
-            let pageAnalyses = await ImageAnalysisService.extractPDFPageAnalyses(from: pdfURL) { [self, progressKey] completedPages, totalPages in
-                guard reportProgress else { return }
-                let pdfProgress = totalPages > 0 ? Double(completedPages) / Double(totalPages) : 1
-                self.pdfAnalysisProgress[progressKey] = pdfProgress
-                self.contextAnalysisProgress = (Double(completedBeforePDF) + pdfProgress) / Double(totalWorkItems)
-            }
-            debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) analyzedPages=\(pageAnalyses.count)")
-            for (pageIndex, analysis) in pageAnalyses.enumerated() {
-                // Build the page chunk from Vision's layout-aware OCR text
-                // plus classification labels. Vision sees the page's
-                // *visual* layout (bounding boxes), so tables, equations,
-                // and figures survive intact — no more column-major dumps
-                // from PDFKit's drawing-order `page.string`.
-                var pageText = analysis.recognizedText
-                if !analysis.labels.isEmpty {
-                    let labelText = analysis.labels
-                        .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
-                        .joined(separator: ", ")
-                    let labelBlock = "Page content: \(labelText)"
-                    pageText = pageText.isEmpty ? labelBlock : pageText + "\n\n" + labelBlock
+        // Text & Markdown files: bypass OCR and chunk directly into structured paragraphs and tables
+        for textURL in textFileURLs {
+            if Task.isCancelled { break }
+            let progressKey = Self.contextAttachmentKey(for: textURL)
+            var fileContent: String?
+            let didAccess = textURL.startAccessingSecurityScopedResource()
+            defer {
+                if didAccess {
+                    textURL.stopAccessingSecurityScopedResource()
                 }
-                // Convert any whitespace-aligned tables (invoices, quotes,
-                // spreadsheets exported as PDF) to Markdown pipe rows BEFORE
-                // chunking. Otherwise the chunker's whitespace normalisation
-                // collapses the columns and the model can't tell a price
-                // from a TVA percentage on the same row.
-                let tabularized = RAGChunker.convertWhitespaceAlignedTables(pageText)
-                let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
-                let pageChunks = await Self.makePDFPageChunks(
-                    text: tabularized,
-                    source: source,
-                    pdfPage: pageIndex + 1,
-                    maxContextTokens: maxContextTokens
-                )
-                debugContext("collectChunks pdfPage=\(pageIndex + 1) chars=\(tabularized.count) emittedChunks=\(pageChunks.count)")
-                chunks.append(contentsOf: pageChunks)
+            }
+
+            let maxFileSize = 10 * 1024 * 1024 // 10 MB ceiling to guard against OOM on massive log/dump files
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: textURL.path),
+               let size = attrs[.size] as? Int, size > maxFileSize {
+                debugContext("collectChunks textFile=\(textURL.lastPathComponent) skipped (exceeds 10MB budget: \(size) bytes)")
+                continue
+            }
+
+            if let data = try? Data(contentsOf: textURL) {
+                if let str = String(data: data, encoding: .utf8) {
+                    fileContent = str
+                } else if let str = String(data: data, encoding: .isoLatin1) {
+                    fileContent = str
+                }
+            }
+            if let rawText = fileContent {
+                let textChunks = Self.makeTextFileChunks(text: rawText, fileName: textURL.lastPathComponent)
+                debugContext("collectChunks textFile=\(textURL.lastPathComponent) chars=\(rawText.count) emittedChunks=\(textChunks.count)")
+                chunks.append(contentsOf: textChunks)
+            } else {
+                debugContext("collectChunks textFile=\(textURL.lastPathComponent) skipped (empty or unreadable)")
             }
             completedWorkItems += 1
             if reportProgress {
-                pdfAnalysisProgress[progressKey] = 1
+                pdfAnalysisProgress[progressKey] = 1.0
+                contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+            }
+        }
+
+        for pdfURL in actualPDFURLs {
+            if Task.isCancelled { break }
+            let completedBeforePDF = completedWorkItems
+            let progressKey = Self.contextAttachmentKey(for: pdfURL)
+            let pageTexts: [String]
+            if let cached = pdfRawPageCache[pdfURL] {
+                pageTexts = cached
+                if reportProgress {
+                    self.pdfAnalysisProgress[progressKey] = 0.5
+                }
+            } else {
+                let pageAnalyses = await ImageAnalysisService.extractPDFPageAnalyses(from: pdfURL) { [self, progressKey] completedPages, totalPages in
+                    guard reportProgress else { return }
+                    let pdfProgress = totalPages > 0 ? (Double(completedPages) / Double(totalPages)) * 0.5 : 0.5
+                    self.pdfAnalysisProgress[progressKey] = pdfProgress
+                    self.contextAnalysisProgress = (Double(completedBeforePDF) + pdfProgress) / Double(totalWorkItems)
+                }
+                var extracted: [String] = []
+                for analysis in pageAnalyses {
+                    var pageText = analysis.recognizedText
+                    if !analysis.labels.isEmpty {
+                        let labelText = analysis.labels
+                            .map { String(format: "%@ (%.2f)", $0.label, $0.confidence) }
+                            .joined(separator: ", ")
+                        let labelBlock = "Page content: \(labelText)"
+                        pageText = pageText.isEmpty ? labelBlock : pageText + "\n\n" + labelBlock
+                    }
+                    let tabularized = RAGChunker.convertWhitespaceAlignedTables(pageText)
+                    extracted.append(tabularized)
+                }
+                pdfRawPageCache[pdfURL] = extracted
+                pageTexts = extracted
+            }
+
+            let trimmedMessage = currentMessage.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedMessage.isEmpty {
+                // Option A: Pre-analysis pass caches OCR text. No summarization without query.
+                debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) pre-analysis OCR cached pages=\(pageTexts.count)")
+                completedWorkItems += 1
+                if reportProgress {
+                    pdfAnalysisProgress[progressKey] = 1.0
+                    contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+                }
+                continue
+            }
+
+            // Message is present: partition pages into batches (merging pairs <= 3500 tokens)
+            let batches = Self.makePDFPageBatches(pages: pageTexts)
+            debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) batches=\(batches.count) for query=\(trimmedMessage)")
+
+            for (batchIndex, batch) in batches.enumerated() {
+                if Task.isCancelled { break }
+                let trimmedBatchContent = batch.combinedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedBatchContent.isEmpty else { continue }
+
+                let summary = await summarizePDFBatch(batch: batch, query: trimmedMessage)
+                if Task.isCancelled { break }
+                let trimmedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedSummary.isEmpty else { continue }
+
+                let pageLabel = batch.isMerged ? "pages \(batch.pageNumbers[0])-\(batch.pageNumbers[1])" : "page \(batch.pageNumbers[0])"
+                let source = "PDF: \(pdfURL.lastPathComponent) \(pageLabel)"
+                let chunk = RAGChunk(
+                    source: source,
+                    text: trimmedSummary,
+                    url: nil,
+                    pdfPage: batch.pageNumbers[0]
+                )
+                chunks.append(chunk)
+
+                if reportProgress {
+                    let progressFraction = 0.5 + 0.5 * (Double(batchIndex + 1) / Double(max(1, batches.count)))
+                    self.pdfAnalysisProgress[progressKey] = progressFraction
+                    self.contextAnalysisProgress = (Double(completedBeforePDF) + progressFraction) / Double(totalWorkItems)
+                }
+            }
+
+            completedWorkItems += 1
+            if reportProgress {
+                pdfAnalysisProgress[progressKey] = 1.0
                 contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
             }
         }
@@ -892,6 +1070,114 @@ final class ChatService: ObservableObject {
         }
 
         return chunks
+    }
+
+    /// Partitions extracted PDF page strings into sequential batches for LLM summarization.
+    ///
+    /// Batching Strategy:
+    /// - Consecutive pages whose joint estimated token count falls within `maxMergedTokens` (3500 tokens)
+    ///   are merged into a single multi-page batch, reducing LLM invocation overhead by ~50%.
+    /// - Pages that cannot be merged are processed individually, with their text safely truncated
+    ///   to `maxSingleTokens` (4000 tokens) to guard against context-window overflow.
+    ///
+    /// - Parameters:
+    ///   - pages: The array of extracted page texts (layout-aware OCR / raw text).
+    ///   - maxMergedTokens: Upper token threshold allowing two consecutive pages to merge.
+    ///   - maxSingleTokens: Safety ceiling on characters ingested for an individual unmerged page.
+    /// - Returns: An ordered array of `PDFPageBatch` items ready for technical summarization.
+    static func makePDFPageBatches(
+        pages: [String],
+        maxMergedTokens: Int = 3500,
+        maxSingleTokens: Int = 4000
+    ) -> [PDFPageBatch] {
+        var batches: [PDFPageBatch] = []
+        var i = 0
+        while i < pages.count {
+            let p1Num = i + 1
+            let p1Text = pages[i].trimmingCharacters(in: .whitespacesAndNewlines)
+            let p1Tokens = TokenBudgeting.estimatedTokens(forApproxCharacters: p1Text.count)
+
+            if i + 1 < pages.count {
+                let p2Num = i + 2
+                let p2Text = pages[i + 1].trimmingCharacters(in: .whitespacesAndNewlines)
+                let p2Tokens = TokenBudgeting.estimatedTokens(forApproxCharacters: p2Text.count)
+
+                if p1Tokens + p2Tokens <= maxMergedTokens {
+                    let combined = """
+--- Page \(p1Num) ---
+\(p1Text)
+
+--- Page \(p2Num) ---
+\(p2Text)
+"""
+                    batches.append(PDFPageBatch(pageNumbers: [p1Num, p2Num], combinedContent: combined, isMerged: true))
+                    i += 2
+                    continue
+                }
+            }
+
+            let cappedChars = maxSingleTokens * TokenBudgeting.avgCharsPerToken
+            let cappedText = String(p1Text.prefix(cappedChars))
+            batches.append(PDFPageBatch(pageNumbers: [p1Num], combinedContent: cappedText, isMerged: false))
+            i += 1
+        }
+        return batches
+    }
+
+    /// Invokes the on-device Foundation Model to generate a targeted technical summary of a PDF page batch.
+    ///
+    /// Summarization Rules:
+    /// - Targets 1 paragraph for single pages, or 2 paragraphs for merged two-page batches.
+    /// - Weights extracted content heavily toward the user's specific query.
+    /// - Strictly preserves critical domain facts: mathematical equations, quantitative measurements, and dates.
+    /// - Automatically short-circuits with an empty string if the batch content is blank or whitespace-only.
+    /// - Gracefully falls back to the raw batch content on unexpected inference failure.
+    /// - Returns an empty string early when the operation is cancelled (`CancellationError`).
+    ///
+    /// - Parameters:
+    ///   - batch: The `PDFPageBatch` containing 1 or 2 pages and combined text.
+    ///   - query: The user's prompt or question guiding relevance weighting.
+    /// - Returns: A concise, technical summary paragraph or the original content fallback.
+    private func summarizePDFBatch(
+        batch: PDFPageBatch,
+        query: String
+    ) async -> String {
+        let trimmedCombined = batch.combinedContent.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCombined.isEmpty else { return "" }
+
+        let promptParagraphs = batch.isMerged ? "two paragraphs" : "one paragraph"
+        let targetNoun = batch.isMerged ? "pages below" : "page below"
+        let headerNoun = batch.isMerged ? "Pages content:" : "Page content:"
+
+        let prompt = """
+The user query is: \(query)
+Summarize in \(promptParagraphs) the content of the \(targetNoun), and preserve important numbers, dates, equations. Put more weight to content relevant to the user query.
+\(headerNoun)
+\(batch.combinedContent)
+"""
+
+        let session = DynamicSessionCoordinator.shared.acquireSession(
+            mode: .webPageSummary,
+            instructions: "You are a precise technical summarizer. Summarize in \(promptParagraphs), preserving important numbers, dates, and equations.",
+            temperature: 0.3,
+            maxResponseTokens: batch.isMerged ? 500 : 300,
+            reasoningLevelOverride: .light
+        )
+
+        let options = GenerationOptions(
+            temperature: 0.3,
+            maximumResponseTokens: batch.isMerged ? 500 : 300
+        )
+
+        do {
+            let response = try await session.respond(to: prompt, options: options)
+            let output = String(describing: response.content).trimmingCharacters(in: .whitespacesAndNewlines)
+            return output.isEmpty ? batch.combinedContent : output
+        } catch is CancellationError {
+            return ""
+        } catch {
+            return batch.combinedContent
+        }
     }
 
     /// Hierarchical PDF retrieval policy:
@@ -1157,7 +1443,7 @@ final class ChatService: ObservableObject {
     /// any mention of documents or context to prevent false refusals.
     /// When `appendToolsAppendix` is true, appends an extra paragraph describing
     /// available tools and when to use them.
-    private func buildInstructions(
+    static func buildChatInstructions(
         for language: ModelLanguage,
         maxOutputCharacters: Int,
         hasContext: Bool = true,
@@ -1178,8 +1464,31 @@ final class ChatService: ObservableObject {
             ]
         ) ?? ""
         guard appendToolsAppendix else { return base }
-        return base + "\n\n" + toolCallingInstructionsAppendix(
+        return base + "\n\n" + ToolKit.instructionsAppendix(
             for: language,
+            tone: .chat,
+            webSearchAvailable: webSearchAvailable,
+            hasCorpus: hasCorpus,
+            useDuckDuckGo: useDuckDuckGo,
+            useWikipedia: useWikipedia
+        )
+    }
+
+    private func buildInstructions(
+        for language: ModelLanguage,
+        maxOutputCharacters: Int,
+        hasContext: Bool = true,
+        appendToolsAppendix: Bool = true,
+        webSearchAvailable: Bool = false,
+        hasCorpus: Bool = true,
+        useDuckDuckGo: Bool = true,
+        useWikipedia: Bool = true
+    ) -> String {
+        Self.buildChatInstructions(
+            for: language,
+            maxOutputCharacters: maxOutputCharacters,
+            hasContext: hasContext,
+            appendToolsAppendix: appendToolsAppendix,
             webSearchAvailable: webSearchAvailable,
             hasCorpus: hasCorpus,
             useDuckDuckGo: useDuckDuckGo,
@@ -1239,6 +1548,94 @@ final class ChatService: ObservableObject {
     /// instructions (and `GenerationOptions.maximumResponseTokens`), never
     /// in the user prompt — putting them here is what leaked
     /// "(Max output: …)" into the rendered answer.
+    /// Represents the most recent question-and-answer exchange between the user and assistant.
+    struct PriorExchange: Equatable, Sendable {
+        let userQuestion: String
+        let assistantAnswer: String?
+    }
+
+    /// Caps the previous assistant response so it provides rich context without exceeding token budgets.
+    nonisolated static func capPriorAssistantAnswer(_ text: String, maxChars: Int = 1600) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxChars else { return trimmed }
+
+        let candidate = String(trimmed.prefix(maxChars))
+        // Prefer breaking at a paragraph or sentence boundary near the cutoff
+        if let lastNewline = candidate.lastIndex(of: "\n"),
+           candidate.distance(from: candidate.startIndex, to: lastNewline) >= maxChars - 300 {
+            return String(candidate[..<lastNewline]).trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+        }
+        if let lastPeriod = candidate.lastIndex(where: { $0 == "." || $0 == "!" || $0 == "?" }),
+           candidate.distance(from: candidate.startIndex, to: lastPeriod) >= maxChars - 200 {
+            let nextIdx = candidate.index(after: lastPeriod)
+            return String(candidate[..<nextIdx]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return candidate.trimmingCharacters(in: .whitespacesAndNewlines) + "…"
+    }
+
+    /// Extracts earlier user questions and the most recent user-assistant exchange from `messages`.
+    private func extractConversationHistory(
+        for currentMessage: String
+    ) -> (earlierQuestions: [String], lastExchange: PriorExchange?) {
+        let priorMessages = messages.dropLast()
+        guard !priorMessages.isEmpty else {
+            return ([], nil)
+        }
+
+        // Find the index of the most recent user message before the current one
+        guard let lastUserIdx = priorMessages.lastIndex(where: { $0.role == .user && $0.content != currentMessage }) else {
+            return ([], nil)
+        }
+
+        let lastUserMsg = priorMessages[lastUserIdx]
+        let userQuestion = lastUserMsg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !userQuestion.isEmpty else {
+            return ([], nil)
+        }
+
+        // Find if there is an assistant answer following that last user message
+        let lastAssistantMsg = priorMessages[(lastUserIdx + 1)...].first(where: {
+            $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        })
+
+        // Prior user questions that occurred before `lastUserIdx`
+        let earlierQuestions = priorMessages[..<lastUserIdx]
+            .filter { $0.role == .user && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .suffix(Self.historyMessageLimit - 1)
+            .map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        let cappedAnswer: String?
+        if let rawAnswer = lastAssistantMsg?.content {
+            let trimmed = rawAnswer.trimmingCharacters(in: .whitespacesAndNewlines)
+            cappedAnswer = trimmed.isEmpty ? nil : Self.capPriorAssistantAnswer(trimmed)
+        } else {
+            cappedAnswer = nil
+        }
+
+        // If there was no assistant answer, treat lastUserMsg as an earlier question instead of a full exchange
+        if cappedAnswer == nil {
+            var combinedEarlier = Array(earlierQuestions)
+            combinedEarlier.append(userQuestion)
+            return (combinedEarlier, nil)
+        }
+
+        let exchange = PriorExchange(
+            userQuestion: userQuestion,
+            assistantAnswer: cappedAnswer
+        )
+
+        return (Array(earlierQuestions), exchange)
+    }
+
+    /// Pure assembly of the tool-calling prompt — separated from `messages`
+    /// state so it can be regression-tested directly. Guarantees the
+    /// properties that broke multi-turn PDF chat: no length/tool scaffolding
+    /// appears (that leaked into rendered answers).
+    ///
+    /// `groundingContext`, when supplied, is the pre-selected document
+    /// context placed BEFORE the current question so the question remains
+    /// the final line of the prompt (the model ends on the thing to answer,
+    /// not on continuable context).
     private func buildToolCallingPrompt(
         for userMessage: String,
         language: ModelLanguage,
@@ -1247,15 +1644,11 @@ final class ChatService: ObservableObject {
         useDuckDuckGo: Bool = true,
         useWikipedia: Bool = true
     ) -> String {
-        // Prior user turns only (exclude the just-appended current message
-        // and every assistant answer).
-        let priorQuestions = messages
-            .filter { $0.role == .user && $0.content != userMessage }
-            .suffix(Self.historyMessageLimit)
-            .map(\.content)
+        let (earlierQuestions, lastExchange) = extractConversationHistory(for: userMessage)
         return Self.assembleToolCallingPrompt(
             currentQuestion: userMessage,
-            priorUserQuestions: Array(priorQuestions),
+            priorUserQuestions: earlierQuestions,
+            lastExchange: lastExchange,
             language: language,
             groundingContext: groundingContext,
             webSearchAvailable: webSearchAvailable,
@@ -1271,10 +1664,7 @@ final class ChatService: ObservableObject {
         language: ModelLanguage,
         maxOutputTokens: Int
     ) -> String {
-        let priorQuestions = messages
-            .filter { $0.role == .user && $0.content != userMessage }
-            .suffix(Self.historyMessageLimit)
-            .map(\.content)
+        let (earlierQuestions, lastExchange) = extractConversationHistory(for: userMessage)
         let totalContextCharacters = TokenBudgeting.maxContextCharacters(
             maxOutputTokens: maxOutputTokens,
             contextUtilizationFactor: 1.0
@@ -1286,27 +1676,18 @@ final class ChatService: ObservableObject {
 
         return Self.assembleToolTranscriptRecoveryPrompt(
             currentQuestion: userMessage,
-            priorUserQuestions: Array(priorQuestions),
+            priorUserQuestions: earlierQuestions,
+            lastExchange: lastExchange,
             language: language,
             groundingContext: compactSelectedContext,
             toolTranscript: compactToolTranscript
         )
     }
 
-    /// Pure assembly of the tool-calling prompt — separated from `messages`
-    /// state so it can be regression-tested directly. Guarantees the
-    /// properties that broke multi-turn PDF chat: no assistant answers are
-    /// replayed (the model can't echo what it isn't shown) and no
-    /// length/tool scaffolding appears (that leaked into rendered answers).
-    ///
-    /// `groundingContext`, when supplied, is the pre-selected document
-    /// context placed BEFORE the current question so the question remains
-    /// the final line of the prompt (the model ends on the thing to answer,
-    /// not on continuable context). It carries no length/format scaffolding
-    /// — only the passage text — so the leak-prevention contract holds.
     nonisolated static func assembleToolCallingPrompt(
         currentQuestion: String,
-        priorUserQuestions: [String],
+        priorUserQuestions: [String] = [],
+        lastExchange: PriorExchange? = nil,
         language: ModelLanguage,
         groundingContext: String = "",
         webSearchAvailable: Bool = false,
@@ -1318,6 +1699,9 @@ final class ChatService: ObservableObject {
 
         let answerImperative: String
         let earlierLabel: String
+        let lastExchangeHeader: String
+        let userPrefix: String
+        let assistantPrefix: String
         let groundingHeader: String
         switch language {
         case .french:
@@ -1335,6 +1719,9 @@ final class ChatService: ObservableObject {
                 answerImperative = "Réponds clairement et directement à la question suivante à partir de tes connaissances. N'utilise les outils disponibles que si un calcul ou la date/heure actuelle est nécessaire :"
             }
             earlierLabel = "Questions précédentes de l'utilisateur :"
+            lastExchangeHeader = "Dernier échange :"
+            userPrefix = "Utilisateur :"
+            assistantPrefix = "Assistant :"
             groundingHeader = "Contexte tiré des documents joints :"
         case .spanish:
             if hasGrounding {
@@ -1351,6 +1738,9 @@ final class ChatService: ObservableObject {
                 answerImperative = "Responde de forma clara y directa a la siguiente pregunta a partir de tus conocimientos. Utiliza las herramientas disponibles solo si se requiere un cálculo o la fecha/hora actual:"
             }
             earlierLabel = "Preguntas anteriores del usuario:"
+            lastExchangeHeader = "Último intercambio:"
+            userPrefix = "Usuario:"
+            assistantPrefix = "Asistente:"
             groundingHeader = "Contexto de los documentos adjuntos:"
         case .english:
             if hasGrounding {
@@ -1367,19 +1757,35 @@ final class ChatService: ObservableObject {
                 answerImperative = "Answer the following question clearly and directly from your knowledge. Use available tools only if a calculation or real-time date/time is required:"
             }
             earlierLabel = "Earlier user questions:"
+            lastExchangeHeader = "Last exchange:"
+            userPrefix = "User:"
+            assistantPrefix = "Assistant:"
             groundingHeader = "Context from the attached documents:"
         }
 
-        // Assemble top-to-bottom: grounding context, then prior questions,
-        // then the imperative + current question. The current question is
-        // always the final line regardless of which optional blocks appear.
+        // Assemble top-to-bottom for U-shaped attention:
+        // 1. Initial instruction + current user question at the start (when grounding is present)
+        // 2. Grounding context (ordered least -> most relevant, with #1 at the end)
+        // 3. Prior user questions (if any exist before the last exchange)
+        // 4. Last exchange (last user question + last model answer)
+        // 5. Answer imperative + repeated current user question at the very end.
         var sections: [String] = []
         if hasGrounding {
+            sections.append("\(answerImperative)\n\(currentQuestion)")
             sections.append("\(groundingHeader)\n\(trimmedGrounding)")
         }
         if !priorUserQuestions.isEmpty {
             let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
             sections.append("\(earlierLabel)\n\(contextBlock)")
+        }
+        if let lastExchange {
+            var exchangeLines: [String] = []
+            exchangeLines.append(lastExchangeHeader)
+            exchangeLines.append("\(userPrefix) \(lastExchange.userQuestion)")
+            if let answer = lastExchange.assistantAnswer, !answer.isEmpty {
+                exchangeLines.append("\(assistantPrefix) \(answer)")
+            }
+            sections.append(exchangeLines.joined(separator: "\n"))
         }
         sections.append("\(answerImperative)\n\(currentQuestion)")
         return sections.joined(separator: "\n\n")
@@ -1387,7 +1793,8 @@ final class ChatService: ObservableObject {
 
     nonisolated static func assembleToolTranscriptRecoveryPrompt(
         currentQuestion: String,
-        priorUserQuestions: [String],
+        priorUserQuestions: [String] = [],
+        lastExchange: PriorExchange? = nil,
         language: ModelLanguage,
         groundingContext: String = "",
         toolTranscript: String
@@ -1398,22 +1805,34 @@ final class ChatService: ObservableObject {
 
         let answerImperative: String
         let earlierLabel: String
+        let lastExchangeHeader: String
+        let userPrefix: String
+        let assistantPrefix: String
         let groundingHeader: String
         let transcriptHeader: String
         switch language {
         case .french:
             answerImperative = "Les appels d'outils précédents ont déjà fourni le contexte utile. N'appelle plus aucun outil. Réponds maintenant clairement et directement à la question suivante en t'appuyant sur les faits utiles obtenus et en complétant avec tes connaissances si nécessaire, sans t'attarder sur les détails secondaires :"
             earlierLabel = "Questions précédentes de l'utilisateur (contexte) :"
+            lastExchangeHeader = "Dernier échange :"
+            userPrefix = "Utilisateur :"
+            assistantPrefix = "Assistant :"
             groundingHeader = "Contexte tiré des documents joints :"
             transcriptHeader = "Résultats d'outils déjà obtenus :"
         case .spanish:
             answerImperative = "Las llamadas previas a herramientas ya aportaron el contexto útil. No llames más herramientas. Responde ahora de forma clara y directa a la siguiente pregunta apoyándote en los datos útiles obtenidos y completando con tus conocimientos si hace falta, sin detenerte en detalles secundarios:"
             earlierLabel = "Preguntas anteriores del usuario (contexto):"
+            lastExchangeHeader = "Último intercambio:"
+            userPrefix = "Usuario:"
+            assistantPrefix = "Asistente:"
             groundingHeader = "Contexto de los documentos adjuntos:"
             transcriptHeader = "Resultados de herramientas ya obtenidos:"
         case .english:
             answerImperative = "The previous tool calls already gathered the useful context. Do not call any more tools. Answer the following question clearly and directly now using the gathered facts and supplementing with your knowledge as needed, without dwelling on secondary details:"
             earlierLabel = "Earlier user questions (context):"
+            lastExchangeHeader = "Last exchange:"
+            userPrefix = "User:"
+            assistantPrefix = "Assistant:"
             groundingHeader = "Context from the attached documents:"
             transcriptHeader = "Tool results already gathered:"
         }
@@ -1429,18 +1848,28 @@ final class ChatService: ObservableObject {
             let contextBlock = priorUserQuestions.map { "- \($0)" }.joined(separator: "\n")
             sections.append("\(earlierLabel)\n\(contextBlock)")
         }
+        if let lastExchange {
+            var exchangeLines: [String] = []
+            exchangeLines.append(lastExchangeHeader)
+            exchangeLines.append("\(userPrefix) \(lastExchange.userQuestion)")
+            if let answer = lastExchange.assistantAnswer, !answer.isEmpty {
+                exchangeLines.append("\(assistantPrefix) \(answer)")
+            }
+            sections.append(exchangeLines.joined(separator: "\n"))
+        }
         sections.append("\(answerImperative)\n\(currentQuestion)")
         return sections.joined(separator: "\n\n")
     }
 
-    nonisolated private static func isContextWindowOverflow(_ error: Error) -> Bool {
-        if let genError = error as? LanguageModelSession.GenerationError {
-            let label = String(describing: genError).lowercased()
-            return label.contains("exceededcontextwindowsize")
-                || label.contains("contextwindow")
+    nonisolated static func isContextWindowOverflow(_ error: Error) -> Bool {
+        if case .contextSizeExceeded = error as? LanguageModelError {
+            return true
         }
+        let label = String(describing: error).lowercased()
         let description = error.localizedDescription.lowercased()
-        return description.contains("context window")
+        return label.contains("exceededcontextwindowsize")
+            || label.contains("contextwindow")
+            || description.contains("context window")
             || description.contains("exceeded model context window size")
     }
 
@@ -1575,17 +2004,43 @@ final class ChatService: ObservableObject {
         pdfAnalysisProgress = [:]
         preAnalyzedContextKey = nil
         preAnalyzedChunks = []
+        preAnalyzedQuery = nil
         preAnalyzedMaxContextTokens = nil
         preAnalyzedMaxOutputTokens = nil
         preAnalyzedMaxDuckDuckGoResults = nil
         preAnalyzedMaxWikipediaResults = nil
         preAnalyzedUseDuckDuckGo = true
         preAnalyzedUseWikipedia = true
+        pdfRawPageCache.removeAll()
 
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAnswer = answer.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedCitations = citations?.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedCitations = (trimmedCitations?.isEmpty ?? true) ? nil : trimmedCitations
+
+        // If current conversation was already seeded with this exact search exchange, update in place
+        if let current = currentConversation,
+           let firstUser = current.messages.first(where: { $0.role == "user" }),
+           firstUser.content == trimmedQuery {
+            if let assistantMsg = current.messages.first(where: { $0.role == "assistant" }) {
+                assistantMsg.content = trimmedAnswer
+                assistantMsg.citations = normalizedCitations
+            } else if !trimmedAnswer.isEmpty {
+                current.messages.append(Message(role: "assistant", content: trimmedAnswer, citations: normalizedCitations))
+            }
+            current.updatedAt = Date()
+            if let modelContext {
+                _ = saveContext(modelContext)
+            }
+            messages = []
+            if !trimmedQuery.isEmpty {
+                messages.append(ChatMessage(role: .user, content: trimmedQuery))
+            }
+            if !trimmedAnswer.isEmpty {
+                messages.append(ChatMessage(role: .assistant, content: trimmedAnswer, citations: normalizedCitations))
+            }
+            return
+        }
 
         messages = []
         if !trimmedQuery.isEmpty {
@@ -1665,6 +2120,11 @@ final class ChatService: ObservableObject {
     /// `sendMessage` so adds/removes that happen between turns reach the
     /// store on the next message.
     private func syncCurrentConversationPDFs(with pdfURLs: [URL]) {
+        // Prune raw page cache for any URLs that were removed from the active context,
+        // even if the conversation is not yet persisted.
+        let activeURLPaths = Set(pdfURLs.map { $0.standardizedFileURL.path })
+        pdfRawPageCache = pdfRawPageCache.filter { activeURLPaths.contains($0.key.standardizedFileURL.path) }
+
         guard let conv = currentConversation else { return }
         var names: [String] = []
         var bookmarks: [Data] = []

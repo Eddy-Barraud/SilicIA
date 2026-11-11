@@ -6,9 +6,10 @@
   "chat.message.regenerate": "Régénérer",
   "chat.context.title": "Sources de contexte",
   "chat.context.addURL": "Ajouter une URL",
-  "chat.context.addPDF": "Ajouter PDF",
+  "chat.context.addPDF": "Ajouter document (PDF, MD, TXT)",
   "chat.context.addImage": "Ajouter une image",
   "chat.context.addAttachment": "Joindre",
+  "chat.context.document.attached": "Document",
   "chat.context.image.attached": "Image jointe",
   "chat.context.image.analyzing": "Analyse de l'image…",
   "chat.context.web": "Web",
@@ -25,6 +26,9 @@
   "chat.settings.searchSources": "Sources de recherche",
   "chat.settings.maxDDG": "Résultats max (DDG)",
   "chat.settings.maxWiki": "Résultats max (Wikipedia)",
+  "chat.settings.wikiSource": "Source Wikipedia",
+  "chat.settings.wikiSource.online": "En ligne",
+  "chat.settings.wikiSource.wikiFast": "Wiki Fast",
   "chat.settings.modelLanguage": "Langue du modèle",
   "chat.settings.offlineMode": "Mode hors-ligne : sources web désactivées."
 }

@@ -2,7 +2,6 @@
 //  SearchResult.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import Foundation
@@ -19,6 +18,9 @@ struct SearchResult: Identifiable, Codable, Equatable {
     /// True when the `NLEmbedding` similarity of `snippet` is below the relevance threshold,
     /// instructing downstream pipelines to skip downloading/scraping full content and assign `0%` used content.
     let isBelowRelevanceThreshold: Bool
+    /// Optional raw page title returned by the `wiki_fast` API (`https://wikifast.trevalim.fr/`),
+    /// used in Reader Mode to request `GET /articles/{page_title}` directly.
+    let wikiFastTitle: String?
 
     /// Creates a search result with title, URL and snippet metadata.
     init(
@@ -28,7 +30,8 @@ struct SearchResult: Identifiable, Codable, Equatable {
         snippet: String,
         retrievedContent: String? = nil,
         snippetSimilarity: Double? = nil,
-        isBelowRelevanceThreshold: Bool = false
+        isBelowRelevanceThreshold: Bool = false,
+        wikiFastTitle: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -37,6 +40,7 @@ struct SearchResult: Identifiable, Codable, Equatable {
         self.retrievedContent = retrievedContent
         self.snippetSimilarity = snippetSimilarity
         self.isBelowRelevanceThreshold = isBelowRelevanceThreshold
+        self.wikiFastTitle = wikiFastTitle
     }
 }
 

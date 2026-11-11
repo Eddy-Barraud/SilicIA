@@ -2,7 +2,6 @@
 //  AppSettings.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import Foundation
@@ -41,15 +40,63 @@ nonisolated enum ModelLanguage: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Source backend used when Wikipedia search is enabled.
+nonisolated enum WikipediaSource: String, CaseIterable, Codable, Sendable {
+    case online = "online"
+    case wikiFast = "wiki_fast"
+}
+
+/// Mutually exclusive source of context for searches and chat.
+nonisolated enum ContextSourceKind: String, CaseIterable, Identifiable, Codable, Sendable {
+    case offline = "Offline"
+    case wiki = "Wiki"
+    case web = "Web"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        rawValue
+    }
+
+    var systemImage: String {
+        switch self {
+        case .offline: return "wifi.slash"
+        case .wiki: return "book.closed"
+        case .web: return "globe"
+        }
+    }
+}
+
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
-    var maxDuckDuckGoResults: Int = 4
-    var maxWikipediaResults: Int = 2
-    var totalTokensBudget: Int = 2500
-    var maxResponseTokens: Int = 500
-    var temperature: Double = 0.7
-    var maxContextTokens: Int = 2000
-    private var _isReaderViewAndSummaryEnabled: Bool = false
+    var maxDuckDuckGoResults: Int = 2 {
+        didSet {
+            let clamped = min(max(maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
+            if maxDuckDuckGoResults != clamped {
+                maxDuckDuckGoResults = clamped
+            }
+        }
+    }
+    var maxWikipediaResults: Int = 2 {
+        didSet {
+            let clamped = min(max(maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)
+            if maxWikipediaResults != clamped {
+                maxWikipediaResults = clamped
+            }
+        }
+    }
+    var totalTokensBudget: Int = TokenBudgeting.OutputProfileKind.standard.implicitTotalTokensBudget
+    var maxResponseTokens: Int = TokenBudgeting.OutputProfileKind.standard.implicitResponseTokens
+    var temperature: Double = 0.7 {
+        didSet {
+            let clamped = min(max(temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
+            if temperature != clamped {
+                temperature = clamped
+            }
+        }
+    }
+    var maxContextTokens: Int = TokenBudgeting.OutputProfileKind.standard.implicitContextTokens
+    private var _isReaderViewAndSummaryEnabled: Bool = true
     var isReaderViewAndSummaryEnabled: Bool {
         get {
             guard FoundationModelAvailability.check().isAvailable else { return false }
@@ -64,9 +111,62 @@ struct AppSettings: Codable, Equatable {
         get { isReaderViewAndSummaryEnabled }
         set { isReaderViewAndSummaryEnabled = newValue }
     }
-    var useDuckDuckGo: Bool = true
-    var useWikipedia: Bool = true
+    var useDuckDuckGo: Bool = false {
+        didSet {
+            if useDuckDuckGo && useWikipedia {
+                useWikipedia = false
+            }
+        }
+    }
+    var useWikipedia: Bool = true {
+        didSet {
+            if useWikipedia && useDuckDuckGo {
+                useDuckDuckGo = false
+            }
+        }
+    }
+    var wikipediaSource: WikipediaSource = .wikiFast
     var language: ModelLanguage = .systemPreferred()
+
+    /// Active context source (`Offline`, `Wiki`, `Web`). Only one source is allowed at a time.
+    var contextSourceKind: ContextSourceKind {
+        get {
+            if useDuckDuckGo { return .web }
+            if useWikipedia { return .wiki }
+            return .offline
+        }
+        set {
+            switch newValue {
+            case .offline:
+                useDuckDuckGo = false
+                useWikipedia = false
+            case .wiki:
+                useDuckDuckGo = false
+                useWikipedia = true
+            case .web:
+                useDuckDuckGo = true
+                useWikipedia = false
+            }
+        }
+    }
+
+    /// Active reasoning / output profile level (`Concise`, `Standard`, `Detailed`).
+    /// Setting this updates `maxResponseTokens`, `maxContextTokens`, and `totalTokensBudget`
+    /// to the level's implicit input/output token budgets.
+    var outputProfileKind: TokenBudgeting.OutputProfileKind {
+        get {
+            TokenBudgeting.outputProfile(forResponseTokens: maxResponseTokens).kind
+        }
+        set {
+            applyOutputProfile(newValue)
+        }
+    }
+
+    mutating func applyOutputProfile(_ kind: TokenBudgeting.OutputProfileKind) {
+        maxResponseTokens = kind.implicitResponseTokens
+        maxContextTokens = kind.implicitContextTokens
+        totalTokensBudget = kind.implicitTotalTokensBudget
+    }
 
     /// Combined per-search result cap exposed for callers that still need a single number
     /// (e.g. results display limit, scraping cap).
@@ -86,6 +186,7 @@ struct AppSettings: Codable, Equatable {
         case isWebSummariesEnabled
         case useDuckDuckGo
         case useWikipedia
+        case wikipediaSource
         case language
     }
 
@@ -138,10 +239,19 @@ struct AppSettings: Codable, Equatable {
         } else {
             isReaderViewAndSummaryEnabled = Self.defaultSettings.isReaderViewAndSummaryEnabled
         }
-        useDuckDuckGo = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
+        let decodedDDG = try container.decodeIfPresent(Bool.self, forKey: .useDuckDuckGo)
             ?? Self.defaultSettings.useDuckDuckGo
-        useWikipedia = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
+        let decodedWiki = try container.decodeIfPresent(Bool.self, forKey: .useWikipedia)
             ?? Self.defaultSettings.useWikipedia
+        if decodedDDG && decodedWiki {
+            useDuckDuckGo = true
+            useWikipedia = false
+        } else {
+            useDuckDuckGo = decodedDDG
+            useWikipedia = decodedWiki
+        }
+        wikipediaSource = try container.decodeIfPresent(WikipediaSource.self, forKey: .wikipediaSource)
+            ?? Self.defaultSettings.wikipediaSource
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
 
@@ -169,6 +279,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(isReaderViewAndSummaryEnabled, forKey: .isWebSummariesEnabled)
         try container.encode(useDuckDuckGo, forKey: .useDuckDuckGo)
         try container.encode(useWikipedia, forKey: .useWikipedia)
+        try container.encode(wikipediaSource, forKey: .wikipediaSource)
         try container.encode(language, forKey: .language)
     }
 
@@ -185,7 +296,7 @@ struct AppSettings: Codable, Equatable {
     }
 
     // Value ranges for validation
-    static let maxDuckDuckGoResultsRange = 4...12
+    static let maxDuckDuckGoResultsRange = 2...12
     static let maxWikipediaResultsRange = 2...12
     /// Combined per-search cap derived from per-source ranges; used by callers that need a
     /// merged limit (e.g. clamping legacy `maxWebResults` style parameters).
@@ -218,6 +329,10 @@ struct AppSettings: Codable, Equatable {
 
     private func normalized() -> AppSettings {
         var copy = self
+        if copy.useDuckDuckGo && copy.useWikipedia {
+            // Only one source of context allowed at a time: default to Web
+            copy.useWikipedia = false
+        }
         copy.totalTokensBudget = min(max(copy.totalTokensBudget, Self.totalTokensBudgetRange.lowerBound), Self.totalTokensBudgetRange.upperBound)
         copy.maxDuckDuckGoResults = min(max(copy.maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
         copy.maxWikipediaResults = min(max(copy.maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)

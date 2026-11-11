@@ -127,7 +127,7 @@ struct ChatView: View {
                 }
             )
         } else if showSettings {
-            chatSettingsPage
+            SharedSettingsView(isPresented: $showSettings, mode: mode)
         } else {
             VStack(spacing: 12) {
                 chatHeaderView
@@ -219,196 +219,30 @@ struct ChatView: View {
         }
     }
 
-    /// Renders top-level chat actions. Icon-only buttons sized for the
-    /// minimum 44pt tap target, with `.help` (macOS hover) and
-    /// `.accessibilityLabel` (VoiceOver) on every entry.
+    /// Shared top bar with context source selector, new message, history, and settings.
     private var chatHeaderView: some View {
-        ZStack {
-            if mode != .pdfTalkme {
-                SourceToggleButtons(settingsStore: settingsStore)
+        SharedTopBarView(
+            settingsStore: settingsStore,
+            showContextSelector: mode != .pdfTalkme,
+            onNew: { startOver() },
+            onHistory: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showHistory = true
+            },
+            onSettings: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showSettings = true
             }
-
-            HStack(spacing: 4) {
-                headerIconButton(
-                    systemImage: "square.and.pencil",
-                    label: L.t("common.new", language: settings.language),
-                    action: { startOver() }
-                )
-
-                Spacer()
-
-                headerIconButton(
-                    systemImage: "clock.arrow.circlepath",
-                    label: L.t("common.history", language: settings.language),
-                    action: { showHistory = true }
-                )
-
-                headerIconButton(
-                    systemImage: "gearshape",
-                    label: L.t("common.settings", language: settings.language),
-                    action: {
-                        #if canImport(UIKit)
-                        dismissKeyboard()
-                        #endif
-                        showSettings = true
-                    }
-                )
-            }
-        }
+        )
         .padding(.bottom, 2)
         .textSelection(.enabled)
     }
 
-    /// Standard icon-only header button: 44pt tap target, secondary tint,
-    /// hover help + VoiceOver label baked in.
-    @ViewBuilder
-    private func headerIconButton(systemImage: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 44, minHeight: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(label)
-        .accessibilityLabel(label)
-    }
 
-    private var chatSettingsPage: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Button(action: { showSettings = false }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "chevron.left")
-                        Text(L.t("common.back", language: settings.language))
-                            .fontWeight(.medium)
-                    }
-                }
-                .buttonStyle(.glass)
-
-                Spacer()
-            }
-            .padding()
-
-            ScrollView {
-                chatSettingsPanel
-                    .padding()
-            }
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-    }
-
-    /// Renders chat-specific tuning controls.
-    private var chatSettingsPanel: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack {
-                Text(L.t("chat.settings.title", language: settings.language))
-                    .font(.headline)
-                    .fontWeight(.semibold)
-                Spacer()
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.temperature", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(String(format: "%.2f", settings.temperature))
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Slider(value: $settingsStore.settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
-            }
-            .disabled(!FoundationModelAvailability.check().isAvailable)
-            .opacity(!FoundationModelAvailability.check().isAvailable ? 0.5 : 1.0)
-
-            // Token Budget (Unified Input/Output Slider)
-            TokenBudgetSliderView(
-                settings: $settingsStore.settings,
-                language: settings.language
-            )
-
-            if mode != .pdfTalkme {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(L.t("chat.settings.searchSources", language: settings.language))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-
-                Toggle(isOn: $settingsStore.settings.useDuckDuckGo) {
-                    Text("DuckDuckGo")
-                        .font(.subheadline)
-                }
-                if settings.useDuckDuckGo {
-                    HStack {
-                        Text(L.t("chat.settings.maxDDG", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxDuckDuckGoResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxDuckDuckGoResults) },
-                        set: { settings.maxDuckDuckGoResults = Int($0) }
-                    ), in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound), step: 1)
-                }
-
-                Toggle(isOn: $settingsStore.settings.useWikipedia) {
-                    Text("Wikipedia")
-                        .font(.subheadline)
-                }
-                if settings.useWikipedia {
-                    HStack {
-                        Text(L.t("chat.settings.maxWiki", language: settings.language))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("\(settings.maxWikipediaResults)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Slider(value: Binding(
-                        get: { Double(settings.maxWikipediaResults) },
-                        set: { settings.maxWikipediaResults = Int($0) }
-                    ), in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound), step: 1)
-                }
-
-                if !settings.useDuckDuckGo && !settings.useWikipedia {
-                    HStack(spacing: 4) {
-                        Image(systemName: "wifi.slash")
-                        Text(L.t("chat.settings.offlineMode", language: settings.language))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(L.t("chat.settings.modelLanguage", language: settings.language))
-                        .font(.subheadline)
-                    Spacer()
-                    Text(settings.language.rawValue)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                }
-                Picker("Language", selection: $settingsStore.settings.language) {
-                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
-                        Text(lang.rawValue).tag(lang)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-        }
-        .padding()
-        .glassCard(cornerRadius: 16)
-    }
 
     /// Invisible marker pinned to the end of the transcript so we can scroll
     /// to the bottom on send / while streaming.
@@ -782,6 +616,19 @@ struct ChatView: View {
                     }
                     Spacer()
                 }
+            case .textFile:
+                if case .textFile(let url) = source.kind {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(url?.lastPathComponent ?? L.t("chat.context.document.attached", language: settings.language))
+                            .lineLimit(1)
+                            .foregroundColor(.secondary)
+                        if let progress = pdfAnalysisProgress(for: url) {
+                            ProgressView(value: progress)
+                                .controlSize(.small)
+                        }
+                    }
+                    Spacer()
+                }
             case .image:
                 if case .image(let url) = source.kind {
                     Text(url?.lastPathComponent ?? L.t("chat.context.image.attached", language: settings.language))
@@ -792,8 +639,11 @@ struct ChatView: View {
             }
             Button {
                 let removed = contextSources.remove(at: index)
-                if case .pdf(let url?) = removed.kind {
+                switch removed.kind {
+                case .pdf(let url?), .textFile(let url?):
                     onPDFRemovedFromContext?(url)
+                default:
+                    break
                 }
                 scheduleContextPreanalysis()
             } label: {
@@ -805,7 +655,7 @@ struct ChatView: View {
         }
         .padding(8)
         .subtleTile(cornerRadius: 10)
-        .onDrop(of: [.pdf, .image, .fileURL], isTargeted: nil) { providers in
+        .onDrop(of: [.pdf, .plainText, .text, .image, .fileURL], isTargeted: nil) { providers in
             handleAttachmentDrop(providers, rowIndex: index)
         }
     }
@@ -835,7 +685,7 @@ struct ChatView: View {
 
         let message = trimmed
         #if DEBUG
-        let selectedPDFs = currentSelectedPDFs()
+        let selectedPDFs = currentSelectedDocuments()
         debugSync("submitMessage sending pdfCount=\(selectedPDFs.count) pdfs=\(selectedPDFs.map(\.lastPathComponent)) imageCount=\(currentSelectedImages().count)")
         #endif
         messageInput = ""
@@ -848,7 +698,7 @@ struct ChatView: View {
             await chatService.sendMessage(
                 message,
                 contextInput: currentContextInputString(),
-                pdfURLs: currentSelectedPDFs(),
+                pdfURLs: currentSelectedDocuments(),
                 imageURLs: currentSelectedImages(),
                 includeWebSearch: effectiveIsWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
@@ -858,7 +708,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                wikipediaSource: settings.wikipediaSource
             )
         }
     }
@@ -876,12 +727,21 @@ struct ChatView: View {
             .joined(separator: "\n")
     }
 
-    /// Returns the persistent file URLs of all PDF context rows.
-    private func currentSelectedPDFs() -> [URL] {
+    /// Returns the persistent file URLs of all PDF and text document context rows.
+    private func currentSelectedDocuments() -> [URL] {
         deduplicatedPDFURLsByBaseName(contextSources.compactMap { source -> URL? in
-            guard case .pdf(let url) = source.kind else { return nil }
-            return url
+            switch source.kind {
+            case .pdf(let url), .textFile(let url):
+                return url
+            default:
+                return nil
+            }
         })
+    }
+
+    /// Returns the persistent file URLs of all PDF context rows (includes text/markdown files for RAG context).
+    private func currentSelectedPDFs() -> [URL] {
+        currentSelectedDocuments()
     }
 
     /// Deduplicates PDFs by normalized base filename while preserving order.
@@ -916,7 +776,7 @@ struct ChatView: View {
             await chatService.regenerateAssistantMessage(
                 id: messageID,
                 contextInput: currentContextInputString(),
-                pdfURLs: currentSelectedPDFs(),
+                pdfURLs: currentSelectedDocuments(),
                 imageURLs: currentSelectedImages(),
                 includeWebSearch: effectiveIsWebSearchEnabled,
                 maxDuckDuckGoResults: settings.maxDuckDuckGoResults,
@@ -926,7 +786,8 @@ struct ChatView: View {
                 maxResponseTokens: settings.maxResponseTokens,
                 maxContextTokens: settings.maxContextTokens,
                 useDuckDuckGo: effectiveUseDuckDuckGo,
-                useWikipedia: effectiveUseWikipedia
+                useWikipedia: effectiveUseWikipedia,
+                wikipediaSource: settings.wikipediaSource
             )
         }
     }
@@ -936,8 +797,13 @@ struct ChatView: View {
         "jpg", "jpeg", "png", "heic", "heif", "gif", "webp", "tiff", "bmp"
     ]
 
-    /// Handles dropped file providers — PDFs and images. Other types are
-    /// silently ignored. Each PDF/image is persisted to its dedicated temp
+    /// Text file extensions accepted by the drag-and-drop / file picker pipeline.
+    private static let textFileExtensions: Set<String> = [
+        "txt", "md", "markdown", "text"
+    ]
+
+    /// Handles dropped file providers — PDFs, text files, and images. Other types are
+    /// silently ignored. Each document/image is persisted to its dedicated temp
     /// store and added to `contextSources`.
     private func handleAttachmentDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
         debugDrop("Received drop with \(providers.count) providers at rowIndex=\(String(describing: rowIndex))")
@@ -946,18 +812,25 @@ struct ChatView: View {
         }
         let acceptedProviders = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.text.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.image.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
         debugDrop("Filtered \(acceptedProviders.count) accepted providers")
         guard !acceptedProviders.isEmpty else {
-            debugDrop("Drop ignored: no provider conforms to public.pdf, public.image, or public.file-url")
+            debugDrop("Drop ignored: no provider conforms to accepted document, image, or file-url types")
             return false
         }
 
         for (index, provider) in acceptedProviders.enumerated() {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
                 loadPDFFromProvider(provider, index: index, rowIndex: rowIndex)
+                continue
+            }
+            if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+                || provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
+                loadTextFromProvider(provider, index: index, rowIndex: rowIndex)
                 continue
             }
             if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
@@ -988,6 +861,27 @@ struct ChatView: View {
         }
     }
 
+    private func loadTextFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
+        let typeIdentifier = provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
+            ? UTType.plainText.identifier
+            : UTType.text.identifier
+        debugDrop("Provider[\(index)] loading file representation for \(typeIdentifier)")
+        provider.loadFileRepresentation(forTypeIdentifier: typeIdentifier) { url, error in
+            if let error {
+                debugDrop("Provider[\(index)] loadText error: \(error.localizedDescription)")
+            }
+            guard let url else {
+                debugDrop("Provider[\(index)] loadText returned nil URL")
+                return
+            }
+            let preferredName = provider.suggestedName
+            guard let persistentURL = persistDroppedTextFile(url, preferredFileName: preferredName) else { return }
+            Task { @MainActor in
+                insertTextFileSource(persistentURL, at: rowIndex)
+            }
+        }
+    }
+
     private func loadImageFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
         debugDrop("Provider[\(index)] loading file representation for public.image")
         provider.loadFileRepresentation(forTypeIdentifier: UTType.image.identifier) { url, error in
@@ -1007,22 +901,12 @@ struct ChatView: View {
     }
 
     private func loadFileURLFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
-        debugDrop("Provider[\(index)] loading item for public.file-url")
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+        debugDrop("Provider[\(index)] loading object of class URL")
+        _ = provider.loadObject(ofClass: URL.self) { url, error in
             if let error {
-                debugDrop("Provider[\(index)] loadItem error: \(error.localizedDescription)")
+                debugDrop("Provider[\(index)] loadObject error: \(error.localizedDescription)")
             }
-            let fileURL: URL?
-            if let data = item as? Data {
-                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-            } else if let url = item as? URL {
-                fileURL = url
-            } else if let nsURL = item as? NSURL {
-                fileURL = nsURL as URL
-            } else {
-                fileURL = nil
-            }
-            guard let fileURL else {
+            guard let fileURL = url else {
                 debugDrop("Provider[\(index)] rejected dropped item; resolvedURL=nil")
                 return
             }
@@ -1031,6 +915,11 @@ struct ChatView: View {
                 guard let persistentURL = persistDroppedPDF(fileURL) else { return }
                 Task { @MainActor in
                     insertPDFSource(persistentURL, at: rowIndex)
+                }
+            } else if Self.textFileExtensions.contains(ext) {
+                guard let persistentURL = persistDroppedTextFile(fileURL) else { return }
+                Task { @MainActor in
+                    insertTextFileSource(persistentURL, at: rowIndex)
                 }
             } else if Self.imageFileExtensions.contains(ext) {
                 guard let persistentURL = persistDroppedImage(fileURL) else { return }
@@ -1054,6 +943,17 @@ struct ChatView: View {
         return persistentURL
     }
 
+    /// Copies dropped text or Markdown file to a stable temporary location so it remains readable for RAG chunking.
+    private func persistDroppedTextFile(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
+        let persistentURL = DroppedTextFileStore.persist(sourceURL, preferredFileName: preferredFileName)
+        if let persistentURL {
+            debugDrop("Copied dropped text file from \(sourceURL.path) to \(persistentURL.path)")
+        } else {
+            debugDrop("Failed to persist dropped text file from \(sourceURL.path)")
+        }
+        return persistentURL
+    }
+
     /// Copies dropped image to a stable temporary location so it remains readable for Vision analysis.
     private func persistDroppedImage(_ sourceURL: URL, preferredFileName: String? = nil) -> URL? {
         let persistentURL = DroppedImageStore.persist(sourceURL, preferredFileName: preferredFileName)
@@ -1073,9 +973,14 @@ struct ChatView: View {
             .filter { !$0.isEmpty }
         let incomingPDFs = deduplicatedPDFURLsByBaseName(
             sharedPDFs
-                .filter { $0.pathExtension.lowercased() == "pdf" }
+                .filter { $0.pathExtension.lowercased() == "pdf" || Self.textFileExtensions.contains($0.pathExtension.lowercased()) }
                 .compactMap { sourceURL in
-                    persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+                    let ext = sourceURL.pathExtension.lowercased()
+                    if Self.textFileExtensions.contains(ext) {
+                        return persistDroppedTextFile(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+                    } else {
+                        return persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+                    }
                 }
         )
         let incomingImages = sharedImages
@@ -1124,7 +1029,14 @@ struct ChatView: View {
         }) {
             contextSources.append(ContextSource(kind: .url(text: u)))
         }
-        for pdf in pdfs { insertPDFSource(pdf, at: nil) }
+        for doc in pdfs {
+            let ext = doc.pathExtension.lowercased()
+            if Self.textFileExtensions.contains(ext) {
+                insertTextFileSource(doc, at: nil)
+            } else {
+                insertPDFSource(doc, at: nil)
+            }
+        }
         for image in images where !contextSources.contains(where: {
             if case .image(let existing) = $0.kind { return existing == image } else { return false }
         }) {
@@ -1140,7 +1052,14 @@ struct ChatView: View {
         let uniquePDFs = deduplicatedPDFURLsByBaseName(pdfs)
         debugSync("startNewConversationFromSharedInputs urls=\(urls.count) pdfs=\(uniquePDFs.map(\.lastPathComponent)) images=\(images.count)")
         var newSources: [ContextSource] = urls.map { ContextSource(kind: .url(text: $0)) }
-        newSources.append(contentsOf: uniquePDFs.map { ContextSource(kind: .pdf(url: $0)) })
+        for doc in uniquePDFs {
+            let ext = doc.pathExtension.lowercased()
+            if Self.textFileExtensions.contains(ext) {
+                newSources.append(ContextSource(kind: .textFile(url: doc)))
+            } else {
+                newSources.append(ContextSource(kind: .pdf(url: doc)))
+            }
+        }
         newSources.append(contentsOf: images.map { ContextSource(kind: .image(url: $0)) })
         contextSources = newSources
     }
@@ -1174,8 +1093,50 @@ struct ChatView: View {
             debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
         }
         onPDFAddedToContext?(url)
-        debugSync("insertPDFSource accepted key=\(incomingKey) rowIndex=\(String(describing: rowIndex)) contextPDFCount=\(currentSelectedPDFs().count)")
+        debugSync("insertPDFSource accepted key=\(incomingKey) rowIndex=\(String(describing: rowIndex)) contextPDFCount=\(currentSelectedDocuments().count)")
         scheduleContextPreanalysis()
+    }
+
+    /// Inserts a text or Markdown source while keeping URL placeholder behavior.
+    private func insertTextFileSource(_ url: URL, at rowIndex: Int?) {
+        guard Self.textFileExtensions.contains(url.pathExtension.lowercased()) else {
+            debugDrop("Ignoring non-text URL during insert: \(url.path)")
+            return
+        }
+        let incomingKey = ChatService.pdfBaseFilename(url.lastPathComponent)
+        guard !contextSources.contains(where: { source in
+            if case .textFile(let existingURL) = source.kind, let existingURL {
+                return ChatService.pdfBaseFilename(existingURL.lastPathComponent) == incomingKey
+            }
+            return false
+        }) else {
+            debugDrop("Ignoring duplicate text context URL: \(url.path)")
+            return
+        }
+
+        if let rowIndex, contextSources.indices.contains(rowIndex) {
+            contextSources[rowIndex].kind = .textFile(url: url)
+            debugDrop("Inserted dropped text file into existing context row \(rowIndex): \(url.lastPathComponent)")
+        } else {
+            contextSources.append(ContextSource(kind: .textFile(url: url)))
+            debugDrop("Appended dropped text file as new context row: \(url.lastPathComponent)")
+        }
+        onPDFAddedToContext?(url)
+        scheduleContextPreanalysis()
+    }
+
+    /// Appends multiple documents (PDFs, Markdown, text files).
+    private func appendDocumentSources(_ urls: [URL]) {
+        for url in urls {
+            let ext = url.pathExtension.lowercased()
+            if Self.textFileExtensions.contains(ext) {
+                let persisted = persistDroppedTextFile(url, preferredFileName: url.lastPathComponent) ?? url
+                insertTextFileSource(persisted, at: nil)
+            } else {
+                let persisted = persistDroppedPDF(url, preferredFileName: url.lastPathComponent) ?? url
+                insertPDFSource(persisted, at: nil)
+            }
+        }
     }
 
     /// Inserts an image source while keeping URL placeholder behavior.
@@ -1206,7 +1167,7 @@ struct ChatView: View {
 
     private func debugDrop(_ message: @autoclosure () -> String) {
         #if DEBUG
-        print("[ChatView][PDFDrop] \(message())")
+        print("[ChatView][AttachmentDrop] \(message())")
         #endif
     }
 
@@ -1307,7 +1268,7 @@ struct ChatView: View {
             if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
-            } else if UIApplication.shared.canOpenURL(url) {
+            } else {
                 UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }
@@ -1328,10 +1289,7 @@ struct ChatView: View {
 
     /// Appends multiple PDFs.
     private func appendPDFSources(_ urls: [URL]) {
-        for url in urls {
-            let persisted = persistDroppedPDF(url, preferredFileName: url.lastPathComponent) ?? url
-            insertPDFSource(persisted, at: nil)
-        }
+        appendDocumentSources(urls)
     }
 
     /// Appends multiple images.
@@ -1358,7 +1316,7 @@ struct ChatView: View {
     private func scheduleContextPreanalysis() {
         preanalysisTask?.cancel()
         let contextInput = currentContextInputString()
-        let selectedPDFs = currentSelectedPDFs()
+        let selectedPDFs = currentSelectedDocuments()
         let selectedImages = currentSelectedImages()
         preanalysisTask = Task {
             try? await Task.sleep(for: .milliseconds(250))
@@ -1388,6 +1346,7 @@ struct ChatView: View {
         sharedImages.removeAll()
         chatService.resetConversation()
         _ = DroppedPDFStore.clearAll()
+        _ = DroppedTextFileStore.clearAll()
         _ = DroppedImageStore.clearAll()
     }
 
@@ -1402,6 +1361,7 @@ private struct ContextSource: Identifiable {
     enum Kind {
         case url(text: String)
         case pdf(url: URL?)
+        case textFile(url: URL?)
         case image(url: URL?)
     }
 
@@ -1412,6 +1372,7 @@ private struct ContextSource: Identifiable {
         switch kind {
         case .url: return "link"
         case .pdf: return "doc.richtext"
+        case .textFile: return "doc.text"
         case .image: return "photo"
         }
     }
@@ -1420,6 +1381,7 @@ private struct ContextSource: Identifiable {
         switch kind {
         case .url: return .blue
         case .pdf: return .red
+        case .textFile: return .teal
         case .image: return .orange
         }
     }

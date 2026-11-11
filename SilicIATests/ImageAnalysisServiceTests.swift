@@ -59,14 +59,30 @@ final class ImageAnalysisServiceTests: XCTestCase {
         )
     }
 
-    func testFixturePDFContainsExpectedTwoColumnSentences() {
+    func testFixturePDFExtractionAndTwoColumnAlignment() async {
         let pdfURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("2025.PFAS.CMC.page.3.pdf")
 
         guard let document = PDFDocument(url: pdfURL),
-              let page = document.page(at: 0),
-              let cgImage = renderedTestCGImage(for: page),
+              let page = document.page(at: 0) else {
+            return XCTFail("Failed to open fixture PDF at \(pdfURL.path)")
+        }
+
+        // Full extraction pipeline preserving page alignment
+        let analyses = await ImageAnalysisService.extractPDFPageAnalyses(from: pdfURL)
+        XCTAssertEqual(
+            analyses.count,
+            document.pageCount,
+            "Page analyses should preserve one slot per PDF page so downstream page numbering stays correct"
+        )
+        XCTAssertTrue(
+            analyses.contains { !$0.isEmpty },
+            "Expected at least one fixture page to yield Vision content"
+        )
+
+        // Single-page Vision OCR two-column ordering verification
+        guard let cgImage = renderedTestCGImage(for: page),
               let analysis = ImageAnalysisService.analyzePDFPage(cgImage: cgImage) else {
             return XCTFail("Failed to analyze fixture PDF at \(pdfURL.path)")
         }
@@ -83,28 +99,6 @@ final class ImageAnalysisServiceTests: XCTestCase {
                 normalizeForComparison("In the absence of alternative information for initializing the optimization of ion−water interactions, Nieto-Draghi et al.43 proposed that partial osmotic pressures could be used as initial values.")
             ),
             "Expected the ion-water sentence to survive two-column OCR ordering.\nOCR output:\n\(analysis.recognizedText)"
-        )
-    }
-
-    func testExtractPDFPageAnalysesPreservesPageAlignment() async {
-        let pdfURL = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("2025.PFAS.CMC.pdf")
-
-        guard let document = PDFDocument(url: pdfURL) else {
-            return XCTFail("Failed to open fixture PDF at \(pdfURL.path)")
-        }
-
-        let analyses = await ImageAnalysisService.extractPDFPageAnalyses(from: pdfURL)
-
-        XCTAssertEqual(
-            analyses.count,
-            document.pageCount,
-            "Page analyses should preserve one slot per PDF page so downstream page numbering stays correct"
-        )
-        XCTAssertTrue(
-            analyses.contains { !$0.isEmpty },
-            "Expected at least one fixture page to yield Vision content"
         )
     }
 
