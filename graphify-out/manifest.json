@@ -480,15 +480,15 @@
     "semantic_hash": ""
   },
   "SilicIA/Views/SharedTopBarView.swift": {
-    "mtime": 1794414611.8032634,
-    "seen": 1794414621.7046232,
-    "ast_hash": "fd1aad354b6aae4e828961d96d70874e",
+    "mtime": 1794416399.4117262,
+    "seen": 1794418650.074938,
+    "ast_hash": "cd3fdf7a605d9cab2044f5d48918b3b1",
     "semantic_hash": ""
   },
   "SilicIA/Views/SourceToggleButtons.swift": {
-    "mtime": 1794414611.803485,
-    "seen": 1794414621.7046242,
-    "ast_hash": "2dce9dc52497aaafe949c225eedd70d1",
+    "mtime": 1794416386.690929,
+    "seen": 1794418650.0749388,
+    "ast_hash": "88548366dc1954a7855fc3b5aa29bf9d",
     "semantic_hash": ""
   },
   "SilicIA/Views/StreamingLaTeXText.swift": {

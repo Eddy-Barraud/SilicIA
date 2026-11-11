@@ -129,24 +129,27 @@ struct ChatView: View {
         } else if showSettings {
             SharedSettingsView(isPresented: $showSettings, mode: mode)
         } else {
-            VStack(spacing: 12) {
+            VStack(spacing: 0) {
                 chatHeaderView
 
-                messagesView
+                VStack(spacing: 12) {
+                    messagesView
 
-                if let errorMessage = chatService.errorMessage {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let errorMessage = chatService.errorMessage {
+                        Text(errorMessage)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+
+                    // Composer is a single unified container: attached
+                    // sources at the top, multi-line input in the middle,
+                    // [+ menu] and [send] in the bottom action row.
+                    composerView
                 }
-
-                // Composer is a single unified container: attached
-                // sources at the top, multi-line input in the middle,
-                // [+ menu] and [send] in the bottom action row.
-                composerView
+                .padding([.horizontal, .bottom])
             }
-            .padding()
+            .background(Color.platformWindowBackground)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .contentShape(Rectangle())
             // Whole-surface drop zone — catches anything not landing on a
@@ -238,8 +241,6 @@ struct ChatView: View {
                 showSettings = true
             }
         )
-        .padding(.bottom, 2)
-        .textSelection(.enabled)
     }
 
 
