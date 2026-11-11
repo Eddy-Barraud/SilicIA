@@ -2,7 +2,6 @@
 //  ShareViewController.swift
 //  SilicIAShareExtension
 //
-//  Created by Copilot on 18/04/2026.
 //
 
 import Foundation
