@@ -11,7 +11,7 @@ import NaturalLanguage
 import Accelerate
 
 /// Represents a retrieval chunk and its source metadata.
-struct RAGChunk: Identifiable {
+nonisolated struct RAGChunk: Identifiable, Sendable {
     let id = UUID()
     let source: String
     let text: String
@@ -421,7 +421,7 @@ struct RAGChunker {
 
     /// Determines if a line or chunk ends with an introductory cue that should be kept
     /// with the immediately following formula, table, or definition.
-    static func endsWithIntroductoryCue(_ text: String) -> Bool {
+    nonisolated static func endsWithIntroductoryCue(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.hasSuffix(":") || trimmed.hasSuffix(",") || trimmed.hasSuffix(";") || trimmed.hasSuffix("=") {
             return true
@@ -438,7 +438,7 @@ struct RAGChunker {
     ///    and section are merged up to ~850 chars so bullet lists and related facts stay unified without crossing `##` boundaries.
     /// 3. Lead-section & trailing-stub absorption: short paragraphs (< 240 chars) in the lead section (`sectionIndex == 0`)
     ///    that cannot merge forward are absorbed into the lead chunk if space permits, or merged backward into the same section.
-    static func mergeShortConsecutiveChunks(
+    nonisolated static func mergeShortConsecutiveChunks(
         _ chunks: [RAGChunk],
         minimumCharacters: Int = 60,
         targetCharacters: Int = 450,

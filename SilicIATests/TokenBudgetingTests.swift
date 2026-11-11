@@ -407,7 +407,7 @@ final class TokenBudgetingTests: XCTestCase {
     }
 
     func testSearchSourcesToolQueryGenerationForConciseAndStandard() async {
-        guard await FoundationModelAvailability.check().isAvailable else { return }
+        guard FoundationModelAvailability.check().isAvailable else { return }
 
         // Concise mode (1+1 queries)
         let conciseResults = await SearchSourcesTool.generateQueries(

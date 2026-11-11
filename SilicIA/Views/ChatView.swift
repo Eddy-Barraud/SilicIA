@@ -901,22 +901,12 @@ struct ChatView: View {
     }
 
     private func loadFileURLFromProvider(_ provider: NSItemProvider, index: Int, rowIndex: Int?) {
-        debugDrop("Provider[\(index)] loading item for public.file-url")
-        provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+        debugDrop("Provider[\(index)] loading object of class URL")
+        _ = provider.loadObject(ofClass: URL.self) { url, error in
             if let error {
-                debugDrop("Provider[\(index)] loadItem error: \(error.localizedDescription)")
+                debugDrop("Provider[\(index)] loadObject error: \(error.localizedDescription)")
             }
-            let fileURL: URL?
-            if let data = item as? Data {
-                fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-            } else if let url = item as? URL {
-                fileURL = url
-            } else if let nsURL = item as? NSURL {
-                fileURL = nsURL as URL
-            } else {
-                fileURL = nil
-            }
-            guard let fileURL else {
+            guard let fileURL = url else {
                 debugDrop("Provider[\(index)] rejected dropped item; resolvedURL=nil")
                 return
             }
@@ -1278,7 +1268,7 @@ struct ChatView: View {
             if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
                let rootViewController = windowScene.windows.first?.rootViewController {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
-            } else if UIApplication.shared.canOpenURL(url) {
+            } else {
                 UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }

@@ -7,15 +7,27 @@
 
 import SwiftUI
 
+/// Unified settings view shared between `SearchView` and `ChatView`.
+///
+/// Provides configurable controls for:
+/// - Temperature (randomness / creativity of model output)
+/// - Token budget via unified `TokenBudgetSliderView`
+/// - Mutually exclusive context source selection (`Offline`, `Wiki`, `Web`)
+/// - DuckDuckGo / Wikipedia per-search result count clamping
+/// - Wikipedia backend source (online vs. `wiki_fast`)
+/// - Reader view & web summaries toggle (dependent on Apple Intelligence availability)
+/// - Target model response language
 struct SharedSettingsView: View {
+    /// Binding controlling the presentation state of this modal settings sheet/overlay.
     @Binding var isPresented: Bool
+
+    /// Mode of the presenting chat/search view; hides context source selection in `.pdfTalkme` mode.
     var mode: ChatViewMode = .full
 
     @Bindable private var settingsStore = AppSettingsStore.shared
 
     private var settings: AppSettings {
-        get { settingsStore.settings }
-        nonmutating set { settingsStore.settings = newValue }
+        settingsStore.settings
     }
 
     var body: some View {
@@ -104,8 +116,11 @@ struct SharedSettingsView: View {
                         }
                         Slider(
                             value: Binding(
-                                get: { Double(settings.maxDuckDuckGoResults) },
-                                set: { settings.maxDuckDuckGoResults = Int($0) }
+                                get: { Double(settingsStore.settings.maxDuckDuckGoResults) },
+                                set: {
+                                    let clamped = min(max(Int($0), AppSettings.maxDuckDuckGoResultsRange.lowerBound), AppSettings.maxDuckDuckGoResultsRange.upperBound)
+                                    settingsStore.settings.maxDuckDuckGoResults = clamped
+                                }
                             ),
                             in: Double(AppSettings.maxDuckDuckGoResultsRange.lowerBound)...Double(AppSettings.maxDuckDuckGoResultsRange.upperBound),
                             step: 1
@@ -139,8 +154,11 @@ struct SharedSettingsView: View {
                         }
                         Slider(
                             value: Binding(
-                                get: { Double(settings.maxWikipediaResults) },
-                                set: { settings.maxWikipediaResults = Int($0) }
+                                get: { Double(settingsStore.settings.maxWikipediaResults) },
+                                set: {
+                                    let clamped = min(max(Int($0), AppSettings.maxWikipediaResultsRange.lowerBound), AppSettings.maxWikipediaResultsRange.upperBound)
+                                    settingsStore.settings.maxWikipediaResults = clamped
+                                }
                             ),
                             in: Double(AppSettings.maxWikipediaResultsRange.lowerBound)...Double(AppSettings.maxWikipediaResultsRange.upperBound),
                             step: 1

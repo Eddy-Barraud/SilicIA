@@ -1865,13 +1865,11 @@ Summarize in \(promptParagraphs) the content of the \(targetNoun), and preserve 
         if case .contextSizeExceeded = error as? LanguageModelError {
             return true
         }
-        if let genError = error as? LanguageModelSession.GenerationError {
-            let label = String(describing: genError).lowercased()
-            return label.contains("exceededcontextwindowsize")
-                || label.contains("contextwindow")
-        }
+        let label = String(describing: error).lowercased()
         let description = error.localizedDescription.lowercased()
-        return description.contains("context window")
+        return label.contains("exceededcontextwindowsize")
+            || label.contains("contextwindow")
+            || description.contains("context window")
             || description.contains("exceeded model context window size")
     }
 

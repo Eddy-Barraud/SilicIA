@@ -70,11 +70,32 @@ nonisolated enum ContextSourceKind: String, CaseIterable, Identifiable, Codable,
 
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
-    var maxDuckDuckGoResults: Int = 4
-    var maxWikipediaResults: Int = 2
+    var maxDuckDuckGoResults: Int = 4 {
+        didSet {
+            let clamped = min(max(maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
+            if maxDuckDuckGoResults != clamped {
+                maxDuckDuckGoResults = clamped
+            }
+        }
+    }
+    var maxWikipediaResults: Int = 2 {
+        didSet {
+            let clamped = min(max(maxWikipediaResults, Self.maxWikipediaResultsRange.lowerBound), Self.maxWikipediaResultsRange.upperBound)
+            if maxWikipediaResults != clamped {
+                maxWikipediaResults = clamped
+            }
+        }
+    }
     var totalTokensBudget: Int = 2500
     var maxResponseTokens: Int = 500
-    var temperature: Double = 0.7
+    var temperature: Double = 0.7 {
+        didSet {
+            let clamped = min(max(temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
+            if temperature != clamped {
+                temperature = clamped
+            }
+        }
+    }
     var maxContextTokens: Int = 2000
     private var _isReaderViewAndSummaryEnabled: Bool = false
     var isReaderViewAndSummaryEnabled: Bool {

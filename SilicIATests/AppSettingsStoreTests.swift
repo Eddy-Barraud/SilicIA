@@ -38,20 +38,25 @@ final class AppSettingsStoreTests: XCTestCase {
         try await super.tearDown()
     }
 
+    private final class SendableBox<T>: @unchecked Sendable {
+        nonisolated(unsafe) var value: T
+        init(_ value: T) { self.value = value }
+    }
+
     func testSingletonAndObservation() {
         XCTAssertTrue(AppSettingsStore.shared === AppSettingsStore.shared)
 
-        var fired = false
+        let fired = SendableBox(false)
         withObservationTracking {
             _ = AppSettingsStore.shared.settings
         } onChange: {
-            fired = true
+            fired.value = true
         }
 
         AppSettingsStore.shared.settings.language =
             AppSettingsStore.shared.settings.language == .french ? .english : .french
 
-        XCTAssertTrue(fired, "mutating settings should notify observation trackers")
+        XCTAssertTrue(fired.value, "mutating settings should notify observation trackers")
     }
 
     func testMutationsPersistAutomatically() {
@@ -185,5 +190,55 @@ final class AppSettingsStoreTests: XCTestCase {
         let updatedConv = afterSummarySearches.first { $0.title == newSearchQuery || $0.messages.first?.content == newSearchQuery }
         XCTAssertEqual(updatedConv?.messages.count, 2)
         XCTAssertEqual(updatedConv?.messages.last?.content, "SwiftData uses SchemaMigrationPlan and VersionedSchema.")
+    }
+
+    func testLegacyDecodingWithBothSourcesEnabledEnforcesExclusivity() throws {
+        let json = """
+        {
+            "useDuckDuckGo": true,
+            "useWikipedia": true,
+            "maxDuckDuckGoResults": 4,
+            "maxWikipediaResults": 2,
+            "totalTokensBudget": 2500,
+            "maxResponseTokens": 500,
+            "temperature": 0.7,
+            "maxContextTokens": 2000
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
+        XCTAssertTrue(decoded.useDuckDuckGo)
+        XCTAssertFalse(decoded.useWikipedia)
+        XCTAssertEqual(decoded.contextSourceKind, .web)
+    }
+
+    func testDecodingOfflineSourceKind() throws {
+        let json = """
+        {
+            "useDuckDuckGo": false,
+            "useWikipedia": false
+        }
+        """.data(using: .utf8)!
+
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
+        XCTAssertFalse(decoded.useDuckDuckGo)
+        XCTAssertFalse(decoded.useWikipedia)
+        XCTAssertEqual(decoded.contextSourceKind, .offline)
+    }
+
+    func testClampingBoundsForResults() {
+        var settings = AppSettings()
+        settings.maxDuckDuckGoResults = 100
+        settings.maxWikipediaResults = -5
+        settings.temperature = 5.0
+        XCTAssertEqual(settings.maxDuckDuckGoResults, AppSettings.maxDuckDuckGoResultsRange.upperBound, "In-memory bounds clamping must enforce maxDuckDuckGoResults")
+        XCTAssertEqual(settings.maxWikipediaResults, AppSettings.maxWikipediaResultsRange.lowerBound, "In-memory bounds clamping must enforce maxWikipediaResults")
+        XCTAssertEqual(settings.temperature, AppSettings.temperatureRange.upperBound, "In-memory bounds clamping must enforce temperature")
+        settings.save()
+
+        let reloaded = AppSettings.load()
+        XCTAssertEqual(reloaded.maxDuckDuckGoResults, AppSettings.maxDuckDuckGoResultsRange.upperBound)
+        XCTAssertEqual(reloaded.maxWikipediaResults, AppSettings.maxWikipediaResultsRange.lowerBound)
+        XCTAssertEqual(reloaded.temperature, AppSettings.temperatureRange.upperBound)
     }
 }

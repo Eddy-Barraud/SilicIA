@@ -1000,9 +1000,7 @@ struct SearchView: View {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
             } else {
                 // Fallback to UIApplication.open if SFSafariViewController presentation fails
-                if UIApplication.shared.canOpenURL(url) {
-                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                }
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }
     }
@@ -1568,9 +1566,7 @@ struct SearchResultCard: View {
                 rootViewController.present(safariViewController, animated: true, completion: nil)
             } else {
                 // Fallback to UIApplication.open if SFSafariViewController presentation fails
-                if UIApplication.shared.canOpenURL(url) {
-                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
-                }
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
             }
         }
     }

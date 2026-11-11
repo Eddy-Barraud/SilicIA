@@ -102,8 +102,7 @@ final class ShareViewController: PlatformShareViewController {
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
-           let item = await loadItem(from: provider, typeIdentifier: UTType.fileURL.identifier),
-           let sourceURL = extractURL(from: item),
+           let sourceURL = await loadURL(from: provider),
            sourceURL.pathExtension.lowercased() == "pdf" {
             return persistPDF(at: sourceURL, preferredFileName: provider.suggestedName ?? sourceURL.lastPathComponent)
         }
@@ -158,8 +157,7 @@ final class ShareViewController: PlatformShareViewController {
         }
 
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier),
-           let item = await loadItem(from: provider, typeIdentifier: UTType.fileURL.identifier),
-           let sourceURL = extractURL(from: item),
+           let sourceURL = await loadURL(from: provider),
            Self.imageFileExtensions.contains(sourceURL.pathExtension.lowercased()) {
             return persistImage(at: sourceURL, preferredFileName: provider.suggestedName ?? sourceURL.lastPathComponent)
         }
@@ -367,34 +365,25 @@ final class ShareViewController: PlatformShareViewController {
         return "\(fallback).\(defaultExtension)"
     }
 
-    private func loadItem(from provider: NSItemProvider, typeIdentifier: String) async -> Any? {
+    /// Asynchronously extracts a `URL` object from an `NSItemProvider` using `loadObject(ofClass: URL.self)`.
+    ///
+    /// - Parameter provider: The input provider from the sharing context.
+    /// - Returns: The resolved `URL`, or `nil` if decoding fails.
+    private func loadURL(from provider: NSItemProvider) async -> URL? {
         await withCheckedContinuation { continuation in
-            provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { item, _ in
-                continuation.resume(returning: item)
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                continuation.resume(returning: url)
             }
         }
     }
 
-    private func extractURL(from item: Any) -> URL? {
-        if let url = item as? URL {
-            return url
-        }
-
-        if let nsURL = item as? NSURL {
-            return nsURL as URL
-        }
-
-        if let data = item as? Data {
-            return NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
-        }
-
-        if let string = item as? String {
-            return URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
-
-        return nil
-    }
-
+    /// Constructs the custom deep-link `URL` (`SilicIA://share?...`) used to open
+    /// the main SilicIA application with references to persisted inbox items.
+    ///
+    /// - Parameters:
+    ///   - sharedPDFFileNames: Persisted PDF filenames inside the app group container.
+    ///   - sharedImageFileNames: Persisted image filenames inside the app group container.
+    /// - Returns: Complete URL ready to trigger `openContainingApp(with:)`.
     private func buildAppURL(
         sharedPDFFileNames: [String],
         sharedImageFileNames: [String]

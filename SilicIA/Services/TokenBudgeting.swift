@@ -317,6 +317,7 @@ nonisolated enum TokenBudgeting {
         case .light: return 200
         case .moderate: return 400
         case .deep: return 800
+        case .custom: return 400
         @unknown default: return 400
         }
     }

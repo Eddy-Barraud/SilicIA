@@ -14,7 +14,7 @@ import PDFKit
 /// Result of analyzing a single image with Apple Vision: OCR text and
 /// classification labels with confidence scores. Either field may be empty;
 /// callers should treat a fully empty result as "nothing useful was extracted".
-struct ImageAnalysisResult {
+nonisolated struct ImageAnalysisResult: Sendable {
     let recognizedText: String
     let labels: [(label: String, confidence: Float)]
 
@@ -23,7 +23,7 @@ struct ImageAnalysisResult {
     }
 }
 
-struct LayoutObservation {
+nonisolated struct LayoutObservation: Sendable {
     let text: String
     let boundingBox: CGRect
 }
@@ -35,7 +35,7 @@ struct LayoutObservation {
 /// - `VNClassifyImageRequest` for high-level content labels (cat, beach, …)
 ///
 /// Everything happens locally on the device; no network calls.
-enum ImageAnalysisService {
+nonisolated enum ImageAnalysisService {
     /// OCR recognition languages. Used by image OCR, the PDF page analyzer,
     /// and the layout-aware OCR path.
     static let defaultRecognitionLanguages: [String] = ["fr-FR", "en-US"]
@@ -66,7 +66,7 @@ enum ImageAnalysisService {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
             ), let dummyCG = context.makeImage() else { return }
 
-            let textRequest = await makeTextRequest(languages: defaultRecognitionLanguages)
+            let textRequest = makeTextRequest(languages: defaultRecognitionLanguages)
             let classifyRequest = VNClassifyImageRequest()
             let handler = VNImageRequestHandler(cgImage: dummyCG, options: [:])
             try? handler.perform([textRequest, classifyRequest])
@@ -96,8 +96,21 @@ enum ImageAnalysisService {
             #if DEBUG
             print("[ImageAnalysisService] Vision request failed: \(error.localizedDescription)")
             #endif
-            // Return whatever partial result is available; both requests may
-            // still have populated their `results` even if one failed.
+            // If the combined accurate pass failed (e.g. transient ANE resource exhaustion),
+            // retry text recognition with .fast fallback so image text extraction is preserved.
+            if (textRequest.results ?? []).isEmpty {
+                let fallbackRequest = VNRecognizeTextRequest()
+                fallbackRequest.recognitionLevel = .fast
+                fallbackRequest.usesLanguageCorrection = false
+                fallbackRequest.recognitionLanguages = defaultRecognitionLanguages
+                try? handler.perform([fallbackRequest])
+                let fallbackText = extractRecognizedText(from: fallbackRequest)
+                let fallbackLabels = extractTopLabels(from: classifyRequest)
+                let fallbackResult = ImageAnalysisResult(recognizedText: fallbackText, labels: fallbackLabels)
+                if !fallbackResult.isEmpty {
+                    return fallbackResult
+                }
+            }
         }
 
         let recognizedText = extractRecognizedText(from: textRequest)
@@ -132,7 +145,13 @@ enum ImageAnalysisService {
             #if DEBUG
             print("[ImageAnalysisService] OCR-with-layout request failed: \(error.localizedDescription)")
             #endif
-            return nil
+            let fallbackRequest = VNRecognizeTextRequest()
+            fallbackRequest.recognitionLevel = .fast
+            fallbackRequest.usesLanguageCorrection = false
+            fallbackRequest.recognitionLanguages = languages
+            guard (try? handler.perform([fallbackRequest])) != nil else { return nil }
+            let text = reconstructLayout(from: fallbackRequest)
+            return text.isEmpty ? nil : text
         }
         let text = reconstructLayout(from: request)
         return text.isEmpty ? nil : text
@@ -313,7 +332,13 @@ enum ImageAnalysisService {
             #if DEBUG
             print("[ImageAnalysisService] OCR request failed: \(error.localizedDescription)")
             #endif
-            return nil
+            let fallbackRequest = VNRecognizeTextRequest()
+            fallbackRequest.recognitionLevel = .fast
+            fallbackRequest.usesLanguageCorrection = false
+            fallbackRequest.recognitionLanguages = languages
+            guard (try? handler.perform([fallbackRequest])) != nil else { return nil }
+            let text = extractRecognizedText(from: fallbackRequest)
+            return text.isEmpty ? nil : text
         }
         let text = extractRecognizedText(from: request)
         return text.isEmpty ? nil : text
@@ -376,8 +401,21 @@ enum ImageAnalysisService {
             #if DEBUG
             print("[ImageAnalysisService] PDF page Vision request failed: \(error.localizedDescription)")
             #endif
-            // Return whatever partial result is available; both requests may
-            // still have populated their `results` even if one failed.
+            // If the combined accurate pass failed (e.g. transient ANE resource exhaustion),
+            // retry text recognition with .fast fallback so PDF text extraction is preserved.
+            if (textRequest.results ?? []).isEmpty {
+                let fallbackRequest = VNRecognizeTextRequest()
+                fallbackRequest.recognitionLevel = .fast
+                fallbackRequest.usesLanguageCorrection = false
+                fallbackRequest.recognitionLanguages = languages
+                try? handler.perform([fallbackRequest])
+                let fallbackText = reconstructLayout(from: fallbackRequest)
+                let fallbackLabels = extractTopLabels(from: classifyRequest)
+                let fallbackResult = PDFPageAnalysisResult(recognizedText: fallbackText, labels: fallbackLabels)
+                if !fallbackResult.isEmpty {
+                    return fallbackResult
+                }
+            }
         }
 
         let recognizedText = reconstructLayout(from: textRequest)

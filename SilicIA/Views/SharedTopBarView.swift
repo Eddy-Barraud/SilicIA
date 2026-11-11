@@ -11,11 +11,26 @@
 
 import SwiftUI
 
+/// Unified top bar shared between `SearchView` and `ChatView`.
+///
+/// Features:
+/// - Left: New conversation/search button (`square.and.pencil`)
+/// - Center: Context source selector (`Offline`, `Wiki`, `Web`) via `SourceToggleButtons`
+/// - Right: History drawer toggle (`clock.arrow.circlepath`) and Settings toggle (`gearshape`)
 struct SharedTopBarView: View {
+    /// Observable settings store driving live localization and context mode.
     @Bindable var settingsStore: AppSettingsStore = .shared
+
+    /// Whether to render the central `SourceToggleButtons` context selector.
     var showContextSelector: Bool = true
+
+    /// Callback triggered when tapping the "New" button to start fresh.
     var onNew: () -> Void
+
+    /// Callback triggered when tapping the "History" button.
     var onHistory: () -> Void
+
+    /// Callback triggered when tapping the "Settings" button.
     var onSettings: () -> Void
 
     private var settings: AppSettings {

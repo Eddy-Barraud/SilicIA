@@ -235,7 +235,7 @@ class WebSearchService: ObservableObject {
         NetworkConstants.defaultUserAgent
     }
 
-    private static let wikipediaPagePathAllowed: CharacterSet = {
+    nonisolated private static let wikipediaPagePathAllowed: CharacterSet = {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "/")
         return allowed

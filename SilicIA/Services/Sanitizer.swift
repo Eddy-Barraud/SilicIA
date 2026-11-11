@@ -8,7 +8,7 @@
 import Foundation
 
 /// Sanitizes LaTeX output to ensure proper rendering in the UI.
-enum ModelOutputLaTeXSanitizer {
+nonisolated enum ModelOutputLaTeXSanitizer {
     
     // MARK: - Precompiled Regexes
 

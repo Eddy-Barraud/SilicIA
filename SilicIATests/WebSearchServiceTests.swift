@@ -350,14 +350,19 @@ final class WebSearchServiceTests: XCTestCase {
         XCTAssertFalse(content.contains("</p>"), "Retrieved content must not contain raw HTML </p> tags")
     }
 
+    private final class SendableBox<T>: @unchecked Sendable {
+        nonisolated(unsafe) var value: T
+        init(_ value: T) { self.value = value }
+    }
+
     @MainActor
     func testSearchSourcesToolExecution() async throws {
         let service = WebSearchService()
         let scraper = WebScrapingService()
         let ragService = RAGContextService()
-        var reportedResults: [SearchResult] = []
-        var reportedScores: [String: Double]? = nil
-        var reportedRAGDuration: (chunk: Double, rank: Double)? = nil
+        let reportedResults = SendableBox<[SearchResult]>([])
+        let reportedScores = SendableBox<[String: Double]?>(nil)
+        let reportedRAGDuration = SendableBox<(chunk: Double, rank: Double)?>(nil)
         let funnel = SourceFunnel(
             webSearchService: service,
             webScraper: scraper,
@@ -370,22 +375,22 @@ final class WebSearchServiceTests: XCTestCase {
             useWikipedia: true,
             responseTokens: 500,
             contextUtilizationFactor: nil,
-            onResults: { reportedResults = $0 },
-            onScores: { reportedScores = $0 },
-            onRAGDuration: { c, r in reportedRAGDuration = (c, r) }
+            onResults: { reportedResults.value = $0 },
+            onScores: { reportedScores.value = $0 },
+            onRAGDuration: { c, r in reportedRAGDuration.value = (c, r) }
         )
         let tool = WikiSourcesTool(funnel: funnel)
         let output = try await tool.call(arguments: WikiSourcesTool.Arguments(wikiQueries: ["Paris"]))
         XCTAssertFalse(output.isEmpty)
         XCTAssertTrue(output.contains("Paris"))
-        XCTAssertFalse(reportedResults.isEmpty)
-        XCTAssertLessThanOrEqual(reportedResults.count, 2)
-        XCTAssertEqual(reportedResults.first?.title.lowercased(), "paris")
-        let firstContent = reportedResults.first?.retrievedContent ?? ""
+        XCTAssertFalse(reportedResults.value.isEmpty)
+        XCTAssertLessThanOrEqual(reportedResults.value.count, 2)
+        XCTAssertEqual(reportedResults.value.first?.title.lowercased(), "paris")
+        let firstContent = reportedResults.value.first?.retrievedContent ?? ""
         XCTAssertGreaterThan(firstContent.count, 5000, "onResults should receive full article content, not truncated excerpt")
-        XCTAssertNotNil(reportedScores, "onScores should be called with normalized source scores")
-        XCTAssertFalse(reportedScores?.isEmpty ?? true, "Reported scores should not be empty")
-        XCTAssertNotNil(reportedRAGDuration, "onRAGDuration should be called with chunking and ranking elapsed times")
+        XCTAssertNotNil(reportedScores.value, "onScores should be called with normalized source scores")
+        XCTAssertFalse(reportedScores.value?.isEmpty ?? true, "Reported scores should not be empty")
+        XCTAssertNotNil(reportedRAGDuration.value, "onRAGDuration should be called with chunking and ranking elapsed times")
     }
 
     @MainActor

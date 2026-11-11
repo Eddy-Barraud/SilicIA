@@ -9,7 +9,13 @@
 
 import SwiftUI
 
+/// Segmented context source selector allowing only one active context source:
+/// `Offline` (pure on-device model knowledge), `Wiki` (Wikipedia / wiki_fast retrieval),
+/// or `Web` (live web search via DuckDuckGo).
+///
+/// Designed with glass-morphic styling and subtle shadows matching the reasoning level selector.
 struct SourceToggleButtons: View {
+    /// Observable settings store binding controlling active context selection.
     @Bindable var settingsStore: AppSettingsStore = .shared
 
     var body: some View {
@@ -39,11 +45,11 @@ struct SourceToggleButtons: View {
                                 .shadow(color: .black.opacity(0.12), radius: 1, x: 0, y: 0.5)
                         }
                     }
-                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
-                .accessibilityLabel("\(source.displayName): \(isSelected ? "Selected" : "Not selected")")
+                .accessibilityLabel(source.displayName)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .padding(2)
