@@ -17,7 +17,7 @@ struct SourceToggleButtons: View {
             ForEach(ContextSourceKind.allCases) { source in
                 let isSelected = settingsStore.settings.contextSourceKind == source
                 Button {
-                    withAnimation(.easeInOut(duration: 0.15)) {
+                    withAnimation(.easeInOut(duration: 0.2)) {
                         settingsStore.settings.contextSourceKind = source
                     }
                 } label: {
@@ -39,6 +39,7 @@ struct SourceToggleButtons: View {
                                 .shadow(color: .black.opacity(0.12), radius: 1, x: 0, y: 0.5)
                         }
                     }
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .contentShape(Rectangle())
