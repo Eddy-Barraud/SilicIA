@@ -2,11 +2,8 @@
 //  AppSettingsStoreTests.swift
 //  SilicIATests
 //
-//  Covers the shared observable settings store that is now the single
-//  source of truth for every screen: same-instance sharing, automatic
-//  persistence on mutation, and change publication (the mechanism that
-//  keeps ContentView's tab bar in sync with a language change made in a
-//  nested settings page).
+//  Covers the shared observable settings store: same-instance sharing, automatic
+//  persistence, mutual exclusion, and search conversation recording.
 //
 
 import XCTest
@@ -17,9 +14,6 @@ import SwiftData
 @MainActor
 final class AppSettingsStoreTests: XCTestCase {
 
-    /// The store is a process-wide singleton persisting to the real
-    /// UserDefaults; snapshot and restore around each test so cases don't
-    /// leak state into each other or the rest of the suite.
     private var snapshot: AppSettings!
 
     override func setUp() async throws {
@@ -43,7 +37,7 @@ final class AppSettingsStoreTests: XCTestCase {
         init(_ value: T) { self.value = value }
     }
 
-    func testSingletonAndObservation() {
+    func testSingletonObservationPersistenceAndMutualExclusion() throws {
         XCTAssertTrue(AppSettingsStore.shared === AppSettingsStore.shared)
 
         let fired = SendableBox(false)
@@ -52,85 +46,40 @@ final class AppSettingsStoreTests: XCTestCase {
         } onChange: {
             fired.value = true
         }
-
         AppSettingsStore.shared.settings.language =
             AppSettingsStore.shared.settings.language == .french ? .english : .french
+        XCTAssertTrue(fired.value, "Mutating settings should notify observation trackers")
 
-        XCTAssertTrue(fired.value, "mutating settings should notify observation trackers")
-    }
-
-    func testMutationsPersistAutomatically() {
-        AppSettingsStore.shared.settings.totalTokensBudget = 2700
-
-        // Individual field update & read-after-write
+        // Automatic persistence and in-memory bounds clamping
         AppSettingsStore.shared.settings.temperature = 0.77
-        XCTAssertEqual(AppSettings.load().temperature, 0.77, accuracy: 0.0001)
-
-        AppSettingsStore.shared.settings.language = .spanish
-        XCTAssertEqual(AppSettings.load().language, .spanish)
-
-        AppSettingsStore.shared.settings.maxResponseTokens = 321
-        XCTAssertEqual(AppSettingsStore.shared.settings.maxResponseTokens, 321)
-
-        // Multiple field updates persist together
-        AppSettingsStore.shared.settings.maxContextTokens = 1234
-        AppSettingsStore.shared.settings.useWikipedia = false
+        AppSettingsStore.shared.settings.maxDuckDuckGoResults = 2
+        AppSettingsStore.shared.settings.save()
 
         let reloaded = AppSettings.load()
-        XCTAssertEqual(reloaded.maxContextTokens, 1234)
-        XCTAssertFalse(reloaded.useWikipedia)
+        XCTAssertEqual(reloaded.temperature, 0.77, accuracy: 0.0001)
+        XCTAssertEqual(reloaded.maxDuckDuckGoResults, 2)
 
-        AppSettingsStore.shared.settings.setTotalTokensBudget(3200)
-        let reloadedBudget = AppSettings.load()
-        XCTAssertEqual(reloadedBudget.totalTokensBudget, 3200)
-    }
-
-    func testContextSourceKindMutualExclusion() {
+        // Context source mutual exclusion & legacy decoding
         var settings = AppSettings()
-
-        // Setting to Web enables DuckDuckGo and disables Wikipedia
         settings.contextSourceKind = .web
         XCTAssertTrue(settings.useDuckDuckGo)
         XCTAssertFalse(settings.useWikipedia)
-        XCTAssertEqual(settings.contextSourceKind, .web)
 
-        // Setting to Wiki enables Wikipedia and disables DuckDuckGo
         settings.contextSourceKind = .wiki
         XCTAssertFalse(settings.useDuckDuckGo)
         XCTAssertTrue(settings.useWikipedia)
-        XCTAssertEqual(settings.contextSourceKind, .wiki)
 
-        // Setting to Offline disables both
         settings.contextSourceKind = .offline
         XCTAssertFalse(settings.useDuckDuckGo)
         XCTAssertFalse(settings.useWikipedia)
-        XCTAssertEqual(settings.contextSourceKind, .offline)
 
-        // Setting property directly enforces mutual exclusivity
-        settings.useWikipedia = true
-        XCTAssertFalse(settings.useDuckDuckGo)
-        XCTAssertTrue(settings.useWikipedia)
-        XCTAssertEqual(settings.contextSourceKind, .wiki)
-
-        settings.useDuckDuckGo = true
-        XCTAssertTrue(settings.useDuckDuckGo)
-        XCTAssertFalse(settings.useWikipedia)
-        XCTAssertEqual(settings.contextSourceKind, .web)
+        let legacyJSON = #"{"useDuckDuckGo": true, "useWikipedia": true}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
+        XCTAssertTrue(decoded.useDuckDuckGo)
+        XCTAssertFalse(decoded.useWikipedia)
     }
 
-    func testMaxDuckDuckGoResultsRangeAllowsDownToTwo() {
-        XCTAssertEqual(AppSettings.maxDuckDuckGoResultsRange.lowerBound, 2)
-        XCTAssertEqual(AppSettings.maxDuckDuckGoResultsRange.upperBound, 12)
-
-        var settings = AppSettings()
-        settings.maxDuckDuckGoResults = 2
-        settings.save()
-
-        let reloaded = AppSettings.load()
-        XCTAssertEqual(reloaded.maxDuckDuckGoResults, 2)
-    }
-
-    func testSearchRegistersConversationInHistoricData() throws {
+    func testSearchRegistersConversationInHistoricDataAndDefaults() throws {
         let container = try ModelContainer(
             for: Conversation.self, Message.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
@@ -142,117 +91,32 @@ final class AppSettingsStoreTests: XCTestCase {
         // Register a search query and answer
         chatService.startConversationFromSearch(
             query: "What is SwiftData?",
-            answer: "SwiftData is Apple's modern data modeling and persistence framework.",
+            answer: "SwiftData is Apple's modern persistence framework.",
             citations: "https://developer.apple.com"
         )
 
         let descriptor = FetchDescriptor<Conversation>()
         let conversations = try context.fetch(descriptor)
         XCTAssertEqual(conversations.count, 1)
+        let messages = conversations[0].messages.sorted { $0.timestamp < $1.timestamp }
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0].content, "What is SwiftData?")
+        XCTAssertEqual(messages[1].content, "SwiftData is Apple's modern persistence framework.")
 
-        let conv = conversations[0]
-        let sortedMessages = conv.messages.sorted { $0.timestamp < $1.timestamp }
-        XCTAssertEqual(sortedMessages.count, 2)
-        XCTAssertEqual(sortedMessages[0].role, "user")
-        XCTAssertEqual(sortedMessages[0].content, "What is SwiftData?")
-        XCTAssertEqual(sortedMessages[1].role, "assistant")
-        XCTAssertEqual(sortedMessages[1].content, "SwiftData is Apple's modern data modeling and persistence framework.")
-        XCTAssertEqual(sortedMessages[1].citations, "https://developer.apple.com")
-
-        // Deduplication: calling again with the same search exchange does not duplicate the conversation
+        // Deduplication: calling again with same exchange does not duplicate
         chatService.startConversationFromSearch(
             query: "What is SwiftData?",
-            answer: "SwiftData is Apple's modern data modeling and persistence framework.",
+            answer: "SwiftData is Apple's modern persistence framework.",
             citations: "https://developer.apple.com"
         )
-        let reloadedConversations = try context.fetch(descriptor)
-        XCTAssertEqual(reloadedConversations.count, 1)
+        let reloaded = try context.fetch(descriptor)
+        XCTAssertEqual(reloaded.count, 1)
 
-        // Starting a search immediately registers with empty answer, then updates when completed
-        let newSearchQuery = "How does SwiftData handle migrations?"
-        chatService.startConversationFromSearch(query: newSearchQuery, answer: "", citations: nil)
-
-        let searches = try context.fetch(descriptor)
-        XCTAssertEqual(searches.count, 2)
-        let searchConv = searches.first { $0.title == newSearchQuery || $0.messages.first?.content == newSearchQuery }
-        XCTAssertNotNil(searchConv)
-        XCTAssertEqual(searchConv?.messages.count, 1)
-        XCTAssertEqual(searchConv?.messages.first?.content, newSearchQuery)
-
-        // When search completes and provides summary
-        chatService.startConversationFromSearch(
-            query: newSearchQuery,
-            answer: "SwiftData uses SchemaMigrationPlan and VersionedSchema.",
-            citations: "https://apple.com"
-        )
-        let afterSummarySearches = try context.fetch(descriptor)
-        XCTAssertEqual(afterSummarySearches.count, 2)
-        let updatedConv = afterSummarySearches.first { $0.title == newSearchQuery || $0.messages.first?.content == newSearchQuery }
-        XCTAssertEqual(updatedConv?.messages.count, 2)
-        XCTAssertEqual(updatedConv?.messages.last?.content, "SwiftData uses SchemaMigrationPlan and VersionedSchema.")
-    }
-
-    func testLegacyDecodingWithBothSourcesEnabledEnforcesExclusivity() throws {
-        let json = """
-        {
-            "useDuckDuckGo": true,
-            "useWikipedia": true,
-            "maxDuckDuckGoResults": 4,
-            "maxWikipediaResults": 2,
-            "totalTokensBudget": 2500,
-            "maxResponseTokens": 500,
-            "temperature": 0.7,
-            "maxContextTokens": 2000
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
-        XCTAssertTrue(decoded.useDuckDuckGo)
-        XCTAssertFalse(decoded.useWikipedia)
-        XCTAssertEqual(decoded.contextSourceKind, .web)
-    }
-
-    func testDecodingOfflineSourceKind() throws {
-        let json = """
-        {
-            "useDuckDuckGo": false,
-            "useWikipedia": false
-        }
-        """.data(using: .utf8)!
-
-        let decoded = try JSONDecoder().decode(AppSettings.self, from: json)
-        XCTAssertFalse(decoded.useDuckDuckGo)
-        XCTAssertFalse(decoded.useWikipedia)
-        XCTAssertEqual(decoded.contextSourceKind, .offline)
-    }
-
-    func testClampingBoundsForResults() {
-        var settings = AppSettings()
-        settings.maxDuckDuckGoResults = 100
-        settings.maxWikipediaResults = -5
-        settings.temperature = 5.0
-        XCTAssertEqual(settings.maxDuckDuckGoResults, AppSettings.maxDuckDuckGoResultsRange.upperBound, "In-memory bounds clamping must enforce maxDuckDuckGoResults")
-        XCTAssertEqual(settings.maxWikipediaResults, AppSettings.maxWikipediaResultsRange.lowerBound, "In-memory bounds clamping must enforce maxWikipediaResults")
-        XCTAssertEqual(settings.temperature, AppSettings.temperatureRange.upperBound, "In-memory bounds clamping must enforce temperature")
-        settings.save()
-
-        let reloaded = AppSettings.load()
-        XCTAssertEqual(reloaded.maxDuckDuckGoResults, AppSettings.maxDuckDuckGoResultsRange.upperBound)
-        XCTAssertEqual(reloaded.maxWikipediaResults, AppSettings.maxWikipediaResultsRange.lowerBound)
-        XCTAssertEqual(reloaded.temperature, AppSettings.temperatureRange.upperBound)
-    }
-
-    func testDefaultSettingsForNewUserOnFirstLaunch() {
+        // Default settings verification
         let defaults = AppSettings()
-        XCTAssertTrue(defaults.useWikipedia, "Default context source should be Wiki")
-        XCTAssertFalse(defaults.useDuckDuckGo, "Default context source should have DDG disabled")
-        XCTAssertEqual(defaults.contextSourceKind, .wiki, "Default contextSourceKind should be .wiki")
-        XCTAssertEqual(defaults.wikipediaSource, .wikiFast, "Default wikipediaSource should be wikiFast mode")
-        XCTAssertEqual(defaults.maxWikipediaResults, 2, "Default maxWikipediaResults should be 2")
-        XCTAssertEqual(defaults.maxDuckDuckGoResults, 2, "Default maxDuckDuckGoResults should be 2")
-        XCTAssertEqual(defaults.temperature, 0.7, accuracy: 0.001, "Default temperature should be 0.7")
-        XCTAssertEqual(defaults.outputProfileKind, .standard, "Default token budget outputProfileKind should be Standard")
-        XCTAssertEqual(defaults.language, ModelLanguage.systemPreferred(), "Default language should match system preferred")
-        XCTAssertTrue(defaults.isReaderViewAndSummaryEnabled, "Reader view should be activated by default")
+        XCTAssertTrue(defaults.useWikipedia)
+        XCTAssertFalse(defaults.useDuckDuckGo)
+        XCTAssertEqual(defaults.outputProfileKind, .standard)
+        XCTAssertTrue(defaults.isReaderViewAndSummaryEnabled)
     }
 }

@@ -1,32 +1,32 @@
 # Graph Report - SilicIA  (2026-11-11)
 
 ## Corpus Check
-- 128 files · ~126,918 words
+- 123 files · ~113,779 words
 - Verdict: corpus is large enough that graph structure adds value.
-- Unclassified: 16 file(s) not represented in the graph (top: (none) 5, .entitlements 3, .plist 2)
+- Unclassified: 15 file(s) not represented in the graph (top: (none) 5, .entitlements 3, .plist 2)
 
 ## Summary
-- 1688 nodes · 4144 edges · 77 communities (58 shown, 19 thin omitted)
-- Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 309 edges (avg confidence: 0.85)
+- 1541 nodes · 3799 edges · 76 communities (57 shown, 19 thin omitted)
+- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 235 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `14e76c9c`
+- Built from commit: `42424906`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
 - RAG Retrieval & Chunking
 - SwiftData Conversation Persistence
-- ContentView
+- WikipediaSource
 - ReaderHTMLWebViewRepresentable
 - Chat Interface & Streaming
 - Web Content Scraping & Errors
 - Image Analysis & Visual Grounding
 - ContentView
 - Search Assist View & Grounding
-- LaTeX Stream Segmentation
-- .loadPrompt
+- ModelOutputLaTeXSanitizer
+- ToolError
 - App Store Screenshot Generation
 - Safari Share Extension
 - GitHub Actions Build CI
@@ -40,42 +40,42 @@
 - Foundation
 - AIService
 - App Settings & Tool Test Fixtures
-- ConversationsListView
+- String
 - DroppedFileStore
 - PurchaseManager
-- AppSettings
-- .makeDefaultSnapshot
+- .acquireSession
+- StreamingLaTeXText
 - LocalizationService
-- AppSettingsStoreTests
-- TokenBudgeting
+- AppSettings
+- TokenBudgetingTests
 - CodingKeys
 - MessageBubbleGlass
-- State
 - RAG Relevance Scoring Engine
+- MarkdownContentView
 - DynamicSessionCoordinator
 - String
 - WebSearchService
 - System Date & Time Tool
 - Tool Call Transcript Recorder
-- .acquireSession
-- SwiftUI
+- SearchResult
+- SilicIA Assistant
 - MarkdownBlock
 - RAGSearchTool
 - SharedTopBarView
-- XCTestCase
+- ConversationsListView
 - SearchView.swift
 - DebugRAGStorage
-- ModelLanguage
-- SearchResultCard
+- AppSettingsStore
+- TokenBudgetSliderView
 - bug_report.md
 - GitHub Development Helper CLI
 - pull_request_template.md
-- Local Processing Guarantee
-- SharedSettingsView
-- ModelLanguage
+- AppSettingsStoreTests
+- TokenBudgetSliderView
+- .loadPrompt
 - feature_request.md
 - ModelAnsweringTests
-- .testPDFPageSummaryWithBatchingAndSingleParagraph
+- DynamicSessionMode
 - .testMainViewsRenderWithoutCrashing
 - Brand Logo Icon Generation
 - Shell Build Automation Script
@@ -85,36 +85,34 @@
 - Token Budgeting Engine Concept
 - WikipediaQueryCleaner
 - View
-- ModelAvailabilityNotice
-- XCTestCase
-- SilicIAApp.swift
-- WebScrapingService.swift
+- SwiftUI
+- WebSearchService.swift
 - Coordinator
-- AppKit
+- ChatService.swift
 
 ## God Nodes (most connected - your core abstractions)
-1. `ChatService` - 91 edges
-2. `ModelLanguage` - 88 edges
+1. `ModelLanguage` - 88 edges
+2. `ChatService` - 88 edges
 3. `ChatView` - 71 edges
 4. `SearchView` - 66 edges
-5. `WebSearchService` - 61 edges
-6. `RAGContextService` - 58 edges
-7. `AppSettings` - 49 edges
-8. `AIService` - 44 edges
-9. `WebScrapingService` - 44 edges
-10. `SearchResult` - 39 edges
+5. `WebSearchService` - 56 edges
+6. `RAGContextService` - 51 edges
+7. `AppSettings` - 46 edges
+8. `WebScrapingService` - 41 edges
+9. `AIService` - 39 edges
+10. `SearchResult` - 35 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Scientific PDF Test Fixtures (PFAS CMC)` --semantically_similar_to--> `DroppedPDFStore`  [INFERRED] [semantically similar]
   SilicIATests/2025.PFAS.CMC.pdf → SilicIA/Services/DroppedPDFStore.swift
-- `Multi-Language UI & Prompts` --implements--> `ModelLanguage`  [EXTRACTED]
-  README.md → SilicIA/Models/AppSettings.swift
-- `Local Processing Guarantee` --rationale_for--> `AIService`  [INFERRED]
-  Privacy.md → SilicIA/Services/AIService.swift
 - `SilicIATests Suite` --references--> `WebSearchServiceTests`  [INFERRED]
   BUILDING.md → SilicIATests/WebSearchServiceTests.swift
 - `SilicIA Brand Identity & Icon Assets` --references--> `SilicIA Assistant`  [INFERRED]
   logo/appicon_big.png → README.md
+- `Math & Factorial UI Rendering` --conceptually_related_to--> `SilicIA Assistant`  [INFERRED]
+  Screenshots/Factorial.png → README.md
+- `Multi-Language UI & Prompts` --implements--> `ModelLanguage`  [EXTRACTED]
+  README.md → SilicIA/Models/AppSettings.swift
 
 ## Import Cycles
 - None detected.
@@ -124,47 +122,47 @@
 - **Privacy-Preserving On-Device Architecture** — privacy_local_processing_guarantee, readme_on_device_llm, silicia_services_aiservice_aiservice, silicia_models_conversation_conversation [INFERRED 0.95]
 - **RAG Retrieval Pipeline Components** — readme_rag_pipeline, silicia_services_chatservice_chatservice, silicia_services_ragcontextservice, silicia_services_tokenbudgeting_tokenbudgeting, silicia_services_aiservice_aiservice [INFERRED 0.95]
 
-## Communities (77 total, 19 thin omitted)
+## Communities (76 total, 19 thin omitted)
 
 ### Community 0 - "RAG Retrieval & Chunking"
-Cohesion: 0.05
-Nodes (17): Accelerate, RAG Retrieval Pipeline, MarkdownSegment, prose, table, QueryTermData, RAGChunk, RAGChunker (+9 more)
+Cohesion: 0.07
+Nodes (17): Accelerate, NaturalLanguage, RAG Retrieval Pipeline, MarkdownSegment, prose, table, QueryTermData, RAGChunk (+9 more)
 
 ### Community 1 - "SwiftData Conversation Persistence"
 Cohesion: 0.06
 Nodes (14): SwiftData Chat Persistence, .body, Conversation, Message, Search Tool Calling Definition, ChatMessage, ChatService, PDFPageBatch (+6 more)
 
-### Community 2 - "ContentView"
-Cohesion: 0.18
-Nodes (8): AppTab, chat, .id, searchAssist, ContentView, .language, .selectedTab, .selectedTabBinding
+### Community 2 - "WikipediaSource"
+Cohesion: 0.17
+Nodes (10): ContextSourceKind, .displayName, .id, offline, .systemImage, web, wiki, WikipediaSource (+2 more)
 
 ### Community 4 - "Chat Interface & Streaming"
-Cohesion: 0.07
-Nodes (26): ChatView, .attachmentMenu, .body, .chatHeaderView, .composerView, .effectiveIsWebSearchEnabled, .effectiveUseDuckDuckGo, .effectiveUseWikipedia (+18 more)
+Cohesion: 0.08
+Nodes (19): ChatView, .attachmentMenu, .body, .chatHeaderView, .composerView, .effectiveIsWebSearchEnabled, .effectiveUseDuckDuckGo, .effectiveUseWikipedia (+11 more)
 
 ### Community 5 - "Web Content Scraping & Errors"
-Cohesion: 0.10
-Nodes (12): HTMLConversionError, conversionFailed, emptyContent, .errorDescription, excessiveDOMDepth, excessiveElementCount, inputTooLarge, ReaderWebPageContent (+4 more)
+Cohesion: 0.08
+Nodes (14): HTMLSanitizer, HTMLConversionError, conversionFailed, emptyContent, .errorDescription, excessiveDOMDepth, excessiveElementCount, inputTooLarge (+6 more)
 
 ### Community 6 - "Image Analysis & Visual Grounding"
 Cohesion: 0.08
-Nodes (17): ImageIO, ContextSourceKind, .displayName, .id, offline, .systemImage, web, wiki (+9 more)
+Nodes (14): ImageIO, ArticleRowProjection, ImageAnalysisResult, .isEmpty, ImageAnalysisService, LayoutObservation, PDFPageAnalysisResult, .isEmpty (+6 more)
 
 ### Community 7 - "ContentView"
-Cohesion: 0.18
-Nodes (9): FoundationModelAvailability, Reason, deviceNotEligible, .isUserFixable, modelNotReady, notEnabled, other, .stringValue (+1 more)
+Cohesion: 0.10
+Nodes (17): FoundationModelAvailability, Reason, deviceNotEligible, .isUserFixable, modelNotReady, notEnabled, other, .stringValue (+9 more)
 
 ### Community 8 - "Search Assist View & Grounding"
-Cohesion: 0.09
-Nodes (19): Search Prompt Instructions, SearchView, .body, .chatButtonTitle, .defaultScrapingCharactersFromContextTokens, .effectiveContextTokens, .emptyStateView, .exampleQueryChips (+11 more)
+Cohesion: 0.10
+Nodes (18): Search Prompt Instructions, SearchView, .body, .chatButtonTitle, .defaultScrapingCharactersFromContextTokens, .effectiveContextTokens, .emptyStateView, .exampleQueryChips (+10 more)
 
-### Community 9 - "LaTeX Stream Segmentation"
-Cohesion: 0.09
-Nodes (3): HTMLSanitizer, ModelOutputLaTeXSanitizer, SanitizerTests
+### Community 9 - "ModelOutputLaTeXSanitizer"
+Cohesion: 0.16
+Nodes (4): LaTeXStreamSegmenter, ModelOutputLaTeXSanitizer, .body, LaTeXStreamSegmenterTests
 
-### Community 10 - ".loadPrompt"
-Cohesion: 0.21
-Nodes (4): System Prompt Framework, BundleToken, PromptLoader, PromptLoaderTests
+### Community 10 - "ToolError"
+Cohesion: 0.14
+Nodes (12): ToolError, duplicate, .errorDescription, toolBudgetReached, totalBudgetReached, SearchError, botChallengeDetected, .errorDescription (+4 more)
 
 ### Community 11 - "App Store Screenshot Generation"
 Cohesion: 0.10
@@ -175,7 +173,7 @@ Cohesion: 0.07
 Nodes (26): GitHub Automation & CI, env, runs-on, steps, CODE_SIGN_IDENTITY, CODE_SIGNING_ALLOWED, CODE_SIGNING_REQUIRED, DEVELOPMENT_TEAM (+18 more)
 
 ### Community 14 - "Multi-Query Search Sources Tool"
-Cohesion: 0.12
+Cohesion: 0.10
 Nodes (16): Arguments, SearchSourcesTool, SingleQueryArguments, WebOnlyArguments, WebOnlySingleQueryArguments, WebSourcesTool, WikiFastArguments, WikiFastOnlyArguments (+8 more)
 
 ### Community 15 - "GitHub Release & Notarization CI"
@@ -187,32 +185,32 @@ Cohesion: 0.08
 Nodes (25): CODE_SIGN_IDENTITY, CODE_SIGNING_ALLOWED, CODE_SIGNING_REQUIRED, DEVELOPMENT_TEAM, jobs, test, name, on (+17 more)
 
 ### Community 17 - "Keyboard Dismiss Gesture Handler"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (3): Coordinator, KeyboardDismissTapOverlay, WindowTrackingView
 
 ### Community 18 - "Tool Calling Governor & Rate Limiting"
-Cohesion: 0.14
-Nodes (14): Decision, allow, .description, duplicate, .refusalMessage, toolBudgetReached, totalBudgetReached, ToolCallGovernor (+6 more)
+Cohesion: 0.22
+Nodes (8): Decision, allow, .description, duplicate, .refusalMessage, toolBudgetReached, totalBudgetReached, ToolCallGovernor
 
 ### Community 19 - "Web Search Scraper Verification CI"
 Cohesion: 0.08
 Nodes (23): env, runs-on, steps, CODE_SIGN_IDENTITY, CODE_SIGNING_ALLOWED, CODE_SIGNING_REQUIRED, DEVELOPMENT_TEAM, jobs (+15 more)
 
 ### Community 20 - "On-Device Calculator Tool"
-Cohesion: 0.17
+Cohesion: 0.20
 Nodes (3): Arguments, CalculatorTool, CalculatorToolTests
 
 ### Community 21 - "Foundation"
-Cohesion: 0.18
-Nodes (5): Combine, Foundation, FoundationModels, NaturalLanguage, StoreKit
+Cohesion: 0.14
+Nodes (6): Combine, Foundation, FoundationModels, os, NetworkConstants, StoreKit
+
+### Community 22 - "AIService"
+Cohesion: 0.06
+Nodes (27): Local Processing Guarantee, SilicIA Privacy Policy, On-Device LLM (Apple Intelligence), Local LLM Chat Showcase, Privacy Feature Showcase, AppTab, chat, .id (+19 more)
 
 ### Community 23 - "App Settings & Tool Test Fixtures"
-Cohesion: 0.16
-Nodes (5): CoreGraphics, PDFKit, SilicIA, Vision, XCTest
-
-### Community 24 - "ConversationsListView"
-Cohesion: 0.29
-Nodes (3): ConversationsListView, .body, .language
+Cohesion: 0.14
+Nodes (6): Observation, SilicIA, ChatServiceTextFileContextTests, ToolCallGovernorTests, WikipediaQueryCleanerTests, XCTest
 
 ### Community 25 - "DroppedFileStore"
 Cohesion: 0.07
@@ -222,69 +220,65 @@ Nodes (11): PDF Analysis & Grounding, PDF Context & Citation Showcase, DroppedFi
 Cohesion: 0.05
 Nodes (11): Entitlements, .canAttachDocuments, .canExceedFreeOutputTokens, .canUseMultipleWebSourcesPerProvider, .hasPremiumAccess, FoundingUserStore, PurchaseManager, AppDelegate (+3 more)
 
-### Community 27 - "AppSettings"
+### Community 27 - ".acquireSession"
+Cohesion: 0.32
+Nodes (4): DynamicSessionStateStore, .current, PrewarmKey, Snapshot
+
+### Community 28 - "StreamingLaTeXText"
+Cohesion: 0.25
+Nodes (4): LaTeXSwiftUI, MarkdownBlockParser, StreamingLaTeXText, .foreground
+
+### Community 29 - "LocalizationService"
+Cohesion: 0.13
+Nodes (10): Multi-Language UI & Prompts, ModelLanguage, .code, english, french, .nlLanguage, spanish, LocalizationService (+2 more)
+
+### Community 30 - "AppSettings"
 Cohesion: 0.12
 Nodes (12): AppSettings, .contextSourceKind, .isWebSummariesEnabled, .maxDuckDuckGoResults, .maxSearchResults, .maxWikipediaResults, .outputProfileKind, .temperature (+4 more)
 
-### Community 28 - ".makeDefaultSnapshot"
-Cohesion: 0.19
-Nodes (5): os, SilicIADynamicInstructions, .body, SilicIADynamicProfile, .body
-
-### Community 29 - "LocalizationService"
+### Community 31 - "TokenBudgetingTests"
 Cohesion: 0.20
-Nodes (4): Multi-Language UI & Prompts, LocalizationService, LocalizationTests, .service
-
-### Community 30 - "AppSettingsStoreTests"
-Cohesion: 0.12
-Nodes (4): AppSettingsStore, .settings, AppSettingsStoreTests, SendableBox
-
-### Community 31 - "TokenBudgeting"
-Cohesion: 0.08
-Nodes (9): TokenBudgeting, TokenBudgetSliderView, .body, .estimatedContextWords, .estimatedOutputWords, .outputProfile, .profileBadgeColor, PDFContextBudgetingTests (+1 more)
+Nodes (4): SilicIADynamicInstructions, .body, .body, TokenBudgetingTests
 
 ### Community 32 - "CodingKeys"
 Cohesion: 0.11
 Nodes (17): CodingKeys, isReaderViewAndSummaryEnabled, isWebSummariesEnabled, language, maxContextTokens, maxDuckDuckGoResults, maxResponseTokens, maxWikipediaResults (+9 more)
 
 ### Community 33 - "MessageBubbleGlass"
-Cohesion: 0.22
-Nodes (4): MessageBubbleGlass, PlatformColors, .controlBackground, .textBackground
-
-### Community 34 - "State"
-Cohesion: 0.33
-Nodes (5): State, available, .isAvailable, .reason, unavailable
+Cohesion: 0.18
+Nodes (6): MessageBubbleGlass, PlatformColors, .controlBackground, .textBackground, Color, .platformWindowBackground
 
 ### Community 35 - "RAG Relevance Scoring Engine"
 Cohesion: 0.17
 Nodes (4): AppIntents, SilicIAAppShortcuts, .appShortcuts, OpenSilicIASearchIntent
 
 ### Community 37 - "DynamicSessionCoordinator"
-Cohesion: 0.19
-Nodes (5): .isReaderViewAndSummaryEnabled, DynamicSessionCoordinator, .currentSnapshot, DynamicSessionStateStore, .current
+Cohesion: 0.23
+Nodes (3): DynamicSessionCoordinator, .currentSnapshot, SilicIADynamicProfile
 
 ### Community 38 - "String"
-Cohesion: 0.18
-Nodes (5): CitationLink, ReaderHTMLWebView, .body, .summaryCard, .webPageSummaryOverlay
+Cohesion: 0.19
+Nodes (3): PlatformClipboard, CitationLink, .summaryCard
 
 ### Community 39 - "WebSearchService"
-Cohesion: 0.05
-Nodes (22): SilicIATests Suite, Dual Web Search Architecture, Dual Web Search Showcase, WikipediaSource, online, wikiFast, SearchResponse, SearchResult (+14 more)
+Cohesion: 0.11
+Nodes (6): SilicIATests Suite, Dual Web Search Architecture, Dual Web Search Showcase, WebSearchService, .userAgent, WebSearchServiceTests
 
 ### Community 40 - "System Date & Time Tool"
 Cohesion: 0.29
 Nodes (6): Arguments, DateTimeTool, Mode, both, dateOnly, timeOnly
 
-### Community 42 - ".acquireSession"
-Cohesion: 0.21
-Nodes (8): DynamicSessionMode, chat, chatFallback, searchQueryGeneration, searchSummary, webPageSummary, PrewarmKey, Snapshot
+### Community 42 - "SearchResult"
+Cohesion: 0.24
+Nodes (3): SearchResponse, SearchResult, WikiFastArticle
 
-### Community 43 - "SwiftUI"
-Cohesion: 0.20
-Nodes (3): Observation, SwiftData, SwiftUI
+### Community 43 - "SilicIA Assistant"
+Cohesion: 0.29
+Nodes (7): App Store Short Description, Build & Tooling Configuration, Build Scripts (scripts/build.sh), Contributing Guidelines, SilicIA Brand Identity & Icon Assets, SilicIA Assistant, Math & Factorial UI Rendering
 
 ### Community 44 - "MarkdownBlock"
-Cohesion: 0.07
-Nodes (21): LaTeXSwiftUI, LaTeXStreamSegmenter, MarkdownBlock, code, heading, horizontalRule, .id, orderedList (+13 more)
+Cohesion: 0.12
+Nodes (14): FilePickerKind, .allowedContentTypes, image, pdf, MarkdownBlock, code, heading, horizontalRule (+6 more)
 
 ### Community 45 - "RAGSearchTool"
 Cohesion: 0.44
@@ -294,21 +288,21 @@ Nodes (3): Arguments, RAGSearchTool, RAGSearchToolTests
 Cohesion: 0.22
 Nodes (5): SharedTopBarView, .body, .settings, SourceToggleButtons, .body
 
+### Community 47 - "ConversationsListView"
+Cohesion: 0.29
+Nodes (3): ConversationsListView, .body, .language
+
 ### Community 48 - "SearchView.swift"
-Cohesion: 0.24
-Nodes (7): SafariServices, FeatureRow, .body, SearchResultCard, .body, .isWebSummariesEnabled, WebKit
+Cohesion: 0.36
+Nodes (4): SearchResultCard, .body, .isWebSummariesEnabled, .resultsView
 
 ### Community 49 - "DebugRAGStorage"
 Cohesion: 0.20
 Nodes (5): DebugRAGStorage, .debugRootDirectory, .promptsDirectory, .rankedChunksDirectory, .webpagesDirectory
 
-### Community 50 - "ModelLanguage"
-Cohesion: 0.19
-Nodes (11): OutputProfile, .reasoningLevel, OutputProfileKind, concise, detailed, .implicitContextCharacters, .implicitContextTokens, .implicitResponseTokens (+3 more)
-
-### Community 51 - "SearchResultCard"
-Cohesion: 0.25
-Nodes (5): MatchScoreBadge, .body, .clampedPercent, .displayPercent, .progress
+### Community 51 - "TokenBudgetSliderView"
+Cohesion: 0.29
+Nodes (6): TokenBudgetSliderView, .body, .estimatedContextWords, .estimatedOutputWords, .outputProfile, .profileBadgeColor
 
 ### Community 52 - "bug_report.md"
 Cohesion: 0.22
@@ -322,61 +316,61 @@ Nodes (6): check_build_status(), check_repo_stats(), create_feature_branch(), pr
 Cohesion: 0.22
 Nodes (8): Additional Notes, Changes Made, Checklist, Description, Related Issues, Screenshots (if applicable), Testing, Type of Change
 
-### Community 55 - "Local Processing Guarantee"
-Cohesion: 0.40
-Nodes (5): Local Processing Guarantee, SilicIA Privacy Policy, On-Device LLM (Apple Intelligence), Local LLM Chat Showcase, Privacy Feature Showcase
+### Community 56 - "TokenBudgetSliderView"
+Cohesion: 0.22
+Nodes (7): ChatViewMode, full, pdfTalkme, SharedSettingsView, .body, .settings, .settingsPanel
 
-### Community 56 - "SharedSettingsView"
-Cohesion: 0.33
-Nodes (4): SharedSettingsView, .body, .settings, .settingsPanel
-
-### Community 57 - "ModelLanguage"
-Cohesion: 0.15
-Nodes (11): ModelLanguage, .code, english, french, .nlLanguage, spanish, Configuration, ToolCallingTone (+3 more)
+### Community 57 - ".loadPrompt"
+Cohesion: 0.12
+Nodes (10): System Prompt Framework, BundleToken, PromptLoader, Configuration, ToolCallingTone, chat, search, ToolKit (+2 more)
 
 ### Community 58 - "feature_request.md"
 Cohesion: 0.40
 Nodes (4): Additional Context, Describe Alternatives You've Considered, Describe the Solution You'd Like, Is Your Feature Request Related to a Problem?
 
-### Community 71 - "ModelAvailabilityNotice"
+### Community 61 - "DynamicSessionMode"
 Cohesion: 0.33
-Nodes (3): ModelAvailabilityNotice, .body, .iconName
+Nodes (6): DynamicSessionMode, chat, chatFallback, searchQueryGeneration, searchSummary, webPageSummary
 
-### Community 72 - "XCTestCase"
-Cohesion: 0.33
-Nodes (3): ChatServicePDFChunkPolicyTests, ModelLanguageTests, ToolTranscriptRecorderTests
+### Community 70 - "View"
+Cohesion: 0.27
+Nodes (3): View, FeatureRow, .body
 
-### Community 73 - "SilicIAApp.swift"
-Cohesion: 0.25
-Nodes (7): App Store Short Description, Build & Tooling Configuration, Build Scripts (scripts/build.sh), Contributing Guidelines, SilicIA Brand Identity & Icon Assets, SilicIA Assistant, Math & Factorial UI Rendering
-
-### Community 76 - "WebScrapingService.swift"
-Cohesion: 0.40
-Nodes (4): HTMLToMarkdown, URL Context Extraction, Reeeed, Multi-Context Chat Showcase
-
-### Community 78 - "AppKit"
+### Community 71 - "SwiftUI"
 Cohesion: 0.24
-Nodes (5): AppKit, NetworkConstants, PlatformClipboard, UIKit, UniformTypeIdentifiers
+Nodes (7): AppKit, SafariServices, SwiftData, SwiftUI, UIKit, UniformTypeIdentifiers, WebKit
+
+### Community 73 - "WebSearchService.swift"
+Cohesion: 0.70
+Nodes (3): WikipediaSearchFallbackPage, WikipediaSearchFallbackResponse, WikipediaWithHTMLResponse
+
+### Community 77 - "Coordinator"
+Cohesion: 0.13
+Nodes (4): Coordinator, ReaderHTMLWebView, .body, ReaderHTMLWebViewRepresentable
+
+### Community 78 - "ChatService.swift"
+Cohesion: 0.22
+Nodes (7): CoreGraphics, HTMLToMarkdown, PDFKit, URL Context Extraction, Reeeed, Multi-Context Chat Showcase, Vision
 
 ## Knowledge Gaps
 - **194 isolated node(s):** `searchAssist`, `chat`, `.id`, `.language`, `.selectedTabBinding` (+189 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 474 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 459 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **19 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `ModelLanguage` connect `ModelLanguage` to `RAG Retrieval & Chunking`, `SwiftData Conversation Persistence`, `ContentView`, `Image Analysis & Visual Grounding`, `ContentView`, `.loadPrompt`, `Multi-Query Search Sources Tool`, `Foundation`, `AIService`, `ConversationsListView`, `AppSettings`, `LocalizationService`, `TokenBudgeting`, `.generateQueries`, `WebSearchService`, `System Date & Time Tool`, `RAGSearchTool`, `SearchView.swift`, `ModelLanguage`, `SearchResultCard`, `ModelAvailabilityNotice`?**
-  _High betweenness centrality (0.157) - this node is a cross-community bridge._
-- **Are the 10 inferred relationships involving `ChatService` (e.g. with `ContentView` and `Search Tool Calling Definition`) actually correct?**
-  _`ChatService` has 10 INFERRED edges - model-reasoned connections that need verification._
+- **Why does `ModelLanguage` connect `LocalizationService` to `RAG Retrieval & Chunking`, `SwiftData Conversation Persistence`, `WikipediaSource`, `.executeWikipediaSearch`, `Image Analysis & Visual Grounding`, `ContentView`, `System Date & Time Tool`, `WebSearchService`, `SearchResult`, `.fetchWikipediaPageDetails`, `RAGSearchTool`, `Multi-Query Search Sources Tool`, `ConversationsListView`, `SearchView.swift`, `TokenBudgetSliderView`, `AIService`, `.loadPrompt`, `AppSettings`?**
+  _High betweenness centrality (0.147) - this node is a cross-community bridge._
+- **Are the 9 inferred relationships involving `ChatService` (e.g. with `ContentView` and `Search Tool Calling Definition`) actually correct?**
+  _`ChatService` has 9 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `searchAssist`, `chat`, `.id` to the rest of the system?**
   _194 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `RAG Retrieval & Chunking` be split into smaller, more focused modules?**
-  _Cohesion score 0.05330578512396694 - nodes in this community are weakly interconnected._
-- **Why does `ChatService` connect `SwiftData Conversation Persistence` to `RAG Retrieval & Chunking`, `ContentView`, `Chat Interface & Streaming`, `Web Content Scraping & Errors`, `WebSearchService`, `Search Assist View & Grounding`, `Coordinator`, `Foundation`, `PurchaseManager`, `ModelAnsweringTests`, `.testMainViewsRenderWithoutCrashing`, `TokenBudgeting`?**
-  _High betweenness centrality (0.135) - this node is a cross-community bridge._
+  _Cohesion score 0.0748013090229079 - nodes in this community are weakly interconnected._
+- **Why does `ChatService` connect `SwiftData Conversation Persistence` to `RAG Retrieval & Chunking`, `Chat Interface & Streaming`, `Web Content Scraping & Errors`, `WebSearchService`, `Search Assist View & Grounding`, `Coordinator`, `ChatService.swift`, `AIService`, `PurchaseManager`, `ModelAnsweringTests`, `.testMainViewsRenderWithoutCrashing`?**
+  _High betweenness centrality (0.131) - this node is a cross-community bridge._
 - **Are the 2 inferred relationships involving `ChatView` (e.g. with `.body` and `.testMainViewsRenderWithoutCrashing()`) actually correct?**
   _`ChatView` has 2 INFERRED edges - model-reasoned connections that need verification._
 - **Should `SwiftData Conversation Persistence` be split into smaller, more focused modules?**
-  _Cohesion score 0.05552825552825553 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.06424242424242424 - nodes in this community are weakly interconnected._

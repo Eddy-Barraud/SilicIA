@@ -222,9 +222,9 @@
     "semantic_hash": "8abded5a146e3989f573d50d575e8201"
   },
   "SilicIA/Services/DroppedFileStore.swift": {
-    "mtime": 1794307334.493378,
-    "seen": 1794307491.665049,
-    "ast_hash": "687198e8cb31af031d22a643214b6861",
+    "mtime": 1794407424.8202553,
+    "seen": 1794407794.6341,
+    "ast_hash": "3d754950604cb09469ca5cf561da65c7",
     "semantic_hash": ""
   },
   "SilicIA/Services/DroppedImageStore.swift": {
@@ -234,10 +234,10 @@
     "semantic_hash": "c8719a4186ce0f39e75006748501d000"
   },
   "SilicIA/Services/DroppedPDFStore.swift": {
-    "mtime": 1792143696.2123601,
-    "seen": 1793266945.461542,
-    "ast_hash": "4e528d35cc0d156431ba700a915d64af",
-    "semantic_hash": "4e528d35cc0d156431ba700a915d64af"
+    "mtime": 1794407491.6292017,
+    "seen": 1794407794.634103,
+    "ast_hash": "8ede560c377b8ee5f8cddc2f0e77cc25",
+    "semantic_hash": ""
   },
   "SilicIA/Services/Entitlements.swift": {
     "mtime": 1792343839.9519763,
@@ -258,9 +258,9 @@
     "semantic_hash": "a767e6087e7c2733b34467e37ecccb7b"
   },
   "SilicIA/Services/HTMLSanitizer.swift": {
-    "mtime": 1794320375.6805837,
-    "seen": 1794320518.962741,
-    "ast_hash": "00ed748c9dcc3545d3249feffd6e0a8b",
+    "mtime": 1794407491.629316,
+    "seen": 1794407794.634109,
+    "ast_hash": "194d9a048183fb5317d5692d1086f3d0",
     "semantic_hash": ""
   },
   "SilicIA/Services/ImageAnalysisService.swift": {
@@ -282,16 +282,16 @@
     "semantic_hash": "8ae81e5fd36ca01c45cb3b46abc3ef0d"
   },
   "SilicIA/Services/NetworkConstants.swift": {
-    "mtime": 1792143696.2129054,
-    "seen": 1793266945.461547,
-    "ast_hash": "330ebf4c42bca01c98afd7c67604624f",
-    "semantic_hash": "330ebf4c42bca01c98afd7c67604624f"
+    "mtime": 1794407491.6292202,
+    "seen": 1794407794.634112,
+    "ast_hash": "3870e4381f14f26c204d8d55ad67b4a3",
+    "semantic_hash": ""
   },
   "SilicIA/Services/PromptLoader.swift": {
-    "mtime": 1792143696.2129588,
-    "seen": 1793266945.461548,
-    "ast_hash": "acc9fa1b5a30a7980a7e9577b975aa81",
-    "semantic_hash": "acc9fa1b5a30a7980a7e9577b975aa81"
+    "mtime": 1794407491.6291888,
+    "seen": 1794407794.634113,
+    "ast_hash": "fc101aa2571d30d2facb42cf5aead38d",
+    "semantic_hash": ""
   },
   "SilicIA/Services/PurchaseManager.swift": {
     "mtime": 1792143696.2130244,
@@ -312,9 +312,9 @@
     "semantic_hash": ""
   },
   "SilicIA/Services/TokenBudgeting.swift": {
-    "mtime": 1794403749.6180391,
-    "seen": 1794404257.652684,
-    "ast_hash": "2273459db9272c28b7fe9d93c03317e3",
+    "mtime": 1794407491.6293283,
+    "seen": 1794407794.6341162,
+    "ast_hash": "625e22a86d0d957e62245da1c8f3b03d",
     "semantic_hash": ""
   },
   "SilicIA/Services/Tools/CalculatorTool.swift": {
@@ -390,16 +390,16 @@
     "semantic_hash": ""
   },
   "SilicIA/SilicIAAppShortcuts.swift": {
-    "mtime": 1792143696.2143986,
-    "seen": 1793266945.461558,
-    "ast_hash": "a6d66eba37e151a9c462a95d1337864a",
-    "semantic_hash": "a6d66eba37e151a9c462a95d1337864a"
+    "mtime": 1794407491.629215,
+    "seen": 1794407794.6341271,
+    "ast_hash": "b9343a36c238beb5c9294273ffd86cf3",
+    "semantic_hash": ""
   },
   "SilicIA/SilicIASpotlightIntent.swift": {
-    "mtime": 1792143696.2144573,
-    "seen": 1793266945.461558,
-    "ast_hash": "f2860ff33971679e9f93d6c4ff1ee73f",
-    "semantic_hash": "f2860ff33971679e9f93d6c4ff1ee73f"
+    "mtime": 1794407491.629189,
+    "seen": 1794407794.6341279,
+    "ast_hash": "f18217226fca35c76c648a56156c35c2",
+    "semantic_hash": ""
   },
   "SilicIA/Views/ChatView.swift": {
     "mtime": 1794405142.3500178,
@@ -474,64 +474,34 @@
     "semantic_hash": ""
   },
   "SilicIAShareExtension/ShareViewController.swift": {
-    "mtime": 1794405289.3741298,
-    "seen": 1794406088.237453,
-    "ast_hash": "e274f713c2426b1fe13152caa3a0adeb",
+    "mtime": 1794407491.6626642,
+    "seen": 1794407794.63414,
+    "ast_hash": "be8f8790111aec8b23b094f709afc7a1",
     "semantic_hash": ""
   },
   "SilicIATests/AppSettingsStoreTests.swift": {
-    "mtime": 1794407184.2427406,
-    "seen": 1794407228.9735029,
-    "ast_hash": "ec1591ba9634270b08d6d5ba13be076c",
+    "mtime": 1794409346.8756752,
+    "seen": 1794409419.830536,
+    "ast_hash": "7c4ee58c022249996772202f3dbafb7c",
     "semantic_hash": ""
   },
-  "SilicIATests/CalculatorToolTests.swift": {
-    "mtime": 1792143696.2255187,
-    "seen": 1793266945.461567,
-    "ast_hash": "4f29ad3740fd1463848fff51ab2e08d2",
-    "semantic_hash": "4f29ad3740fd1463848fff51ab2e08d2"
-  },
-  "SilicIATests/ChatServicePDFChunkPolicyTests.swift": {
-    "mtime": 1792143696.2255905,
-    "seen": 1793266945.461568,
-    "ast_hash": "3ca53f75e6b6be0f07581ee9ab535b3b",
-    "semantic_hash": "3ca53f75e6b6be0f07581ee9ab535b3b"
-  },
   "SilicIATests/ImageAnalysisServiceTests.swift": {
-    "mtime": 1792343839.9575527,
-    "seen": 1793266945.461568,
-    "ast_hash": "0ac18fcfd9863e89b3f824eb66149099",
-    "semantic_hash": "0ac18fcfd9863e89b3f824eb66149099"
-  },
-  "SilicIATests/LaTeXStreamSegmenterTests.swift": {
-    "mtime": 1792143696.2257516,
-    "seen": 1793266945.461569,
-    "ast_hash": "a9cbde08c642b9d88090b215cb511278",
-    "semantic_hash": "a9cbde08c642b9d88090b215cb511278"
+    "mtime": 1794409169.8444543,
+    "seen": 1794409419.830539,
+    "ast_hash": "0b964afd74d6d5fa327376bafbd0c049",
+    "semantic_hash": ""
   },
   "SilicIATests/LocalizationTests.swift": {
-    "mtime": 1792143696.2258263,
-    "seen": 1793266945.46157,
-    "ast_hash": "8566aad5d4fa14ba82583e7fe67db412",
-    "semantic_hash": "8566aad5d4fa14ba82583e7fe67db412"
-  },
-  "SilicIATests/MathAccuracyTests.swift": {
-    "mtime": 1792677446.044079,
-    "seen": 1793266945.461571,
-    "ast_hash": "e6028a66e85d0d7fdaaa9d2a9bf6bbef",
-    "semantic_hash": "e6028a66e85d0d7fdaaa9d2a9bf6bbef"
+    "mtime": 1794408290.0167649,
+    "seen": 1794408712.068382,
+    "ast_hash": "afdc2a05753c9137456246e2311f90b9",
+    "semantic_hash": ""
   },
   "SilicIATests/ModelAnsweringTests.swift": {
-    "mtime": 1792516216.6535478,
-    "seen": 1793266945.4615722,
-    "ast_hash": "65bc3daa7e2102285eeacfcf5002f9ab",
-    "semantic_hash": "65bc3daa7e2102285eeacfcf5002f9ab"
-  },
-  "SilicIATests/ModelLanguageTests.swift": {
-    "mtime": 1792143696.226078,
-    "seen": 1793266945.4615731,
-    "ast_hash": "bc4891b72488ff6ed1a4f11e25690a3c",
-    "semantic_hash": "bc4891b72488ff6ed1a4f11e25690a3c"
+    "mtime": 1794408357.6982594,
+    "seen": 1794408712.068384,
+    "ast_hash": "0c930d2d968968c18ec08902381943cf",
+    "semantic_hash": ""
   },
   "SilicIATests/MonetizationTests.swift": {
     "mtime": 1792343839.9577937,
@@ -540,64 +510,34 @@
     "semantic_hash": "e099cb7f49fc4129683a3a6d9a4e415d"
   },
   "SilicIATests/PromptLoaderTests.swift": {
-    "mtime": 1794096315.6130688,
-    "seen": 1794096423.6021812,
-    "ast_hash": "464e29da173e47ba8ee101beba480b7d",
+    "mtime": 1794408575.9622386,
+    "seen": 1794408712.068386,
+    "ast_hash": "a45eae3f2ceafd2a2407f71c01bad43d",
     "semantic_hash": ""
   },
   "SilicIATests/RAGChunkerTests.swift": {
-    "mtime": 1794138890.783989,
-    "seen": 1794138922.663998,
-    "ast_hash": "3e49d06a8a3ef135d79fb474a075b675",
+    "mtime": 1794409269.6427522,
+    "seen": 1794409419.830543,
+    "ast_hash": "149cbc3d0cf79465bcd7856fc8c87e48",
     "semantic_hash": ""
   },
-  "SilicIATests/RAGPDFRankingTests.swift": {
-    "mtime": 1792143696.2263353,
-    "seen": 1793266945.4615748,
-    "ast_hash": "f7f0258895de95ce5203f1726363a2fd",
-    "semantic_hash": "f7f0258895de95ce5203f1726363a2fd"
-  },
-  "SilicIATests/RAGSearchToolTests.swift": {
-    "mtime": 1792143696.2264123,
-    "seen": 1793266945.4615748,
-    "ast_hash": "c5ed50dfeabd276ba0b7416459ba7633",
-    "semantic_hash": "c5ed50dfeabd276ba0b7416459ba7633"
-  },
   "SilicIATests/SanitizerTests.swift": {
-    "mtime": 1794320431.5212157,
-    "seen": 1794320518.962784,
-    "ast_hash": "3e91f84b5f09852f70083c2a69bcffe3",
+    "mtime": 1794409234.2956712,
+    "seen": 1794409419.830543,
+    "ast_hash": "b7fa43e2627af4e777f8bb15ad3ef46e",
     "semantic_hash": ""
   },
   "SilicIATests/TokenBudgetingTests.swift": {
-    "mtime": 1794407172.2920227,
-    "seen": 1794407228.973517,
-    "ast_hash": "2d9f8180761174dd856d17edc40dc4e7",
+    "mtime": 1794409376.0210264,
+    "seen": 1794409419.8305438,
+    "ast_hash": "eea2c5fa3f8135fab7d52ca475d6bdcb",
     "semantic_hash": ""
-  },
-  "SilicIATests/ToolCallGovernorTests.swift": {
-    "mtime": 1792346575.3764536,
-    "seen": 1793266945.461577,
-    "ast_hash": "643ff43a7cb3286e9ccb2aa2ed670ee8",
-    "semantic_hash": "643ff43a7cb3286e9ccb2aa2ed670ee8"
   },
   "SilicIATests/ToolCallingPromptTests.swift": {
-    "mtime": 1794173726.2532551,
-    "seen": 1794173776.944788,
-    "ast_hash": "b3f41a1f7261ec61ad94cc2c4e51575b",
+    "mtime": 1794409357.9083812,
+    "seen": 1794409419.830545,
+    "ast_hash": "4d5bb006fddb93fc541cedea0a2bf65f",
     "semantic_hash": ""
-  },
-  "SilicIATests/ToolKitBudgetTests.swift": {
-    "mtime": 1792346561.6994412,
-    "seen": 1793266945.461578,
-    "ast_hash": "09b28176529ef9fa7767406b9f8bd0f9",
-    "semantic_hash": "09b28176529ef9fa7767406b9f8bd0f9"
-  },
-  "SilicIATests/ToolTranscriptRecorderTests.swift": {
-    "mtime": 1792143696.2268555,
-    "seen": 1793266945.461579,
-    "ast_hash": "a3de267019035b761724b9fcfc27adda",
-    "semantic_hash": "a3de267019035b761724b9fcfc27adda"
   },
   "SilicIATests/ViewRenderingTests.swift": {
     "mtime": 1794400486.9961295,
@@ -606,16 +546,10 @@
     "semantic_hash": ""
   },
   "SilicIATests/WebSearchServiceTests.swift": {
-    "mtime": 1794403954.8569458,
-    "seen": 1794404257.652728,
-    "ast_hash": "01cf9c7a775bc43db349f543e01c4fc7",
+    "mtime": 1794409323.2436168,
+    "seen": 1794409419.8305469,
+    "ast_hash": "380edd583cff62cf62bc0dec01ab7ad2",
     "semantic_hash": ""
-  },
-  "SilicIATests/WikipediaQueryCleanerTests.swift": {
-    "mtime": 1792143696.227053,
-    "seen": 1793266945.461581,
-    "ast_hash": "b0e4dc51f97b037cc648270e060646c6",
-    "semantic_hash": "b0e4dc51f97b037cc648270e060646c6"
   },
   "TestRAG/run.sh": {
     "mtime": 1792568506.4994607,
@@ -718,12 +652,6 @@
     "seen": 1793266945.461591,
     "ast_hash": "83cbe2cf78a5bdad68eeab8981e85c9b",
     "semantic_hash": "83cbe2cf78a5bdad68eeab8981e85c9b"
-  },
-  "SilicIATests/2025.PFAS.CMC.pdf": {
-    "mtime": 1792143696.2253008,
-    "seen": 1793266945.461591,
-    "ast_hash": "5d1a27726456258d9c212d7630bcf765",
-    "semantic_hash": "5d1a27726456258d9c212d7630bcf765"
   },
   "Screenshots/Factorial.png": {
     "mtime": 1792343839.9495606,
@@ -2015,24 +1943,6 @@
     "ast_hash": "adf7bd5436b0be88520996c8bdf5bd81",
     "semantic_hash": ""
   },
-  "SilicIATests/ChatServiceTextFileContextTests.swift": {
-    "mtime": 1794307439.831028,
-    "seen": 1794307491.6650848,
-    "ast_hash": "a193068e0fab83a324efe63523f70bee",
-    "semantic_hash": ""
-  },
-  "SilicIATests/PDFPageSummaryBenchmarkTests.swift": {
-    "mtime": 1794176197.0971463,
-    "seen": 1794176971.552151,
-    "ast_hash": "09f5c696e08196082c41f5fde533eed1",
-    "semantic_hash": ""
-  },
-  "SilicIATests/PDFContextBudgetingTests.swift": {
-    "mtime": 1794307475.764179,
-    "seen": 1794307491.665091,
-    "ast_hash": "6e80b60400ce6ae9ed02838f6c1b1509",
-    "semantic_hash": ""
-  },
   "BenchmarkSearchPipeline.swift": {
     "mtime": 1794317596.859389,
     "seen": 1794317627.236577,
@@ -2049,6 +1959,18 @@
     "mtime": 1794404050.6170924,
     "seen": 1794404257.652705,
     "ast_hash": "fd1aad354b6aae4e828961d96d70874e",
+    "semantic_hash": ""
+  },
+  "SilicIATests/DocumentContextTests.swift": {
+    "mtime": 1794409210.020243,
+    "seen": 1794409419.8305368,
+    "ast_hash": "447ad96c184c79479564b4c8867e2ede",
+    "semantic_hash": ""
+  },
+  "SilicIATests/ToolKitTests.swift": {
+    "mtime": 1794409293.1952598,
+    "seen": 1794409419.830545,
+    "ast_hash": "083d01e3a5d3f596ccbc60a5d04b6f79",
     "semantic_hash": ""
   }
 }
