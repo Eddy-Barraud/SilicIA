@@ -258,9 +258,9 @@
     "semantic_hash": "a767e6087e7c2733b34467e37ecccb7b"
   },
   "SilicIA/Services/HTMLSanitizer.swift": {
-    "mtime": 1794319457.9424977,
-    "seen": 1794319699.4330938,
-    "ast_hash": "9707c2ee214e95dd2a87340a55fea1dc",
+    "mtime": 1794320375.6805837,
+    "seen": 1794320518.962741,
+    "ast_hash": "00ed748c9dcc3545d3249feffd6e0a8b",
     "semantic_hash": ""
   },
   "SilicIA/Services/ImageAnalysisService.swift": {
@@ -366,9 +366,9 @@
     "semantic_hash": "1e11fb18836465bd559535e7f0a630f3"
   },
   "SilicIA/Services/WebScrapingService.swift": {
-    "mtime": 1794319527.2262304,
-    "seen": 1794319699.4331079,
-    "ast_hash": "7b3a0b98a4ee60616177f0344808f53f",
+    "mtime": 1794320395.2753973,
+    "seen": 1794320518.962755,
+    "ast_hash": "80091f7c59624f34da990360ed00e69f",
     "semantic_hash": ""
   },
   "SilicIA/Services/WebSearchService.swift": {
@@ -564,9 +564,9 @@
     "semantic_hash": "c5ed50dfeabd276ba0b7416459ba7633"
   },
   "SilicIATests/SanitizerTests.swift": {
-    "mtime": 1794319620.6344893,
-    "seen": 1794319699.4331362,
-    "ast_hash": "2613dda0d67ff829c73bea24cea42f8b",
+    "mtime": 1794320431.5212157,
+    "seen": 1794320518.962784,
+    "ast_hash": "3e91f84b5f09852f70083c2a69bcffe3",
     "semantic_hash": ""
   },
   "SilicIATests/TokenBudgetingTests.swift": {
