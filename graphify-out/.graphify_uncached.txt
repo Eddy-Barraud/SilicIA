@@ -1,0 +1,208 @@
+/Users/eddybarraud/gitclones/SilicIA/.github/ISSUE_TEMPLATE/bug_report.md
+/Users/eddybarraud/gitclones/SilicIA/.github/ISSUE_TEMPLATE/feature_request.md
+/Users/eddybarraud/gitclones/SilicIA/.github/pull_request_template.md
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/en-US_description.txt
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/en-US_keywords.txt
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/en-US_promotional_text.txt
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/fr-FR_description.txt
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/fr-FR_keywords.txt
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/AppStore-metadata/fr-FR_promotional_text.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.instructions.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.instructions.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.instructions.no_context.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.instructions.no_context.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.chat.instructions.no_context.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.cached.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.cached.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.cached.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.direct.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.direct.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.direct.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.grounding.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.grounding.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.grounding.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.web.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.web.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.corpus_hint.web.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.instructions.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.instructions.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.tool_calling.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.tool_calling.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.search.tool_calling.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.appendix.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.appendix.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.appendix.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.direct.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.direct.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.direct.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.search.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.search.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.search.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.with_search.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.with_search.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.footer.with_search.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.header.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.header.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.header.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.calculate.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.calculate.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.calculate.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.current_date_time.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.current_date_time.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.current_date_time.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.chat.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.chat.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.chat.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.search.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.search.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_context.search.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.both.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.both.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.both.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.web.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.web.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.web.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.wiki.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.wiki.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.toolkit.tool.search_sources.wiki.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.instructions.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.instructions.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.normal.webpage.instructions.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.concise.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.concise.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.concise.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.detailed.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.detailed.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.detailed.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.standard.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.standard.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.length.standard.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.concise.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.concise.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.concise.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.detailed.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.detailed.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.detailed.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.standard.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.standard.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.persona.standard.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.concise.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.concise.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.concise.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.detailed.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.detailed.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.detailed.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.standard.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.standard.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.profile.structure.standard.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.instructions.en.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.instructions.es.txt
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/prompts/prompt.quick.search.instructions.fr.txt
+/Users/eddybarraud/gitclones/SilicIA/TestRAG/ranked_chunks_distance_euclidienne.txt
+/Users/eddybarraud/gitclones/SilicIA/TestRAG/wiki_distance_euclidienne.md
+/Users/eddybarraud/gitclones/SilicIA/index.html
+/Users/eddybarraud/gitclones/SilicIA/SilicIATests/2025.PFAS.CMC.page.3.pdf
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStore/01_privacy_fr_1284x2778.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStore/02_local_llm_fr_1284x2778.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStore/03_web_search_fr_1284x2778.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStore/04_pdf_fr_1284x2778.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStore/05_multicontext_fr_1284x2778.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/01_privacy_en_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/01_privacy_fr_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/02_local_llm_en_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/02_local_llm_fr_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/03_web_search_en_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/03_web_search_fr_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/04_pdf_en_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/04_pdf_fr_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/05_multicontext_en_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/AppStoreIPAD/05_multicontext_fr_2064x2752.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/PDF-context.EN.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/PDF-context.FR.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/Web.Search.EN.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/Web.Search.FR.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/Web.context.EN.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/ios-screenshots/Web.context.FR.PNG
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/01_privacy_en_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/01_privacy_fr_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/02_local_llm_en_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/02_local_llm_fr_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/03_web_search_en_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/03_web_search_fr_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/04_pdf_en_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/04_pdf_fr_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/05_multicontext_en_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/AppStore/05_multicontext_fr_2880x1800.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/PDF-context.EN.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/PDF-context.FR.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/Web.Search.EN.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/Web.Search.FR.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/Web.context.EN.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/Web.context.FR.png
+/Users/eddybarraud/gitclones/SilicIA/Screenshots/macos-screenshots/Web.search.context.EN.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-1024x1024@1x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-20x20@2x 1.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-20x20@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-20x20@3x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-29x29@2x 1.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-29x29@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-29x29@3x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-40x40@2x 1.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-40x40@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-40x40@3x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-60x60@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-60x60@3x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-76x76@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/SilicIA_logo-iOS-Default-83.5x83.5@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_128x128.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_128x128@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_16x16.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_16x16@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_256x256.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_256x256@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_32x32.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_32x32@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_512x512.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_ios_20@1x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_ios_29@1x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_ios_40@1x.png
+/Users/eddybarraud/gitclones/SilicIA/SilicIA/Assets.xcassets/AppIcon.appiconset/icon_ios_76@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-1024x1024@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-128x128@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-128x128@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-16x16@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-16x16@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-20x20@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-20x20@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-256x256@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-256x256@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-29x29@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-29x29@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-32x32@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-32x32@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-38x38@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-38x38@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-40x40@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-40x40@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-512x512@1x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-60x60@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-60x60@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-64x64@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-64x64@3x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-68x68@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-76x76@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo Exports/SilicIA_logo-iOS-Default-83.5x83.5@2x.png
+/Users/eddybarraud/gitclones/SilicIA/logo/SilicIA_logo.icon/Assets/icon_512x512@2x 2.png
