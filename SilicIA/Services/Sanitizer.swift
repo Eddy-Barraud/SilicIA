@@ -2,7 +2,6 @@
 //  Sanitizer.swift
 //  SilicIA
 //
-//  Created by Claude on [date].
 //
 
 import Foundation

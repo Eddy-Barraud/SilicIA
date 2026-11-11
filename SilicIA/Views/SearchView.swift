@@ -2,7 +2,6 @@
 //  SearchView.swift
 //  SilicIA
 //
-//  Created by Claude on 23/03/2026.
 //
 
 import SwiftUI
