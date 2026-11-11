@@ -69,7 +69,7 @@ nonisolated enum ContextSourceKind: String, CaseIterable, Identifiable, Codable,
 
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
-    var maxDuckDuckGoResults: Int = 4 {
+    var maxDuckDuckGoResults: Int = 2 {
         didSet {
             let clamped = min(max(maxDuckDuckGoResults, Self.maxDuckDuckGoResultsRange.lowerBound), Self.maxDuckDuckGoResultsRange.upperBound)
             if maxDuckDuckGoResults != clamped {
@@ -85,8 +85,8 @@ struct AppSettings: Codable, Equatable {
             }
         }
     }
-    var totalTokensBudget: Int = 2500
-    var maxResponseTokens: Int = 500
+    var totalTokensBudget: Int = TokenBudgeting.OutputProfileKind.standard.implicitTotalTokensBudget
+    var maxResponseTokens: Int = TokenBudgeting.OutputProfileKind.standard.implicitResponseTokens
     var temperature: Double = 0.7 {
         didSet {
             let clamped = min(max(temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
@@ -95,8 +95,8 @@ struct AppSettings: Codable, Equatable {
             }
         }
     }
-    var maxContextTokens: Int = 2000
-    private var _isReaderViewAndSummaryEnabled: Bool = false
+    var maxContextTokens: Int = TokenBudgeting.OutputProfileKind.standard.implicitContextTokens
+    private var _isReaderViewAndSummaryEnabled: Bool = true
     var isReaderViewAndSummaryEnabled: Bool {
         get {
             guard FoundationModelAvailability.check().isAvailable else { return false }
@@ -111,21 +111,21 @@ struct AppSettings: Codable, Equatable {
         get { isReaderViewAndSummaryEnabled }
         set { isReaderViewAndSummaryEnabled = newValue }
     }
-    var useDuckDuckGo: Bool = true {
+    var useDuckDuckGo: Bool = false {
         didSet {
             if useDuckDuckGo && useWikipedia {
                 useWikipedia = false
             }
         }
     }
-    var useWikipedia: Bool = false {
+    var useWikipedia: Bool = true {
         didSet {
             if useWikipedia && useDuckDuckGo {
                 useDuckDuckGo = false
             }
         }
     }
-    var wikipediaSource: WikipediaSource = .online
+    var wikipediaSource: WikipediaSource = .wikiFast
     var language: ModelLanguage = .systemPreferred()
 
     /// Active context source (`Offline`, `Wiki`, `Web`). Only one source is allowed at a time.

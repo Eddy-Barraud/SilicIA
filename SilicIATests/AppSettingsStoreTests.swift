@@ -241,4 +241,18 @@ final class AppSettingsStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.maxWikipediaResults, AppSettings.maxWikipediaResultsRange.lowerBound)
         XCTAssertEqual(reloaded.temperature, AppSettings.temperatureRange.upperBound)
     }
+
+    func testDefaultSettingsForNewUserOnFirstLaunch() {
+        let defaults = AppSettings()
+        XCTAssertTrue(defaults.useWikipedia, "Default context source should be Wiki")
+        XCTAssertFalse(defaults.useDuckDuckGo, "Default context source should have DDG disabled")
+        XCTAssertEqual(defaults.contextSourceKind, .wiki, "Default contextSourceKind should be .wiki")
+        XCTAssertEqual(defaults.wikipediaSource, .wikiFast, "Default wikipediaSource should be wikiFast mode")
+        XCTAssertEqual(defaults.maxWikipediaResults, 2, "Default maxWikipediaResults should be 2")
+        XCTAssertEqual(defaults.maxDuckDuckGoResults, 2, "Default maxDuckDuckGoResults should be 2")
+        XCTAssertEqual(defaults.temperature, 0.7, accuracy: 0.001, "Default temperature should be 0.7")
+        XCTAssertEqual(defaults.outputProfileKind, .standard, "Default token budget outputProfileKind should be Standard")
+        XCTAssertEqual(defaults.language, ModelLanguage.systemPreferred(), "Default language should match system preferred")
+        XCTAssertTrue(defaults.isReaderViewAndSummaryEnabled, "Reader view should be activated by default")
+    }
 }

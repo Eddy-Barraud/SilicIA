@@ -457,14 +457,14 @@ final class TokenBudgetingTests: XCTestCase {
 
     func testWikipediaSourceSettingsPersistenceAndBackwardCompatibility() throws {
         var settings = AppSettings()
-        XCTAssertEqual(settings.wikipediaSource, .online)
+        XCTAssertEqual(settings.wikipediaSource, .wikiFast)
 
-        settings.wikipediaSource = .wikiFast
+        settings.wikipediaSource = .online
         let encoded = try JSONEncoder().encode(settings)
         let decoded = try JSONDecoder().decode(AppSettings.self, from: encoded)
-        XCTAssertEqual(decoded.wikipediaSource, .wikiFast)
+        XCTAssertEqual(decoded.wikipediaSource, .online)
 
-        // Backward compatibility: JSON payload without wikipediaSource must default to .online
+        // Backward compatibility: JSON payload without wikipediaSource must default to defaultSettings.wikipediaSource (.wikiFast)
         let legacyJSON = """
         {
             "maxDuckDuckGoResults": 5,
@@ -479,7 +479,7 @@ final class TokenBudgetingTests: XCTestCase {
         }
         """.data(using: .utf8)!
         let legacyDecoded = try JSONDecoder().decode(AppSettings.self, from: legacyJSON)
-        XCTAssertEqual(legacyDecoded.wikipediaSource, .online)
+        XCTAssertEqual(legacyDecoded.wikipediaSource, .wikiFast)
     }
 
     func testWikiFastArticleDecodingAndURLFormatting() throws {
